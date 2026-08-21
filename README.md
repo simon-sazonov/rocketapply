@@ -162,6 +162,7 @@ python scripts/run_pipeline.py export --format md --min-score 55
 # housekeeping
 python scripts/purge_stale.py --apply --vacuum
 python scripts/eval_scoring.py sweep
+python scripts/setup_ollama.py --check
 ```
 
 ---
@@ -250,17 +251,47 @@ client-side instead.
 
 | provider | model | cost | notes |
 |---|---|---|---|
-| `zai` | `glm-4.7-flash` | free (~1,000 req/day) | **default.** Set `ZAI_API_KEY`. |
+| `ollama` | `pitwall-qwen2.5` | free, local, no key | **default.** Run `python scripts/setup_ollama.py` once. |
+| `zai` | `glm-4.7-flash` | free (~1,000 req/day) | needs `ZAI_API_KEY`; far faster than local CPU |
 | `deepseek` | `deepseek-v4-flash` | ~$0.14 / 1M in | the paid upgrade; batching keeps the cached-prompt discount |
-| `ollama` | `qwen3:8b` | free, local | offline fallback, no quota |
 
 All three speak the OpenAI-compatible Chat Completions API, so only `base_url`,
-`api_key` and `model` change. If the daily free quota runs out mid-run, the
-pipeline degrades to Ollama when it is reachable, and otherwise saves progress
-and exits cleanly. **It never loses work.**
+`api_key` and `model` change. If a cloud quota runs out mid-run, the pipeline
+degrades to Ollama when it is reachable, and otherwise saves progress and exits
+cleanly. **It never loses work.**
 
-Without any LLM key the pipeline still runs — heuristics only, which is already
-useful.
+Without any LLM at all the pipeline still runs — heuristics only, which is
+already useful.
+
+#### Local Qwen setup
+
+```bash
+python scripts/setup_ollama.py        # pull, configure, and prove it on a real batch
+python scripts/setup_ollama.py --check # verify only, change nothing
+```
+
+This pulls `qwen2.5:7b` and derives `pitwall-qwen2.5` from it with `num_ctx` raised
+to 8,192. Both details matter:
+
+- **Qwen2.5, not Qwen3.** Qwen3 is a hybrid reasoning model with thinking on by
+  default, and Ollama has [no reliable way to turn it off](https://github.com/ollama/ollama/issues/14617).
+  For a temperature-0 JSON classifier those tokens are pure cost — minutes per
+  batch on CPU, and a real risk of pushing the JSON past the token budget.
+- **The derived model exists for `num_ctx`.** A batch of 8 needs ~3,600 tokens of
+  context; Ollama's default is 4,096 and it truncates **from the front**, which
+  would silently delete the system prompt — the entire scoring rubric — and score
+  every candidate against nothing. Ollama's `/v1` endpoint ignores per-request
+  `options`, so the only place to fix this is the model itself. Deriving costs no
+  extra disk: it reuses the base model's content-addressed layers.
+
+PitWall refuses to run rather than risk this: `preflight()` checks the model exists
+and has a large enough window, and fails with the exact remedy if not. If you
+change `llm.batch_size`, re-run the setup script — the requirement scales with it.
+
+**Speed.** Local inference on a CPU-only machine is minutes per batch. Expect
+roughly 6–11 minutes per batch of 8 on an Intel laptop — fine for a few hundred
+candidates overnight, slow for a full sweep. `LLM_PROVIDER=zai` with a free key is
+the faster path if you have one; scoring is resumable either way.
 
 ---
 
@@ -317,7 +348,7 @@ src/pitwall/     config · models · db · inputs · query_builder · ratelimit 
   extract/       linkedin (the SERP parser) · normalize · dedupe
   scoring/       heuristics · llm · schema · prompts/
 app/             Home.py + pages/ (Setup · Run Search · Leads · Pipeline · Analytics)
-scripts/         run_pipeline · seed_motorsport · purge_stale · eval_scoring
+scripts/         run_pipeline · seed_motorsport · purge_stale · eval_scoring · setup_ollama
 tests/           unit + integration + the labelled eval set
 data/            pitwall.db · cache/ · exports/ · backups/     (gitignored)
 ```
@@ -332,7 +363,9 @@ data/            pitwall.db · cache/ · exports/ · backups/     (gitignored)
 | A company returns nothing at all | wrong or missing alias | Check the Analytics coverage heatmap — empty rows are flagged for you |
 | Wrong-industry people scoring high | empty `negative_keywords` for that company | Fill the column, then `score --rescore-all` |
 | `current_company` comes out empty | unusual SERP title format | Add the string to `tests/test_linkedin_parser.py` and extend the regex |
-| Lots of `needs_review` verdicts | model returning bad JSON | Shorten `llm.batch_size` to 4, or try `deepseek-v4-flash` |
+| Lots of `needs_review` verdicts | model returning bad JSON | Shorten `llm.batch_size` to 4 (then re-run `setup_ollama.py`), or try a cloud provider |
+| `LLM unavailable: ... has no num_ctx set` | the model would silently truncate the prompt | `python scripts/setup_ollama.py` — this is the guard working, not a bug |
+| LLM calls time out | `llm.timeout_seconds` too low for local inference | Raise it in `config/settings.yaml`; local batches take minutes, not seconds |
 | Recall looks poor | threshold too high for your provider | `python scripts/eval_scoring.py sweep` |
 | Stale data after an edit in the app | cache not cleared | Every write calls `invalidate()` then `st.rerun()` — file a bug if you see it |
 

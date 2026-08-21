@@ -517,6 +517,10 @@ class Pipeline:
 
         try:
             scorer = LLMScorer(self.settings)
+            # Catches a missing local model, or one whose context window is too
+            # small for a full batch — Ollama would truncate silently and score
+            # every candidate against a half-missing rubric.
+            scorer.preflight()
         except (LLMUnavailable, ValueError) as exc:
             stats.notes.append(f"LLM unavailable: {exc}")
             self.progress("llm", f"skipped — {exc}", 0, 0)

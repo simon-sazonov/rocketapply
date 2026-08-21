@@ -74,6 +74,7 @@ YAML_MAP: dict[str, str] = {
     "llm.batch_size": "llm_batch_size",
     "llm.temperature": "llm_temperature",
     "llm.max_tokens": "llm_max_tokens",
+    "llm.timeout_seconds": "llm_timeout_seconds",
     "llm.prompt_version": "prompt_version",
     "llm.daily_request_cap": "daily_llm_request_cap",
     "llm.prices": "llm_prices",
@@ -160,10 +161,13 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_model: str = "deepseek-v4-flash"
     ollama_base_url: str = "http://localhost:11434/v1"
-    ollama_model: str = "qwen3:8b"
+    ollama_model: str = "pitwall-qwen2.5"
     llm_batch_size: int = Field(default=8, ge=1, le=32)
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=1500, ge=256)
+    # Local CPU inference is minutes per batch, not seconds. Cloud providers are
+    # unaffected by a generous ceiling — they simply return sooner.
+    llm_timeout_seconds: float = Field(default=900.0, ge=10)
     prompt_version: str = "v1"
     daily_llm_request_cap: int = Field(default=900, ge=1)
     llm_prices: Annotated[dict[str, dict[str, float]], NoDecode] = Field(

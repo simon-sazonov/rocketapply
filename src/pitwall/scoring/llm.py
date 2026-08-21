@@ -45,10 +45,18 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     },
     "ollama": {
         "base_url": "http://localhost:11434/v1",
-        "model": "qwen3:8b",
+        # A Modelfile-derived qwen2.5:7b with num_ctx raised — see
+        # scripts/setup_ollama.py. Qwen2.5 rather than Qwen3 because Qwen3 is a
+        # hybrid reasoning model whose thinking mode is on by default and cannot
+        # be turned off reliably through Ollama; for a temperature-0 JSON
+        # classifier those tokens are pure cost.
+        "model": "pitwall-qwen2.5",
         "key_env": None,
     },
 }
+
+#: Headroom over the estimated prompt + max_tokens, for tokenizer variance.
+CONTEXT_MARGIN = 512
 
 _QUOTA_MARKERS = (
     "429", "quota", "rate limit", "rate_limit", "too many requests",
@@ -232,7 +240,9 @@ class LLMScorer:
                     f"{PROVIDERS.get(self.provider, {}).get('key_env', 'the API key')} in .env"
                 )
             self._client = OpenAI(
-                base_url=self.cfg["base_url"], api_key=key or "not-needed", timeout=90.0
+                base_url=self.cfg["base_url"],
+                api_key=key or "not-needed",
+                timeout=self.settings.llm_timeout_seconds,
             )
         return self._client
 
@@ -242,6 +252,74 @@ class LLMScorer:
             return True
         except LLMUnavailable:
             return False
+
+    # ── preflight ──
+
+    def estimated_prompt_tokens(self) -> int:
+        """Rough token count of one full batch prompt.
+
+        The system prompt is fixed; the user prompt grows with `llm_batch_size`.
+        ~3.6 characters per token is close enough for a context check, and the
+        margin below absorbs the error.
+        """
+        per_candidate_chars = 350  # title + snippet + url + framing
+        chars = len(self.system_prompt) + 1200 + per_candidate_chars * self.settings.llm_batch_size
+        return int(chars / 3.6)
+
+    def required_context_tokens(self) -> int:
+        return self.estimated_prompt_tokens() + self.settings.llm_max_tokens + CONTEXT_MARGIN
+
+    def preflight(self) -> None:
+        """Fail loudly, before scoring, when a local model would silently truncate.
+
+        Ollama's `/v1/chat/completions` ignores per-request `options`, so `num_ctx`
+        can only come from the model itself. If it is left at the server default
+        (4,096) a full batch overflows and Ollama drops tokens **from the front** —
+        which silently deletes the system prompt, i.e. the entire scoring rubric,
+        and returns confident nonsense with no error at all.
+
+        Only meaningful for `ollama`. A no-op for cloud providers and whenever a
+        client has been injected (tests never touch the network).
+        """
+        if self.provider != "ollama" or self._client is not None:
+            return
+
+        import httpx
+
+        root = self.cfg["base_url"].rstrip("/").removesuffix("/v1")
+        try:
+            resp = httpx.post(f"{root}/api/show", json={"model": self.model}, timeout=10.0)
+        except httpx.HTTPError as exc:
+            raise LLMUnavailable(
+                f"cannot reach Ollama at {root} ({exc}). Start it, then run "
+                "`python scripts/setup_ollama.py`."
+            ) from exc
+
+        if resp.status_code == 404:
+            raise LLMUnavailable(
+                f"Ollama has no model named {self.model!r}. "
+                "Run `python scripts/setup_ollama.py` to pull and configure it."
+            )
+        if resp.status_code >= 400:
+            raise LLMUnavailable(f"Ollama /api/show returned {resp.status_code}: {resp.text[:200]}")
+
+        num_ctx = parse_num_ctx(resp.json().get("parameters", ""))
+        required = self.required_context_tokens()
+        if num_ctx is None:
+            raise LLMUnavailable(
+                f"{self.model!r} has no num_ctx set, so Ollama would use its 4096 default "
+                f"while a batch of {self.settings.llm_batch_size} needs ~{required} tokens. "
+                "Ollama truncates from the front, which would silently drop the scoring "
+                "rubric. Run `python scripts/setup_ollama.py` to fix it."
+            )
+        if num_ctx < required:
+            raise LLMUnavailable(
+                f"{self.model!r} has num_ctx={num_ctx} but a batch of "
+                f"{self.settings.llm_batch_size} needs ~{required} tokens. Either raise it "
+                "with `python scripts/setup_ollama.py`, or lower llm.batch_size in "
+                "config/settings.yaml."
+            )
+        log.info("preflight ok: %s num_ctx=%d (needs ~%d)", self.model, num_ctx, required)
 
     def switch_to(self, provider: str) -> None:
         """Mid-run degradation to the fallback provider (§5 step 6)."""
@@ -372,6 +450,24 @@ def _is_quota_error(exc: Exception) -> bool:
 def batched(items: list[Any], size: int) -> list[list[Any]]:
     size = max(1, int(size))
     return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def parse_num_ctx(parameters: str) -> int | None:
+    """Pull `num_ctx` out of the `parameters` block `/api/show` returns.
+
+    The block is whitespace-aligned key/value lines, e.g.::
+
+        num_ctx                        8192
+        stop                           "<|im_end|>"
+    """
+    for line in (parameters or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == "num_ctx":
+            try:
+                return int(parts[1])
+            except ValueError:
+                return None
+    return None
 
 
 def ollama_reachable(base_url: str, timeout: float = 2.0) -> bool:

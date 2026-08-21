@@ -45,6 +45,9 @@ llm:
   max_tokens: 1500
   prompt_version: v1
   daily_request_cap: 900
+  # A batch of 8 takes ~3.5 min on a local CPU-only 7B model. The cloud
+  # providers never come close to this ceiling.
+  timeout_seconds: 900
   # $ per 1M tokens, used for the cost estimate on the Run page
   prices:
     zai:      { input: 0.0,   output: 0.0 }

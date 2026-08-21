@@ -13,6 +13,7 @@ import pytest
 from pitwall.models import LLMVerdict
 from pitwall.scoring.llm import (
     LLMScorer,
+    LLMUnavailable,
     QuotaExhausted,
     batched,
     parse_batch,
@@ -261,3 +262,129 @@ def test_batching_respects_the_configured_size():
     assert [len(b) for b in batched(list(range(19)), 8)] == [8, 8, 3]
     assert batched([], 8) == []
     assert [len(b) for b in batched([1, 2, 3], 0)] == [1, 1, 1]
+
+
+# ───────────────── preflight: the silent-truncation guard ────────────────
+
+
+class FakeResponse:
+    def __init__(self, status_code=200, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+def _ollama(settings, monkeypatch, response=None, raises=None):
+    """An ollama-backed scorer whose /api/show call is mocked."""
+    settings.llm_provider = "ollama"
+
+    def fake_post(url, **kwargs):
+        assert url.endswith("/api/show"), url
+        assert "/v1" not in url, "the /v1 suffix must be stripped for the native API"
+        if raises is not None:
+            raise raises
+        return response
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    return LLMScorer(settings, provider="ollama")
+
+
+def test_num_ctx_is_parsed_from_the_ollama_parameters_block():
+    from pitwall.scoring.llm import parse_num_ctx
+
+    block = 'stop                           "<|im_end|>"\nnum_ctx                        8192\n'
+    assert parse_num_ctx(block) == 8192
+    assert parse_num_ctx('stop  "<|im_end|>"') is None
+    assert parse_num_ctx("") is None
+    assert parse_num_ctx("num_ctx  not-a-number") is None
+
+
+def test_preflight_passes_when_the_context_window_is_big_enough(settings, monkeypatch):
+    scorer = _ollama(
+        settings, monkeypatch,
+        FakeResponse(200, {"parameters": "num_ctx                        8192\n"}),
+    )
+    scorer.preflight()   # must not raise
+
+
+def test_preflight_rejects_a_missing_model_with_the_remedy(settings, monkeypatch):
+    scorer = _ollama(settings, monkeypatch, FakeResponse(404, {}, "not found"))
+    with pytest.raises(LLMUnavailable) as exc:
+        scorer.preflight()
+    assert "setup_ollama.py" in str(exc.value)
+    assert settings.ollama_model in str(exc.value)
+
+
+def test_preflight_rejects_an_unset_context_window(settings, monkeypatch):
+    """The dangerous case: Ollama would fall back to 4096 and truncate silently."""
+    scorer = _ollama(
+        settings, monkeypatch, FakeResponse(200, {"parameters": 'stop  "<|im_end|>"'})
+    )
+    with pytest.raises(LLMUnavailable) as exc:
+        scorer.preflight()
+    message = str(exc.value)
+    assert "num_ctx" in message
+    assert "4096" in message
+    assert "setup_ollama.py" in message
+
+
+def test_preflight_rejects_a_context_window_that_is_too_small(settings, monkeypatch):
+    scorer = _ollama(
+        settings, monkeypatch,
+        FakeResponse(200, {"parameters": "num_ctx                        2048\n"}),
+    )
+    with pytest.raises(LLMUnavailable, match="num_ctx=2048"):
+        scorer.preflight()
+
+
+def test_preflight_reports_an_unreachable_ollama(settings, monkeypatch):
+    import httpx
+
+    scorer = _ollama(settings, monkeypatch, raises=httpx.ConnectError("refused"))
+    with pytest.raises(LLMUnavailable, match="cannot reach Ollama"):
+        scorer.preflight()
+
+
+def test_preflight_is_a_no_op_for_cloud_providers(settings, monkeypatch):
+    def explode(*a, **k):  # pragma: no cover - must never be called
+        raise AssertionError("preflight must not probe the network for cloud providers")
+
+    monkeypatch.setattr("httpx.post", explode)
+    LLMScorer(settings, provider="zai").preflight()
+    LLMScorer(settings, provider="deepseek").preflight()
+
+
+def test_preflight_is_a_no_op_when_a_client_is_injected(settings, monkeypatch):
+    """Mocked tests must never touch the network."""
+    def explode(*a, **k):  # pragma: no cover
+        raise AssertionError("preflight must not probe when a client was supplied")
+
+    monkeypatch.setattr("httpx.post", explode)
+    LLMScorer(settings, provider="ollama", client=FakeClient([])).preflight()
+
+
+def test_the_required_context_scales_with_the_batch_size(settings):
+    settings.llm_batch_size = 4
+    small = LLMScorer(settings, client=FakeClient([])).required_context_tokens()
+    settings.llm_batch_size = 16
+    large = LLMScorer(settings, client=FakeClient([])).required_context_tokens()
+    assert large > small
+    assert small > settings.llm_max_tokens   # the prompt is never free
+
+
+def test_the_configured_timeout_reaches_the_client(settings, monkeypatch):
+    """A 90s default would time out every local batch; the setting must win."""
+    captured = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+    settings.llm_timeout_seconds = 900.0
+    _ = LLMScorer(settings, provider="ollama").client
+    assert captured["timeout"] == 900.0
+    assert captured["base_url"] == settings.ollama_base_url
