@@ -1,0 +1,263 @@
+"""The LLM contract: good JSON, prose-wrapped JSON, malformed JSON, 429 (§12.1).
+
+Mocked client only — this file never touches a network.
+"""
+
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from pitwall.models import LLMVerdict
+from pitwall.scoring.llm import (
+    LLMScorer,
+    QuotaExhausted,
+    batched,
+    parse_batch,
+    render_user_prompt,
+    repair_json,
+)
+from pitwall.scoring.schema import BATCH_SCHEMA, SCHEMA_HINT, response_format
+
+GOOD = {
+    "results": [
+        {
+            "candidate_id": 1,
+            "is_person_profile": True,
+            "full_name": "Jane Doe",
+            "current_company": "McLaren Racing",
+            "current_title": "Senior Data Scientist",
+            "is_current_employee": True,
+            "company_match": "exact",
+            "role_match": "exact",
+            "seniority": "senior",
+            "motorsport_experience": True,
+            "score": 92,
+            "confidence": 0.86,
+            "reasons": ["Title states 'Senior Data Scientist - McLaren Racing'"],
+            "red_flags": [],
+        }
+    ]
+}
+
+
+class FakeClient:
+    """Minimal stand-in for the OpenAI client."""
+
+    def __init__(self, replies, usage=(1200, 300)):
+        self.replies = list(replies)
+        self.calls = []
+        self.usage = usage
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=reply))],
+            usage=SimpleNamespace(prompt_tokens=self.usage[0], completion_tokens=self.usage[1]),
+        )
+
+
+def payload(*ids):
+    return [
+        {"id": i, "raw_title": f"P{i} - Data Scientist - McLaren Racing",
+         "raw_snippet": "London", "profile_url": f"https://www.linkedin.com/in/p{i}"}
+        for i in ids
+    ]
+
+
+# ─────────────────────────── the repair ladder ───────────────────────────
+
+
+def test_plain_json_parses():
+    assert repair_json(json.dumps(GOOD))["results"][0]["candidate_id"] == 1
+
+
+def test_markdown_fenced_json_parses():
+    assert repair_json("```json\n" + json.dumps(GOOD) + "\n```") is not None
+
+
+def test_prose_wrapped_json_is_recovered():
+    text = "Sure! Here are the results:\n" + json.dumps(GOOD) + "\nHope that helps."
+    assert repair_json(text)["results"][0]["score"] == 92
+
+
+def test_json_containing_braces_in_strings_is_recovered():
+    payload_text = 'Note: {not json}. {"results": [{"candidate_id": 5, "reasons": ["a } b"]}]}'
+    out = repair_json(payload_text)
+    assert out["results"][0]["candidate_id"] == 5
+
+
+def test_unparseable_text_returns_none():
+    assert repair_json("no json at all") is None
+    assert repair_json("") is None
+    assert parse_batch("total nonsense") is None
+
+
+def test_a_bare_single_object_is_wrapped():
+    batch = parse_batch(json.dumps(GOOD["results"][0]))
+    assert batch is not None and len(batch.results) == 1
+
+
+# ──────────────────────────── schema coercion ────────────────────────────
+
+
+def test_loose_types_are_coerced_to_the_schema():
+    batch = parse_batch(
+        '{"results":[{"candidate_id":3,"score":"88","confidence":86,'
+        '"company_match":"Exact","role_match":"ADJACENT","seniority":"Mid",'
+        '"reasons":"only one reason","red_flags":null}]}'
+    )
+    v = batch.results[0]
+    assert v.score == 88.0
+    assert v.confidence == pytest.approx(0.86)  # 0-100 confidence rescaled
+    assert v.company_match == "exact"
+    assert v.role_match == "adjacent"
+    assert v.seniority == "mid"
+    assert v.reasons == ["only one reason"]
+    assert v.red_flags == []
+
+
+def test_out_of_range_values_are_clamped():
+    v = LLMVerdict(candidate_id=1, score=1000, confidence=-5)
+    assert v.score == 100.0
+    assert v.confidence == 0.0
+
+
+def test_unknown_enum_values_fall_back_to_unknown_without_failing_the_batch():
+    v = LLMVerdict(candidate_id=1, company_match="wibble", role_match=None, seniority="")
+    assert v.company_match == "unknown"
+    assert v.role_match == "unknown"
+    assert v.seniority == "unknown"
+    # ...and a whole batch survives one invented value
+    batch = parse_batch(
+        '{"results":[{"candidate_id":1,"company_match":"totally_made_up"},'
+        '{"candidate_id":2,"company_match":"exact"}]}'
+    )
+    assert batch is not None
+    assert [v.candidate_id for v in batch.results] == [1, 2]
+    assert batch.results[0].company_match == "unknown"
+
+
+def test_the_schema_advertises_the_same_name_different_org_verdict():
+    props = BATCH_SCHEMA["properties"]["results"]["items"]["properties"]
+    assert "same_name_different_org" in props["company_match"]["enum"]
+    assert "same_name_different_org" in SCHEMA_HINT
+    assert response_format(False) == {"type": "json_object"}
+    assert response_format(True)["type"] == "json_schema"
+
+
+# ─────────────────────────────── the scorer ──────────────────────────────
+
+
+def test_valid_reply_is_scored(settings):
+    client = FakeClient([json.dumps(GOOD)])
+    scorer = LLMScorer(settings, client=client)
+    out = scorer.score_batch(payload(1), None, None)
+    assert [v.candidate_id for v in out.verdicts] == [1]
+    assert out.needs_review == []
+    assert scorer.usage.calls == 1
+    assert scorer.usage.tokens_in == 1200
+
+
+def test_deterministic_call_parameters(settings):
+    client = FakeClient([json.dumps(GOOD)])
+    LLMScorer(settings, client=client).score_batch(payload(1), None, None)
+    call = client.calls[0]
+    assert call["temperature"] == 0
+    assert call["top_p"] == 1
+    assert call["response_format"] == {"type": "json_object"}
+    assert call["messages"][0]["role"] == "system"
+
+
+def test_bad_json_triggers_exactly_one_corrective_retry(settings):
+    client = FakeClient(["I refuse to answer in JSON.", json.dumps(GOOD)])
+    out = LLMScorer(settings, client=client).score_batch(payload(1), None, None)
+    assert len(client.calls) == 2
+    assert "not valid JSON" in client.calls[1]["messages"][-1]["content"]
+    assert [v.candidate_id for v in out.verdicts] == [1]
+
+
+def test_persistently_bad_json_marks_needs_review_and_keeps_the_person(settings):
+    client = FakeClient(["nope", "still nope"])
+    out = LLMScorer(settings, client=client).score_batch(payload(1, 2), None, None)
+    assert out.verdicts == []
+    assert out.needs_review == [1, 2]          # nobody is silently dropped
+    assert out.error
+
+
+def test_omitted_candidates_are_marked_needs_review(settings):
+    client = FakeClient([json.dumps(GOOD)])   # asked about 1 and 2, answered only 1
+    out = LLMScorer(settings, client=client).score_batch(payload(1, 2), None, None)
+    assert [v.candidate_id for v in out.verdicts] == [1]
+    assert out.needs_review == [2]
+
+
+def test_a_429_raises_quota_exhausted(settings):
+    err = RuntimeError("Error code: 429 - rate limit exceeded")
+    client = FakeClient([err])
+    with pytest.raises(QuotaExhausted):
+        LLMScorer(settings, client=client).score_batch(payload(1), None, None)
+
+
+def test_an_ordinary_error_does_not_lose_the_batch(settings):
+    client = FakeClient([RuntimeError("connection reset")])
+    out = LLMScorer(settings, client=client).score_batch(payload(1, 2), None, None)
+    assert out.needs_review == [1, 2]
+    assert "connection reset" in out.error
+
+
+def test_switching_provider_mid_run(settings):
+    scorer = LLMScorer(settings, client=FakeClient([json.dumps(GOOD)]))
+    assert scorer.provider == "zai"
+    scorer.switch_to("ollama")
+    assert scorer.provider == "ollama"
+    assert scorer.degraded_from == "zai"
+    assert scorer.model == settings.ollama_model
+
+
+def test_cost_accounting_uses_the_provider_price_table(settings):
+    scorer = LLMScorer(settings, provider="deepseek", client=FakeClient([json.dumps(GOOD)]))
+    scorer.score_batch(payload(1), None, None)
+    expected = 1200 / 1e6 * 0.14 + 300 / 1e6 * 0.28
+    assert scorer.estimated_cost() == pytest.approx(expected)
+
+
+def test_empty_batches_short_circuit(settings):
+    client = FakeClient([])
+    out = LLMScorer(settings, client=client).score_batch([], None, None)
+    assert out.verdicts == [] and client.calls == []
+
+
+# ─────────────────────────────── prompting ───────────────────────────────
+
+
+def test_the_prompt_names_the_target_and_the_disambiguations(company, role):
+    text = render_user_prompt(company, role, payload(1))
+    assert "McLaren Racing" in text
+    assert "NOT these organisations" in text
+    assert "Health Care" in text
+    assert "Data Scientist" in text
+    assert "candidate_id: 1" in text
+    assert "McLaren Health Care" in text          # the few-shot trap example
+    assert "Ex-Scuderia Ferrari" in text          # the few-shot former-employee example
+
+
+def test_the_prompt_carries_the_raw_evidence_not_our_parse(company, role):
+    text = render_user_prompt(
+        company, role,
+        [{"id": 9, "raw_title": "RAW TITLE HERE", "raw_snippet": "RAW SNIPPET HERE",
+          "profile_url": "https://www.linkedin.com/in/x"}],
+    )
+    assert "RAW TITLE HERE" in text and "RAW SNIPPET HERE" in text
+
+
+def test_batching_respects_the_configured_size():
+    assert [len(b) for b in batched(list(range(19)), 8)] == [8, 8, 3]
+    assert batched([], 8) == []
+    assert [len(b) for b in batched([1, 2, 3], 0)] == [1, 1, 1]

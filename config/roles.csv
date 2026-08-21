@@ -1,0 +1,18 @@
+title,aliases,family,seniority,keywords,priority,active
+Data Engineer,Trackside Data Engineer|Data Systems Engineer,data_engineering,intern|graduate|junior|mid,telemetry|logging|data pipeline|post-session|CAN bus,1,true
+Race Engineer,Number One Engineer,operations,mid|senior|lead,setup|driver comms|race engineering|strategy call,1,true
+Trackside Engineer,Trackside Support Engineer|Systems Support Engineer,operations,graduate|junior|mid,trackside|support engineer|customer team|travel,1,true
+Assistant Race Engineer,Junior Race Engineer|No.2 Engineer,operations,graduate|junior|mid,assistant race engineer|number two|run plan,2,true
+Data Analyst,Race Data Analyst|Motorsport Data Analyst,data_science,intern|graduate|junior|mid,dashboard|SQL|telemetry|stint|competitor analysis,2,true
+Performance Analyst,Driver Performance Analyst|Race Analyst,data_science,intern|graduate|junior|mid,driver performance|benchmarking|sector|lap time,2,true
+Performance Engineer,Car Performance Engineer|Performance & Data Engineer,performance,graduate|junior|mid,lap time|setup|telemetry|correlation,2,true
+Race Strategy Engineer,Strategy Engineer|Race Strategist|Strategy & Simulation Engineer,strategy,graduate|junior|mid,Monte Carlo|undercut|pit window|tyre degradation|safety car,2,true
+Telemetry Engineer,Electronics & Telemetry Engineer|Control Systems Engineer,data_engineering,graduate|junior|mid,telemetry|sensors|logger|data acquisition|live link,2,true
+Vehicle Performance Engineer,Vehicle Dynamics Engineer|VPE,vehicle_dynamics,graduate|junior|mid,vehicle dynamics|tyre model|suspension|handling,2,true
+Machine Learning Engineer,Applied Scientist|Data Scientist,data_science,graduate|junior|mid|senior,machine learning|PyTorch|model|inference|applied scientist,3,true
+Operations Research,Operations Research Analyst|OR Engineer|Decision Science Analyst,strategy,graduate|junior|mid|senior,operations research|stochastic|decision science|scheduling,3,true
+Optimisation Engineer,Applied Optimisation Engineer|Strategy Software Engineer,strategy,graduate|junior|mid|senior,optimisation|energy management|lap time simulation|solver,3,true
+Simulation & Modelling Engineer,Modelling Engineer|Vehicle Model Engineer,simulation,graduate|junior|mid,vehicle model|tyre model|model validation|lap sim,3,true
+Simulation Engineer,Driver-in-the-Loop Engineer|Sim Engineer,simulation,graduate|junior|mid,driver in loop|simulator|DIL|correlation,3,true
+Software Engineer,Race Software Engineer|Tools Developer,software,graduate|junior|mid,C++|Python|real-time|tools|internal tooling,3,true
+Systems Engineer,Control Systems Engineer|Electronics Engineer,software,graduate|junior|mid,control systems|electronics|embedded|ECU,3,true

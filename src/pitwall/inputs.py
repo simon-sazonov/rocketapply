@@ -1,0 +1,359 @@
+"""Input CSV loading, validation and DB sync — §4.1 and Phase 1.
+
+`config/companies.csv` and `config/roles.csv` are the two files you edit by
+hand. They are validated on load: required columns present, no duplicate
+canonical names, `family` from the allowed enum, `tier`/`priority` in range.
+Errors come back as a :class:`~pitwall.models.ValidationReport` — a table for
+the Setup page, never a stack trace.
+"""
+
+from __future__ import annotations
+
+import csv
+import sqlite3
+from collections.abc import Iterable, Sequence
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from .config import config_dir
+from .db import CompanyRepo, RoleRepo
+from .models import (
+    ROLE_FAMILIES,
+    Company,
+    Role,
+    ValidationReport,
+    _split_multi,
+)
+
+COMPANY_COLUMNS = (
+    "name",
+    "aliases",
+    "negative_keywords",
+    "linkedin_slug",
+    "domain",
+    "series",
+    "country",
+    "tier",
+    "active",
+)
+ROLE_COLUMNS = (
+    "title",
+    "aliases",
+    "family",
+    "seniority",
+    "keywords",
+    "priority",
+    "active",
+)
+
+TRUE_VALUES = {"1", "true", "yes", "y", "on", "t"}
+FALSE_VALUES = {"0", "false", "no", "n", "off", "f", ""}
+
+
+def companies_csv() -> Path:
+    return config_dir() / "companies.csv"
+
+
+def roles_csv() -> Path:
+    return config_dir() / "roles.csv"
+
+
+def negative_keywords_yaml() -> Path:
+    return config_dir() / "negative_keywords.yaml"
+
+
+# ─────────────────────────────── helpers ────────────────────────────────
+
+
+def _as_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    s = str(value).strip().lower()
+    if s in TRUE_VALUES:
+        return True
+    if s in FALSE_VALUES:
+        return default if s == "" else False
+    return default
+
+
+def _as_int(value: Any, default: int) -> int | None:
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return int(float(str(value).strip()))
+    except ValueError:
+        return None
+
+
+def _read_rows(path: Path) -> tuple[list[dict[str, str]], list[str]]:
+    """Read a CSV, tolerating a UTF-8 BOM and stray whitespace in headers."""
+    with path.open(newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh)
+        fields = [(f or "").strip() for f in (reader.fieldnames or [])]
+        rows = [
+            {(k or "").strip(): (v if v is not None else "") for k, v in row.items()}
+            for row in reader
+        ]
+    return rows, fields
+
+
+# ─────────────────────────────── loaders ────────────────────────────────
+
+
+def load_companies(path: Path | str | None = None) -> tuple[list[Company], ValidationReport]:
+    path = Path(path) if path else companies_csv()
+    report = ValidationReport()
+    if not path.exists():
+        report.add(path.name, 0, f"file not found: {path}")
+        return [], report
+
+    rows, fields = _read_rows(path)
+    report.rows_read = len(rows)
+    if "name" not in fields:
+        report.add(path.name, 0, "required column 'name' is missing", column="name")
+        return [], report
+    for extra in set(fields) - set(COMPANY_COLUMNS):
+        if extra:
+            report.add(
+                path.name, 0, f"unknown column {extra!r} ignored", column=extra, level="warning"
+            )
+
+    out: list[Company] = []
+    seen: dict[str, int] = {}
+    for i, row in enumerate(rows, start=2):  # row 1 is the header
+        name = (row.get("name") or "").strip()
+        if not name:
+            report.add(path.name, i, "blank 'name' — row skipped", column="name")
+            continue
+        key = name.casefold()
+        if key in seen:
+            report.add(
+                path.name,
+                i,
+                f"duplicate company name (first seen on row {seen[key]}) — row skipped",
+                column="name",
+                value=name,
+            )
+            continue
+
+        tier = _as_int(row.get("tier"), 2)
+        if tier is None or not 1 <= tier <= 3:
+            report.add(
+                path.name, i, "tier must be 1, 2 or 3 — defaulted to 2",
+                column="tier", level="warning", value=str(row.get("tier")),
+            )
+            tier = 2
+        try:
+            company = Company(
+                name=name,
+                aliases=_split_multi(row.get("aliases", "")),
+                negative_keywords=_split_multi(row.get("negative_keywords", "")),
+                linkedin_slug=(row.get("linkedin_slug") or "").strip() or None,
+                domain=(row.get("domain") or "").strip() or None,
+                series=(row.get("series") or "").strip() or None,
+                country=(row.get("country") or "").strip() or None,
+                tier=tier,
+                active=_as_bool(row.get("active"), True),
+            )
+        except Exception as exc:  # pydantic validation
+            report.add(path.name, i, str(exc), value=name)
+            continue
+
+        if not company.aliases:
+            report.add(
+                path.name, i,
+                "no aliases — recall will suffer; add season/sponsor names",
+                column="aliases", level="warning", value=name,
+            )
+        if not company.negative_keywords:
+            report.add(
+                path.name, i,
+                "no negative_keywords — the single highest-value column for precision",
+                column="negative_keywords", level="warning", value=name,
+            )
+        seen[key] = i
+        out.append(company)
+
+    report.rows_ok = len(out)
+    return out, report
+
+
+def load_roles(path: Path | str | None = None) -> tuple[list[Role], ValidationReport]:
+    path = Path(path) if path else roles_csv()
+    report = ValidationReport()
+    if not path.exists():
+        report.add(path.name, 0, f"file not found: {path}")
+        return [], report
+
+    rows, fields = _read_rows(path)
+    report.rows_read = len(rows)
+    for required in ("title", "family"):
+        if required not in fields:
+            report.add(path.name, 0, f"required column {required!r} is missing", column=required)
+    if "title" not in fields or "family" not in fields:
+        return [], report
+    for extra in set(fields) - set(ROLE_COLUMNS):
+        if extra:
+            report.add(
+                path.name, 0, f"unknown column {extra!r} ignored", column=extra, level="warning"
+            )
+
+    out: list[Role] = []
+    seen: dict[str, int] = {}
+    for i, row in enumerate(rows, start=2):
+        title = (row.get("title") or "").strip()
+        if not title:
+            report.add(path.name, i, "blank 'title' — row skipped", column="title")
+            continue
+        key = title.casefold()
+        if key in seen:
+            report.add(
+                path.name, i,
+                f"duplicate role title (first seen on row {seen[key]}) — row skipped",
+                column="title", value=title,
+            )
+            continue
+
+        priority = _as_int(row.get("priority"), 2)
+        if priority is None or not 1 <= priority <= 3:
+            report.add(
+                path.name, i, "priority must be 1, 2 or 3 — defaulted to 2",
+                column="priority", level="warning", value=str(row.get("priority")),
+            )
+            priority = 2
+        try:
+            role = Role(
+                title=title,
+                aliases=_split_multi(row.get("aliases", "")),
+                family=row.get("family", ""),
+                seniority=_split_multi(row.get("seniority", "")),
+                keywords=_split_multi(row.get("keywords", "")),
+                priority=priority,
+                active=_as_bool(row.get("active"), True),
+            )
+        except Exception as exc:
+            report.add(
+                path.name, i,
+                f"{exc}"[:200] + (f" (allowed families: {', '.join(ROLE_FAMILIES)})"
+                                  if "family" in str(exc) else ""),
+                column="family" if "family" in str(exc) else None,
+                value=title,
+            )
+            continue
+        seen[key] = i
+        out.append(role)
+
+    report.rows_ok = len(out)
+    return out, report
+
+
+def load_negative_keywords(path: Path | str | None = None) -> dict[str, Any]:
+    """Global + per-company disambiguation lists and the marker vocabularies."""
+    path = Path(path) if path else negative_keywords_yaml()
+    if not path.exists():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def merge_negative_keywords(companies: Sequence[Company], extra: dict[str, Any] | None = None) -> None:
+    """Fold `negative_keywords.yaml:per_company` into each Company, in place."""
+    data = extra if extra is not None else load_negative_keywords()
+    per_company = {str(k).casefold(): v for k, v in (data.get("per_company") or {}).items()}
+    for c in companies:
+        merged = list(c.negative_keywords)
+        for kw in per_company.get(c.name.casefold(), []) or []:
+            if kw and kw not in merged:
+                merged.append(str(kw))
+        c.negative_keywords = merged
+
+
+# ──────────────────────────────── writers ───────────────────────────────
+
+
+def save_companies(companies: Iterable[Company], path: Path | str | None = None) -> Path:
+    path = Path(path) if path else companies_csv()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(COMPANY_COLUMNS))
+        w.writeheader()
+        for c in companies:
+            w.writerow(
+                {
+                    "name": c.name,
+                    "aliases": "|".join(c.aliases),
+                    "negative_keywords": "|".join(c.negative_keywords),
+                    "linkedin_slug": c.linkedin_slug or "",
+                    "domain": c.domain or "",
+                    "series": c.series or "",
+                    "country": c.country or "",
+                    "tier": c.tier,
+                    "active": "true" if c.active else "false",
+                }
+            )
+    return path
+
+
+def save_roles(roles: Iterable[Role], path: Path | str | None = None) -> Path:
+    path = Path(path) if path else roles_csv()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(ROLE_COLUMNS))
+        w.writeheader()
+        for r in roles:
+            w.writerow(
+                {
+                    "title": r.title,
+                    "aliases": "|".join(r.aliases),
+                    "family": r.family,
+                    "seniority": "|".join(r.seniority),
+                    "keywords": "|".join(r.keywords),
+                    "priority": r.priority,
+                    "active": "true" if r.active else "false",
+                }
+            )
+    return path
+
+
+# ──────────────────────────────── DB sync ───────────────────────────────
+
+
+def sync_to_db(
+    conn: sqlite3.Connection,
+    companies: Sequence[Company],
+    roles: Sequence[Role],
+    *,
+    deactivate_missing: bool = True,
+) -> dict[str, int]:
+    """Upsert by canonical `name`/`title` so editing the CSV updates rather
+    than duplicates. Rows removed from the CSV are deactivated, never deleted
+    (their candidates and CRM notes stay intact)."""
+    crepo, rrepo = CompanyRepo(conn), RoleRepo(conn)
+    for c in companies:
+        c.id = crepo.upsert(c)
+    for r in roles:
+        r.id = rrepo.upsert(r)
+    stats = {"companies": len(companies), "roles": len(roles), "deactivated": 0}
+    if deactivate_missing:
+        stats["deactivated"] = crepo.deactivate_missing(
+            [c.name for c in companies]
+        ) + rrepo.deactivate_missing([r.title for r in roles])
+    return stats
+
+
+def load_and_sync(
+    conn: sqlite3.Connection,
+    *,
+    companies_path: Path | str | None = None,
+    roles_path: Path | str | None = None,
+) -> tuple[list[Company], list[Role], ValidationReport]:
+    """Load both CSVs, merge the YAML negatives, and sync to the database."""
+    companies, creport = load_companies(companies_path)
+    roles, rreport = load_roles(roles_path)
+    report = creport.merge(rreport)
+    merge_negative_keywords(companies)
+    if companies or roles:
+        sync_to_db(conn, companies, roles)
+    return companies, roles, report

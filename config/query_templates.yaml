@@ -1,0 +1,77 @@
+# The query grammar — §6.2 of PITWALL_PLAN.md.
+#
+# Placeholders: {company} {company_alias} {role} {role_alias} {role_alias_1}
+#               {role_alias_2} {seniority} {country} {domain}
+#
+# for_each: fan the template out over a list field
+#           (company_alias | role_alias | seniority)
+# families: restrict the template to these role families
+# requires_operators: dropped automatically when the active provider
+#           reports supports_operators() == False (operator degradation, §6.2)
+
+templates:
+  - id: profile_exact
+    weight: 5
+    requires_operators: true
+    pattern: 'site:linkedin.com/in "{company}" "{role}"'
+
+  - id: profile_alias
+    weight: 4
+    requires_operators: true
+    for_each: company_alias
+    pattern: 'site:linkedin.com/in "{company_alias}" "{role}"'
+
+  - id: profile_role_alias
+    weight: 4
+    requires_operators: true
+    for_each: role_alias
+    pattern: 'site:linkedin.com/in "{company}" "{role_alias}"'
+
+  - id: profile_family_or
+    weight: 3
+    requires_operators: true
+    pattern: 'site:linkedin.com/in "{company}" ({role} OR {role_alias_1} OR {role_alias_2})'
+
+  - id: profile_seniority
+    weight: 3
+    requires_operators: true
+    for_each: seniority
+    pattern: 'site:linkedin.com/in "{company}" "{seniority} {role}"'
+
+  - id: plain_fallback            # for providers with weak operator support (ddgs)
+    weight: 3
+    requires_operators: false
+    pattern: '{company} {role} linkedin profile'
+
+  - id: plain_site_soft
+    weight: 4
+    requires_operators: false
+    pattern: 'site:linkedin.com/in {company} {role}'
+
+  - id: plain_alias_soft
+    weight: 3
+    requires_operators: false
+    for_each: company_alias
+    pattern: 'site:linkedin.com/in {company_alias} {role}'
+
+  - id: plain_role_alias_soft
+    weight: 3
+    requires_operators: false
+    for_each: role_alias
+    pattern: 'site:linkedin.com/in {company} {role_alias}'
+
+  - id: posts_discovery           # people who post about their work
+    weight: 2
+    requires_operators: true
+    pattern: 'site:linkedin.com/posts "{company}" "{role}"'
+
+  - id: x_discovery
+    weight: 1
+    requires_operators: true
+    pattern: 'site:x.com "{company}" "{role}"'
+
+  - id: github_discovery          # good for data/software people
+    weight: 1
+    requires_operators: true
+    families: [data_science, data_engineering, software, simulation]
+    pattern: 'site:github.com "{company}" "{role}"'

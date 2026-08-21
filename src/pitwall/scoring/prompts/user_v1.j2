@@ -1,0 +1,34 @@
+TARGET COMPANY: {{ company.name }}
+  aliases: {{ company.aliases | join(", ") or "none" }}
+  NOT these organisations: {{ company.negative_keywords | join(", ") or "none" }}
+  series: {{ company.series or "unknown" }} | country: {{ company.country or "unknown" }}
+
+TARGET ROLE: {{ role.title }}
+  aliases: {{ role.aliases | join(", ") or "none" }}
+  family: {{ role.family }}
+  wanted seniority: {{ role.seniority | join(", ") or "any" }}
+
+EXAMPLES:
+1) Title: "Anna Petrova - Senior Data Scientist - McLaren Racing | LinkedIn"
+   → company_match=exact, role_match=exact, is_current_employee=true, score=93
+2) Title: "David Brooks - Data Analyst - McLaren Health Care | LinkedIn"
+   → company_match=same_name_different_org, score=8,
+     red_flags=["McLaren Health Care is a US hospital network, not McLaren Racing"]
+3) Title: "Luca Rossi - Strategy Consultant | LinkedIn"
+   Snippet: "Ex-Scuderia Ferrari race strategist, now at Bain..."
+   → is_current_employee=false, company_match=none, score=22,
+     red_flags=["Snippet says 'Ex-Scuderia Ferrari'"]
+
+CANDIDATES:
+{% for c in candidates %}
+---
+candidate_id: {{ c.id }}
+title:   {{ c.raw_title }}
+snippet: {{ c.raw_snippet }}
+url:     {{ c.profile_url }}
+{% endfor %}
+
+Return JSON matching exactly this shape:
+{{ schema_hint }}
+
+Return JSON: {"results": [ {one object per candidate_id, in order} ]}

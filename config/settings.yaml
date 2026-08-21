@@ -1,0 +1,59 @@
+# PitWall behaviour settings — Appendix B of PITWALL_PLAN.md.
+# Precedence: CLI flags > .env > this file > code defaults.
+
+search:
+  providers: [ddgs, serper]
+  max_results_per_query: 20
+  cache_ttl_days: 7
+  region: uk-en
+  ddgs_queries_per_second: 0.25
+  serper_queries_per_second: 5
+  searxng_queries_per_second: 2
+  serper_credits: 2500          # tracked down to 0, then the provider disables itself
+
+query_budget:
+  max_queries_per_run: 200
+  company_tier_weight: 3
+  role_priority_weight: 2
+
+scoring:
+  # Tuned against tests/fixtures/eval_set.csv, not guessed (§12.2). On the free
+  # ddgs path the quoted-phrase operators are unavailable, so titles carry less
+  # signal and the plan's default of 25 costs too much recall:
+  #     thr=25  precision 0.67  recall 0.62  F1 0.65   <- below the 0.90 floor
+  #     thr=12  precision 0.61  recall 0.94  F1 0.74   <- chosen
+  #     thr=5   precision 0.59  recall 1.00  F1 0.74
+  # Re-run `python scripts/eval_scoring.py sweep` after any rubric change.
+  # Raise this back towards 25 if you switch to an operator-capable provider.
+  heuristic_threshold: 12
+  weights:
+    heuristic: 0.30
+    llm: 0.70
+  penalties:
+    not_current_employee: 0.35
+    same_name_different_org: 0.10
+    role_unrelated: 0.40
+    low_confidence: 0.80
+  bands:
+    strong: 75
+    possible: 55
+    weak: 35
+
+llm:
+  batch_size: 8
+  temperature: 0
+  max_tokens: 1500
+  prompt_version: v1
+  daily_request_cap: 900
+  # $ per 1M tokens, used for the cost estimate on the Run page
+  prices:
+    zai:      { input: 0.0,   output: 0.0 }
+    deepseek: { input: 0.14,  output: 0.28 }
+    ollama:   { input: 0.0,   output: 0.0 }
+
+crm:
+  default_followup_days: 14
+  hide_ignored_by_default: true
+
+retention:
+  purge_ignored_after_days: 180

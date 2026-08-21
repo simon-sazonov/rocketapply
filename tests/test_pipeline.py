@@ -1,0 +1,265 @@
+"""End-to-end pipeline behaviour — the automatable half of the §12.3 QA checklist.
+
+    - re-running the same search adds 0 duplicate candidates
+    - killing a run mid-way and restarting resumes without redoing work
+    - every score can be traced to a visible SERP snippet
+    - an ignored person stays out of the default view
+    - delete & blocklist survives a fresh full run
+    - the app works offline with --cache-only
+
+A stub provider stands in for the network, so this file never makes a request.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from pitwall.crm import CRM
+from pitwall.export import filter_frame, funnel_counts, leads_frame
+from pitwall.inputs import sync_to_db
+from pitwall.models import Company, Role
+from pitwall.pipeline import Pipeline, RunParams
+from pitwall.search.base import SearchHit
+
+HITS = [
+    SearchHit(0, "https://uk.linkedin.com/in/jane-doe",
+              "Jane Doe - Data Scientist - McLaren Racing | LinkedIn",
+              "Data Scientist at McLaren Racing · Woking, England, United Kingdom", {}),
+    SearchHit(1, "https://www.linkedin.com/in/david-brooks",
+              "David Brooks - Data Analyst - McLaren Health Care | LinkedIn",
+              "Macomb, Michigan, United States", {}),
+    SearchHit(2, "https://www.linkedin.com/in/luca-rossi",
+              "Luca Rossi - Strategy Consultant | LinkedIn",
+              "Ex-McLaren Racing data scientist, now at Bain", {}),
+    SearchHit(3, "https://www.linkedin.com/posts/someone_activity-1",
+              "A post about F1 data", "not a person", {}),
+    SearchHit(4, "https://uk.linkedin.com/in/Jane-Doe/",   # same person, mirror host
+              "Jane Doe - Senior Data Scientist - McLaren Racing | LinkedIn",
+              "Senior Data Scientist at McLaren Racing, working on tyre degradation and "
+              "Monte Carlo race simulation · Woking, England, United Kingdom", {}),
+]
+
+
+class StubProvider:
+    """A deterministic stand-in for a real search provider."""
+
+    name = "ddgs"
+
+    def __init__(self, hits=None):
+        self.hits = HITS if hits is None else hits
+        self.calls = 0
+
+    def supports_operators(self) -> bool:
+        return False
+
+    def remaining_quota(self):
+        return None
+
+    def search(self, query, *, max_results=20, region="wt-wt"):
+        """First query returns the short Jane headline, later queries the long one.
+
+        Two URLs that canonicalize identically inside ONE result page are the
+        same row and collapse there (UNIQUE(query_id, canonical_url)); the
+        longest-wins merge only has anything to do across different queries.
+        """
+        self.calls += 1
+        page = list(self.hits)
+        if self.calls > 1 and len(page) >= 5:
+            page = [page[4], *page[1:4]]
+        else:
+            page = page[:4]
+        return page[:max_results]
+
+
+@pytest.fixture()
+def pipeline(settings, repos, monkeypatch, company, role):
+    sync_to_db(repos.conn, [company], [role])
+    provider = StubProvider()
+    monkeypatch.setattr("pitwall.pipeline.build_chain", lambda *a, **k: [provider])
+    monkeypatch.setattr("pitwall.query_builder.build_chain", lambda *a, **k: [provider],
+                        raising=False)
+    pipe = Pipeline(settings, repos)
+    pipe.stub = provider
+    return pipe
+
+
+def _params(**kw):
+    base = {"max_queries": 4, "max_results": 10, "use_llm": False}
+    base.update(kw)
+    return RunParams(**base)
+
+
+# ─────────────────────────────── the stages ──────────────────────────────
+
+
+def test_a_full_run_produces_traceable_scores(pipeline, repos, settings):
+    stats = pipeline.run(_params())
+    assert stats.queries_executed == 4
+    assert stats.candidates_new == 3          # 5 hits: 1 post dropped, 1 duplicate merged
+    assert repos.candidates.count() == 3
+
+    df = leads_frame(repos.conn, settings)
+    assert len(df) == 3
+    for _, row in df.iterrows():
+        evidence = repos.candidates.evidence(int(row["candidate_id"]))
+        assert evidence, f"{row['name']} has no evidence"
+        assert any(e["title"] or e["snippet"] for e in evidence)
+
+
+def test_the_health_care_trap_is_rejected_end_to_end(pipeline, repos, settings):
+    pipeline.run(_params())
+    df = leads_frame(repos.conn, settings)
+    brooks = df[df["name"] == "David Brooks"].iloc[0]
+    rossi = df[df["name"] == "Luca Rossi"].iloc[0]
+    jane = df[df["name"] == "Jane Doe"].iloc[0]
+    assert brooks["verdict"] == "reject"
+    assert rossi["verdict"] == "reject"
+    assert jane["verdict"] == "pending_llm"
+    assert jane["heuristic_score"] > brooks["heuristic_score"]
+
+
+def test_rerunning_adds_no_duplicate_candidates(pipeline, repos):
+    pipeline.run(_params())
+    first = repos.candidates.count()
+    pipeline.run(_params())
+    assert repos.candidates.count() == first
+
+
+def test_the_second_run_spends_no_network_calls(pipeline):
+    pipeline.run(_params())
+    calls_after_first = pipeline.stub.calls
+    pipeline.run(_params())
+    assert pipeline.stub.calls == calls_after_first  # freshness skip + SERP cache
+
+
+def test_mirror_hosts_merge_into_one_person_keeping_the_longest_fields(pipeline, repos):
+    pipeline.run(_params())
+    jane = repos.candidates.get_by_slug("jane-doe")
+    assert jane is not None
+    assert jane["current_title"] == "Senior Data Scientist"      # longest wins
+    assert "tyre degradation" in (jane["headline"] or "")        # longest headline wins
+    assert jane["location"] == "Woking, England, United Kingdom"
+    assert repos.candidates.get_by_slug("Jane-Doe") is None      # not a second row
+    assert jane["evidence_count"] >= 2                           # several queries found her
+
+
+def test_an_interrupted_run_resumes_without_redoing_finished_queries(pipeline, repos):
+    pipeline.build_queries(_params())
+    pipeline.search(_params(limit=2))
+    done_after_partial = repos.queries.counts_by_status().get("done", 0)
+    assert done_after_partial == 2
+
+    repos.queries.mark(999999, "running")          # a no-op id: nothing to reset
+    pipeline.search(_params(limit=4))
+    counts = repos.queries.counts_by_status()
+    assert counts.get("done", 0) == 4
+    assert pipeline.stub.calls == 4                # the first two were not refetched
+
+
+def test_cache_only_mode_never_calls_the_provider(pipeline, repos):
+    pipeline.build_queries(_params())
+    stats = pipeline.search(_params(cache_only=True))
+    assert pipeline.stub.calls == 0
+    assert stats.results_fetched == 0
+
+
+def test_extract_is_idempotent_unless_reprocess_is_asked_for(pipeline, repos):
+    pipeline.run(_params())
+    again = pipeline.extract(_params())
+    assert again.rows_parsed == 0                  # everything already processed
+    reprocessed = pipeline.extract(_params(reprocess=True))
+    assert reprocessed.rows_parsed > 0
+    assert reprocessed.candidates_new == 0
+
+
+# ─────────────────────────────── CRM effects ─────────────────────────────
+
+
+def test_an_ignored_person_disappears_from_the_default_view(pipeline, repos, settings):
+    pipeline.run(_params())
+    df = leads_frame(repos.conn, settings)
+    jane_id = int(df[df["name"] == "Jane Doe"].iloc[0]["candidate_id"])
+    CRM(repos.conn).ignore(jane_id)
+
+    refreshed = leads_frame(repos.conn, settings)
+    visible = filter_frame(refreshed, hide_ignored=True)
+    assert "Jane Doe" not in set(visible["name"])
+    assert "Jane Doe" in set(filter_frame(refreshed, hide_ignored=False)["name"])
+
+
+def test_delete_and_blocklist_survives_a_fresh_full_run(pipeline, repos):
+    pipeline.run(_params())
+    jane = repos.candidates.get_by_slug("jane-doe")
+    CRM(repos.conn).delete_and_block(jane["id"], "not interested")
+    assert repos.candidates.get_by_slug("jane-doe") is None
+
+    # a completely fresh sweep: new queries, cache bypassed, everything reprocessed
+    pipeline.run(_params(max_queries=6, no_cache=True, reprocess=True))
+    assert repos.candidates.get_by_slug("jane-doe") is None
+    assert repos.candidates.is_blocked("jane-doe")
+
+
+# ─────────────────────────── bookkeeping and preview ─────────────────────
+
+
+def test_the_run_row_records_what_happened(pipeline, repos):
+    stats = pipeline.run(_params())
+    run = repos.runs.get(stats.run_id)
+    assert run["status"] == "done"
+    assert run["finished_at"]
+    assert run["queries_executed"] == stats.queries_executed
+    assert run["results_fetched"] == stats.results_fetched
+    assert json.loads(run["params"])["use_llm"] is False
+
+
+def test_a_cancelled_run_stops_and_is_recorded(pipeline, repos, monkeypatch):
+    monkeypatch.setattr(Pipeline, "cancelled", lambda self: True)
+    stats = pipeline.run(_params())
+    run = repos.runs.get(stats.run_id)
+    assert run["status"] == "cancelled"
+
+
+def test_the_preview_reports_a_plan_without_touching_the_network(pipeline):
+    info = pipeline.preview(_params(max_queries=10))
+    assert info["queries_after_cap"] <= 10
+    assert info["est_serp_rows"] > 0
+    assert info["provider"] == "ddgs"
+    assert pipeline.stub.calls == 0
+
+
+def test_the_funnel_counts_line_up_with_the_tables(pipeline, repos, settings):
+    pipeline.run(_params())
+    funnel = funnel_counts(repos.conn, settings)
+    assert funnel["queries"] == 4
+    assert funnel["serp_rows"] == repos.results.count()
+    assert funnel["candidates"] == repos.candidates.count()
+    assert funnel["passed_heuristics"] <= funnel["candidates"]
+
+
+def test_narrowing_a_run_to_one_company_and_role(settings, repos, monkeypatch, write_inputs):
+    companies = [
+        Company(name="McLaren Racing", aliases="McLaren F1", negative_keywords="Health Care", tier=1),
+        Company(name="AF Corse", aliases="", negative_keywords="", tier=2),
+    ]
+    roles = [
+        Role(title="Data Scientist", family="data_science", aliases="", seniority="", keywords=""),
+        Role(title="Race Engineer", family="operations", aliases="", seniority="", keywords=""),
+    ]
+    write_inputs(companies, roles)
+    sync_to_db(repos.conn, companies, roles)
+    provider = StubProvider()
+    monkeypatch.setattr("pitwall.pipeline.build_chain", lambda *a, **k: [provider])
+    pipe = Pipeline(settings, repos)
+
+    pipe.build_queries(RunParams(companies=["AF Corse"], roles=["Race Engineer"], max_queries=50))
+    texts = [r["query_text"] for r in repos.queries.pending()]
+    assert texts
+    assert all("AF Corse" in t and "Race Engineer" in t for t in texts)
+
+
+def test_llm_stage_is_skipped_cleanly_when_disabled(pipeline, repos):
+    stats = pipeline.run(_params(use_llm=False))
+    assert stats.llm_calls == 0
+    assert repos.quota.used_today("llm:zai") == 0

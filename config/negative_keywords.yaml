@@ -1,0 +1,85 @@
+# Global + per-company disambiguation (§3.2, §9.1).
+# `global` applies to every candidate. `per_company` is merged with the
+# negative_keywords column of companies.csv (matched on the canonical name,
+# case-insensitively).
+
+# `global` carries the full -40 wrong-organisation penalty, so it holds only
+# signals that mean "this is a different domain entirely". Hiring-post noise
+# and recruiter headlines are handled by recruiter_markers (-18) instead.
+global:
+  # wrong kind of "racing"
+  - horse racing
+  - greyhound racing
+  - drag racing school
+  - esports betting
+  - bootcamp
+
+# Past-tense / ex-employee markers used by the heuristic layer (§9.1).
+past_tense_markers:
+  - former
+  - formerly
+  - "ex-"
+  - "ex "
+  - previously
+  - "until 20"
+  - alum
+  - alumni
+  - past:
+  - retired
+
+recruiter_markers:
+  - recruiter
+  - recruitment
+  - talent acquisition
+  - headhunter
+  - staffing
+  - resourcer
+  - "hr business partner"
+  - executive search
+
+student_markers:
+  - student at
+  - msc candidate
+  - phd candidate
+  - undergraduate
+  - "aspiring "
+  - "seeking opportunities"
+
+per_company:
+  McLaren Racing:
+    - health care
+    - healthcare
+    - hospital
+    - macomb
+    - automotive dealership
+  Williams Racing:
+    - williams companies
+    - williams sonoma
+    - williams-sonoma
+  Alpine Endurance Team:
+    - alpine electronics
+    - alpine audio
+    - alpine skiing
+  Alpine Racing:
+    - alpine electronics
+    - alpine audio
+    - alpine skiing
+  Haas F1 Team:
+    - haas automation
+    - cnc
+  Ferrari:
+    - dealership
+    - ferrari north america sales
+  Mercedes-AMG:
+    - dealership
+    - mercedes-benz cars
+    - van sales
+  BMW M Motorsport:
+    - dealership
+    - bmw sales
+  Porsche Motorsport:
+    - dealership
+    - porsche cars sales
+  Toyota Gazoo Racing:
+    - dealership
+    - toyota motor sales
