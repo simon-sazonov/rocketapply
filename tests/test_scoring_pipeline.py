@@ -99,17 +99,37 @@ def reply(*items):
 
 
 def seed_pending(pipe, repos, n=3):
-    """Candidates that already passed the heuristic gate."""
+    """Candidates that already passed the heuristic gate, with their evidence.
+
+    The evidence rows matter: `_candidate_context` walks
+    candidates -> candidate_sources -> search_results -> queries to work out
+    which company×role pair a person should be judged against, so a candidate
+    with no evidence is invisible to the heuristic stage.
+    """
     from pitwall.models import Score
 
     company = repos.companies.all()[0]
     role = repos.roles.all()[0]
+    conn = repos.conn
+    conn.execute(
+        "INSERT INTO queries (id, company_id, role_id, template_id, query_text, query_hash,"
+        " status) VALUES (1,?,?,'profile_exact','q','h','done') ON CONFLICT DO NOTHING",
+        (company["id"], role["id"]),
+    )
     ids = []
     for i in range(n):
         cid, _ = repos.candidates.upsert(
             {"linkedin_slug": f"p{i}", "profile_url": f"https://www.linkedin.com/in/p{i}",
              "full_name": f"Person {i}", "headline": f"Data Scientist at McLaren Racing {i}"}
         )
+        conn.execute(
+            "INSERT INTO search_results (id, query_id, provider, rank, url, canonical_url,"
+            " title, snippet, processed) VALUES (?,1,'ddgs',?,?,?,?,?,1)",
+            (i + 1, i, f"https://www.linkedin.com/in/p{i}", f"https://linkedin.com/in/p{i}",
+             f"Person {i} - Data Scientist - McLaren Racing | LinkedIn",
+             "Data Scientist at McLaren Racing · Woking, England, United Kingdom"),
+        )
+        repos.candidates.link_source(cid, i + 1)
         repos.scores.upsert(
             Score(candidate_id=cid, company_id=company["id"], role_id=role["id"],
                   heuristic_score=60.0, verdict="pending_llm",
@@ -331,4 +351,36 @@ def test_the_configured_threshold_clears_the_recall_floor(settings):
     assert recall >= 0.90, (
         f"heuristic recall {recall:.2f} at threshold "
         f"{settings.heuristic_threshold:g} — run `python scripts/eval_scoring.py sweep`"
+    )
+
+
+def test_rescoring_heuristics_does_not_discard_paid_llm_work(pipe, repos, monkeypatch):
+    """`score --rescore-all` must re-blend, not reset verdicts to pending_llm."""
+    ids = seed_pending(pipe, repos, 1)
+    client = FakeClient([reply(
+        {"candidate_id": ids[0], "is_person_profile": True, "is_current_employee": True,
+         "company_match": "exact", "role_match": "exact", "seniority": "mid",
+         "score": 95, "confidence": 0.9, "reasons": ["exact title match"], "red_flags": []},
+    )])
+    monkeypatch.setattr(
+        "pitwall.pipeline.LLMScorer",
+        lambda settings, **kw: __import__("pitwall.scoring.llm", fromlist=["LLMScorer"]).LLMScorer(
+            settings, client=client
+        ),
+    )
+    pipe.score_llm(RunParams(use_llm=True))
+    before = repos.scores.for_candidate(ids[0])[0]
+    assert before["llm_score"] == 95
+
+    stats = pipe.score_heuristics(RunParams(rescore_all=True, use_llm=False))
+    after = repos.scores.for_candidate(ids[0])[0]
+
+    assert stats.heuristic_scored >= 1
+    assert after["llm_score"] == 95, "the LLM verdict survived the rescore"
+    assert after["verdict"] != "pending_llm"
+    assert after["company_match"] == "exact"
+    assert "exact title match" in json.loads(after["reasons"])
+    # the blend was recomputed against the fresh heuristic score
+    assert after["final_score"] == pytest.approx(
+        0.30 * after["heuristic_score"] + 0.70 * 95, abs=0.01
     )

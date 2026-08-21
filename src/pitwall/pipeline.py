@@ -23,7 +23,7 @@ from .config import Settings, get_settings
 from .db import Repos, open_repos
 from .extract.linkedin import parse_profile
 from .inputs import load_and_sync, load_negative_keywords
-from .models import Company, Role, Score
+from .models import Company, LLMVerdict, Role, Score
 from .query_builder import build_all
 from .scoring import heuristics
 from .scoring.llm import (
@@ -340,6 +340,7 @@ class Pipeline:
         pairs = self._candidate_context(params)
         total = len(pairs)
         self.progress("heuristics", f"{total} candidate×company×role pairs", 0, total)
+        existing = self._existing_llm_scores(prompt_version) if params.rescore_all else {}
 
         for i, ctx in enumerate(pairs, start=1):
             company = by_company.get(ctx["company_id"])
@@ -354,6 +355,41 @@ class Pipeline:
                 allow_recruiters=allow_recruiters,
             )
             passed = heuristics.passes(result, threshold)
+
+            # Re-scoring must not throw away LLM work already paid for: if a
+            # verdict exists under this prompt version, re-blend against the
+            # fresh heuristic score instead of resetting it to pending_llm.
+            prior = existing.get(
+                (ctx["candidate"]["id"], ctx["company_id"], ctx["role_id"])
+            )
+            if prior is not None:
+                prior_verdict, prior_model = prior
+                blended = self.final_score(result.score, prior_verdict)
+                self.repos.scores.upsert(
+                    Score(
+                        candidate_id=ctx["candidate"]["id"],
+                        company_id=ctx["company_id"],
+                        role_id=ctx["role_id"],
+                        heuristic_score=result.score,
+                        llm_score=prior_verdict.score,
+                        final_score=blended,
+                        verdict=self.settings.band_for(blended),
+                        is_current_employee=prior_verdict.is_current_employee,
+                        company_match=prior_verdict.company_match,
+                        role_match=prior_verdict.role_match,
+                        seniority=prior_verdict.seniority,
+                        confidence=prior_verdict.confidence,
+                        reasons=[*result.reasons, *prior_verdict.reasons],
+                        red_flags=prior_verdict.red_flags,
+                        model=prior_model,
+                        prompt_version=prompt_version,
+                    )
+                )
+                stats.heuristic_scored += 1
+                if passed:
+                    stats.heuristic_passed += 1
+                continue
+
             self.repos.scores.upsert(
                 Score(
                     candidate_id=ctx["candidate"]["id"],
@@ -361,7 +397,13 @@ class Pipeline:
                     role_id=ctx["role_id"],
                     heuristic_score=result.score,
                     llm_score=None,
-                    final_score=result.score if not passed else None,
+                    # The heuristic score IS the provisional final score until
+                    # the LLM runs: Phase 6 (the read-only dashboard) lands
+                    # before Phase 5 in the plan's schedule, so the table has to
+                    # sort sensibly on heuristics alone. `verdict='pending_llm'`
+                    # is what marks it provisional; the LLM stage overwrites
+                    # both fields with the 0.3/0.7 blend.
+                    final_score=result.score,
                     verdict="pending_llm" if passed else "reject",
                     reasons=result.reasons,
                     red_flags=[],
@@ -379,6 +421,32 @@ class Pipeline:
                     total,
                 )
         return stats
+
+    def _existing_llm_scores(
+        self, prompt_version: str
+    ) -> dict[tuple[int, int | None, int | None], tuple[LLMVerdict, str | None]]:
+        """LLM verdicts already stored under this prompt version, by pair key."""
+        out: dict[tuple[int, int | None, int | None], tuple[LLMVerdict, str | None]] = {}
+        for row in self.conn.execute(
+            "SELECT * FROM scores WHERE prompt_version = ? AND llm_score IS NOT NULL",
+            (prompt_version,),
+        ):
+            verdict = LLMVerdict(
+                candidate_id=row["candidate_id"],
+                is_person_profile=True,
+                is_current_employee=(
+                    None if row["is_current_employee"] is None else bool(row["is_current_employee"])
+                ),
+                company_match=row["company_match"] or "unknown",
+                role_match=row["role_match"] or "unknown",
+                seniority=row["seniority"] or "unknown",
+                score=row["llm_score"] or 0.0,
+                confidence=row["confidence"] or 0.0,
+                reasons=_json_loads(row["reasons"]),
+                red_flags=_json_loads(row["red_flags"]),
+            )
+            out[(row["candidate_id"], row["company_id"], row["role_id"])] = (verdict, row["model"])
+        return out
 
     def _candidate_context(self, params: RunParams) -> list[dict[str, Any]]:
         """Every (candidate, company, role) pair implied by the evidence.

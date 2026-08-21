@@ -263,3 +263,68 @@ def test_llm_stage_is_skipped_cleanly_when_disabled(pipeline, repos):
     stats = pipeline.run(_params(use_llm=False))
     assert stats.llm_calls == 0
     assert repos.quota.used_today("llm:zai") == 0
+
+
+# ───────────────── the background-worker contract (§10) ──────────────────
+
+
+def test_a_run_in_a_worker_thread_streams_progress_to_the_main_thread(
+    settings, repos, monkeypatch, write_inputs, company, role
+):
+    """What the 🔎 Run Search page depends on.
+
+    The worker must never touch Streamlit state: it opens its own thread-local
+    SQLite connection, creates the run row, and streams progress through
+    `run_progress`, which the UI thread polls.
+    """
+    import threading
+
+    write_inputs([company], [role])
+    sync_to_db(repos.conn, [company], [role])
+    provider = StubProvider()
+    monkeypatch.setattr("pitwall.pipeline.build_chain", lambda *a, **k: [provider])
+
+    seen: list[tuple[str, int, int]] = []
+    error: list[Exception] = []
+
+    def worker():
+        try:
+            Pipeline(settings).run(_params(max_queries=3))
+        except Exception as exc:  # pragma: no cover
+            error.append(exc)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    while thread.is_alive():
+        latest = repos.runs.latest(1)
+        if latest:
+            prog = repos.runs.get_progress(latest[0]["id"])
+            if prog:
+                seen.append((prog["stage"], prog["current"], prog["total"]))
+        thread.join(timeout=0.05)
+    thread.join(timeout=30)
+
+    assert not error, error
+    run = repos.runs.latest(1)[0]
+    assert run["status"] == "done"
+    assert run["finished_at"]
+    assert run["queries_executed"] > 0
+    assert {stage for stage, _, _ in seen}, "the UI thread saw no progress at all"
+    assert repos.candidates.count() > 0
+
+
+def test_cancelling_from_another_thread_stops_the_run(settings, repos, monkeypatch,
+                                                      write_inputs, company, role):
+    """The ⏹ Cancel button writes a flag the running pipeline notices."""
+    write_inputs([company], [role])
+    sync_to_db(repos.conn, [company], [role])
+    monkeypatch.setattr("pitwall.pipeline.build_chain", lambda *a, **k: [StubProvider()])
+    pipe = Pipeline(settings, repos)
+
+    run_id = repos.runs.start({})
+    assert repos.runs.is_cancelled(run_id) is False
+    repos.runs.cancel(run_id)
+    assert repos.runs.is_cancelled(run_id) is True
+
+    pipe._run_id = run_id
+    assert pipe.cancelled() is True
