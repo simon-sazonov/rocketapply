@@ -48,9 +48,9 @@ pip install -r requirements.txt
 cp .env.example .env          # then edit if you have API keys
 ```
 
-Nothing needs an API key to work. The default path — DuckDuckGo search, heuristic
-scoring — is free, keyless, and runs offline against its cache after the first
-sweep.
+**No API key is needed for any of this.** DuckDuckGo search is keyless, and the
+LLM stage runs locally on Qwen through [Ollama](https://ollama.com). Cloud
+providers are optional upgrades, not requirements.
 
 ## First run
 
@@ -62,15 +62,21 @@ python scripts/seed_motorsport.py --source plan --force   # or the plan's §17 s
 # 2. Create the database
 python scripts/run_pipeline.py init-db
 
-# 3. See the plan without touching the network
+# 3. Set up the local model that does the AI scoring (~4.7 GB, once)
+python scripts/setup_ollama.py               # skip if you set a cloud key instead
+
+# 4. See the plan without touching the network
 python scripts/run_pipeline.py build-queries --dry-run
 
-# 4. Run it (about 4 s per query on the free provider — 50 queries ≈ 3½ minutes)
+# 5. Run it (about 4 s per query on the free provider — 50 queries ≈ 3½ minutes)
 python scripts/run_pipeline.py run --max-queries 50 --max-results 15
 
-# 5. Look at your leads
+# 6. Look at your leads
 streamlit run app/Home.py
 ```
+
+Steps 1–2 take seconds. Step 3 is a one-time download. Skip step 3 and everything
+still works — you just get heuristic scores without the AI judgement layer.
 
 ---
 
@@ -330,8 +336,8 @@ Motorsport is a small industry; automated messaging burns your reputation in it.
 ## Development
 
 ```bash
-pytest                                    # 220 tests, no network required
-pytest --cov=pitwall --cov-report=term    # ~89% coverage
+pytest                                    # 260 tests, no network required
+pytest --cov=pitwall --cov-report=term    # ~90% coverage
 ruff check . && mypy                      # lint and types
 ```
 
