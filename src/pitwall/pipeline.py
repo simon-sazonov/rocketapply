@@ -14,7 +14,7 @@ import json
 import logging
 import sqlite3
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -804,27 +804,32 @@ class Pipeline:
 
     # ───────────────────────── full run ───────────────────────────
 
-    def run(self, params: RunParams | None = None) -> RunStats:
-        params = params or RunParams()
-        stats = RunStats()
-        run_id = self.repos.runs.start(params.as_dict())
+    @contextlib.contextmanager
+    def tracked(
+        self, params: RunParams, stats: RunStats, command: str = "run"
+    ) -> Iterator[int]:
+        """Open a `runs` row, stream progress into it, and always close it.
+
+        The single place run bookkeeping happens. The Streamlit worker got this
+        right in v1 by going through `run()`; the CLI stages did not go through
+        `run()` at all, which is why the `runs` table was empty after a whole
+        real session and Analytics had nothing to show (§0.5).
+
+        Closing is unconditional: a stage that raises still leaves a terminal
+        `failed` row carrying the error, not a row stuck at `running`.
+        """
+        run_id = self.repos.runs.start(params.as_dict(), command)
         self._run_id = run_id
         stats.run_id = run_id
         started = time.time()
-
         try:
-            self.repos.queries.reset_running()
-            inserted, summary = self.build_queries(params)
-            stats.queries_planned = summary.get("capped_to", 0)
-
-            self.search(params, stats)
-            if not self.cancelled():
-                self.extract(params, stats)
-            if not self.cancelled():
-                self.score_heuristics(params, stats)
-            if not self.cancelled() and params.use_llm:
-                self.score_llm(params, stats)
-
+            yield run_id
+        except Exception as exc:  # noqa: BLE001 - a failed stage must not lose the run row
+            log.exception("%s failed", command)
+            self.repos.runs.finish(run_id, "failed", str(exc)[:500])
+            self.progress("failed", str(exc)[:200], 0, 1)
+            raise
+        else:
             self.repos.runs.bump(
                 run_id,
                 queries_planned=stats.queries_planned,
@@ -840,18 +845,29 @@ class Pipeline:
             self.repos.runs.finish(run_id, status)
             self.progress(
                 "done",
-                f"{status} in {time.time() - started:.0f}s · "
+                f"{command} {status} in {time.time() - started:.0f}s · "
                 f"{stats.candidates_new} new people · ${stats.cost_estimate:.4f}",
                 1,
                 1,
             )
-        except Exception as exc:  # noqa: BLE001 - a failed stage must not lose the run row
-            log.exception("run failed")
-            self.repos.runs.finish(run_id, "failed", str(exc)[:500])
-            self.progress("failed", str(exc)[:200], 0, 1)
-            raise
         finally:
             self._run_id = None
+
+    def run(self, params: RunParams | None = None) -> RunStats:
+        params = params or RunParams()
+        stats = RunStats()
+        with self.tracked(params, stats, "run"):
+            self.repos.queries.reset_running()
+            _, summary = self.build_queries(params)
+            stats.queries_planned = summary.get("capped_to", 0)
+
+            self.search(params, stats)
+            if not self.cancelled():
+                self.extract(params, stats)
+            if not self.cancelled():
+                self.score_heuristics(params, stats)
+            if not self.cancelled() and params.use_llm:
+                self.score_llm(params, stats)
         return stats
 
     # ───────────────────────── previews ──────────────────────────

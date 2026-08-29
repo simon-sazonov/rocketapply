@@ -159,6 +159,7 @@ CREATE TABLE IF NOT EXISTS blocklist (
 -- ─────────────────────────── bookkeeping ───────────────────────
 CREATE TABLE IF NOT EXISTS runs (
     id               INTEGER PRIMARY KEY,
+    command          TEXT,          -- run|search|extract|score|ui — which entry point
     started_at       TEXT DEFAULT (datetime('now')),
     finished_at      TEXT,
     params           TEXT,          -- JSON
@@ -273,11 +274,13 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     """Forward-only migrations, each safe to re-run.
 
     * v1 -> v2 added `search_results.processed`.
-    * v2 -> v3 added `scores.provider` (§0.4) — the CREATE TABLE above only
-      applies to a fresh database, so an existing 2.0 MB file needs the ALTER.
+    * v2 -> v3 added `scores.provider` (§0.4) and `runs.command` (§0.5) — the
+      CREATE TABLE above only applies to a fresh database, so an existing 2.0 MB
+      file needs the ALTER.
     """
     _add_column(conn, "search_results", "processed", "INTEGER DEFAULT 0")
     _add_column(conn, "scores", "provider", "TEXT")
+    _add_column(conn, "runs", "command", "TEXT")
 
 
 def vacuum(conn: sqlite3.Connection) -> None:
@@ -823,10 +826,10 @@ class RunRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def start(self, params: dict[str, Any]) -> int:
+    def start(self, params: dict[str, Any], command: str = "run") -> int:
         cur = self.conn.execute(
-            "INSERT INTO runs (params, status) VALUES (?, 'running')",
-            (json.dumps(params, ensure_ascii=False, default=str),),
+            "INSERT INTO runs (command, params, status) VALUES (?, ?, 'running')",
+            (command, json.dumps(params, ensure_ascii=False, default=str)),
         )
         run_id = int(cur.lastrowid or 0)
         self.conn.execute(

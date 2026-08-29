@@ -35,7 +35,7 @@ from pitwall.export import (  # noqa: E402
 )
 from pitwall.inputs import load_and_sync  # noqa: E402
 from pitwall.logging_setup import setup_logging  # noqa: E402
-from pitwall.pipeline import Pipeline, RunParams  # noqa: E402
+from pitwall.pipeline import Pipeline, RunParams, RunStats  # noqa: E402
 from pitwall.query_builder import build_all  # noqa: E402
 
 app = typer.Typer(add_completion=False, help=__doc__, no_args_is_help=True)
@@ -141,9 +141,14 @@ def search(
     """Stage 2 — execute pending queries against the provider chain."""
     settings = _bootstrap(verbose, use_serper=use_serper)
     pipe = Pipeline(settings, on_progress=_progress)
-    stats = pipe.search(
-        RunParams(limit=limit, max_results=max_results, no_cache=no_cache, cache_only=cache_only)
+    params = RunParams(
+        limit=limit, max_results=max_results, no_cache=no_cache, cache_only=cache_only
     )
+    stats = RunStats()
+    # A CLI stage opens a `runs` row exactly like the Streamlit worker does, so
+    # a CLI-driven session shows up in Analytics and the Home panel (§0.5).
+    with pipe.tracked(params, stats, "search"):
+        pipe.search(params, stats)
     console.print(
         f"[green]{stats.queries_executed}[/] queries ran "
         f"({stats.queries_cached} from cache, {stats.queries_failed} failed) -> "
@@ -159,7 +164,10 @@ def extract(
     """Stage 3 — turn SERP rows into distinct people."""
     settings = _bootstrap(verbose)
     pipe = Pipeline(settings, on_progress=_progress)
-    stats = pipe.extract(RunParams(reprocess=reprocess))
+    params = RunParams(reprocess=reprocess)
+    stats = RunStats()
+    with pipe.tracked(params, stats, "extract"):
+        pipe.extract(params, stats)
     console.print(
         f"[green]{stats.rows_parsed}[/] profile rows -> "
         f"[green]{stats.candidates_touched}[/] people "
@@ -186,13 +194,16 @@ def score(
         use_llm=not heuristic_only,
         limit=limit,
     )
-    stats = pipe.score_heuristics(params)
-    console.print(
-        f"heuristics: [green]{stats.heuristic_scored}[/] scored, "
-        f"[green]{stats.heuristic_passed}[/] above threshold"
-    )
+    stats = RunStats()
+    with pipe.tracked(params, stats, "score"):
+        pipe.score_heuristics(params, stats)
+        console.print(
+            f"heuristics: [green]{stats.heuristic_scored}[/] scored, "
+            f"[green]{stats.heuristic_passed}[/] above threshold"
+        )
+        if not heuristic_only:
+            pipe.score_llm(params, stats)
     if not heuristic_only:
-        stats = pipe.score_llm(params, stats)
         console.print(
             f"LLM: [green]{stats.llm_scored}[/] scored in {stats.llm_calls} calls "
             f"({stats.llm_needs_review} need review) · "
