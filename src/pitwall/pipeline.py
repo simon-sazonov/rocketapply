@@ -111,6 +111,8 @@ class Pipeline:
         self._on_progress = on_progress
         self.markers = load_negative_keywords()
         self._run_id: int | None = None
+        #: Providers still to try in this LLM stage; `_degrade` pops from it.
+        self._llm_remaining: list[str] = []
 
     # ── progress plumbing ──
 
@@ -376,7 +378,7 @@ class Pipeline:
                 (ctx["candidate"]["id"], ctx["company_id"], ctx["role_id"])
             )
             if prior is not None:
-                prior_verdict, prior_model = prior
+                prior_verdict, prior_model, prior_provider = prior
                 blended = self.final_score(result.score, prior_verdict)
                 self.repos.scores.upsert(
                     Score(
@@ -395,6 +397,7 @@ class Pipeline:
                         reasons=[*result.reasons, *prior_verdict.reasons],
                         red_flags=prior_verdict.red_flags,
                         model=prior_model,
+                        provider=prior_provider,
                         prompt_version=prompt_version,
                     )
                 )
@@ -437,9 +440,11 @@ class Pipeline:
 
     def _existing_llm_scores(
         self, prompt_version: str
-    ) -> dict[tuple[int, int | None, int | None], tuple[LLMVerdict, str | None]]:
+    ) -> dict[tuple[int, int | None, int | None], tuple[LLMVerdict, str | None, str | None]]:
         """LLM verdicts already stored under this prompt version, by pair key."""
-        out: dict[tuple[int, int | None, int | None], tuple[LLMVerdict, str | None]] = {}
+        out: dict[
+            tuple[int, int | None, int | None], tuple[LLMVerdict, str | None, str | None]
+        ] = {}
         for row in self.conn.execute(
             "SELECT * FROM scores WHERE prompt_version = ? AND llm_score IS NOT NULL",
             (prompt_version,),
@@ -458,7 +463,12 @@ class Pipeline:
                 reasons=_json_loads(row["reasons"]),
                 red_flags=_json_loads(row["red_flags"]),
             )
-            out[(row["candidate_id"], row["company_id"], row["role_id"])] = (verdict, row["model"])
+            out[(row["candidate_id"], row["company_id"], row["role_id"])] = (
+                verdict,
+                row["model"],
+                # `scores.provider` is guaranteed by the v2 -> v3 migration.
+                row["provider"],
+            )
         return out
 
     def _candidate_context(self, params: RunParams) -> list[dict[str, Any]]:
@@ -528,25 +538,18 @@ class Pipeline:
             self.progress("llm", "LLM disabled for this run", 0, 0)
             return stats
 
-        try:
-            scorer = LLMScorer(self.settings)
-            # Catches a missing local model, or one whose context window is too
-            # small for a full batch — Ollama would truncate silently and score
-            # every candidate against a half-missing rubric.
-            scorer.preflight()
-        except (LLMUnavailable, ValueError) as exc:
-            stats.notes.append(f"LLM unavailable: {exc}")
-            self.progress("llm", f"skipped — {exc}", 0, 0)
+        # The chain, not one provider. Everything after the first entry is the
+        # degradation path (§0.4); keyless providers drop out silently.
+        self._llm_remaining = self.settings.llm_chain()
+        scorer = self._open_scorer(stats)
+        if scorer is None:
+            tried = ", ".join(self.settings.llm_chain()) or "none"
+            note = f"no usable LLM provider in the chain ({tried})"
+            stats.notes.append(note)
+            self.progress("llm", f"skipped — {note}", 0, 0)
             return stats
 
-        used_today = self.repos.quota.used_today(f"llm:{scorer.provider}")
         cap = self.settings.daily_llm_request_cap
-        if used_today >= cap * 0.95:
-            stats.notes.append(
-                f"daily LLM cap reached ({used_today}/{cap}); remaining candidates stay pending_llm"
-            )
-            self.progress("llm", f"daily cap reached ({used_today}/{cap})", 0, 0)
-            return stats
 
         pending = self.repos.scores.awaiting_llm(prompt_version, limit=params.limit)
         groups: dict[tuple[int | None, int | None], list[dict[str, Any]]] = {}
@@ -568,30 +571,68 @@ class Pipeline:
                 if self.cancelled():
                     stats.notes.append("cancelled during LLM scoring")
                     return self._finish_llm(scorer, stats)
-                if self.repos.quota.used_today(f"llm:{scorer.provider}") >= cap * 0.95:
-                    stats.notes.append("daily LLM cap reached mid-run — progress saved")
-                    return self._finish_llm(scorer, stats)
+                used = self.repos.quota.used_today(f"llm:{scorer.provider}")
+                if used >= cap * 0.95:
+                    # A per-provider ceiling, so this is a reason to move down
+                    # the chain, not a reason to stop.
+                    nxt = self._degrade(
+                        scorer, stats, LLMUnavailable(f"daily cap reached ({used}/{cap})")
+                    )
+                    if nxt is None:
+                        return self._finish_llm(scorer, stats)
+                    scorer = nxt
 
                 payload = [self._llm_payload(r) for r in batch]
-                try:
-                    outcome = scorer.score_batch(payload, company, role)
-                except QuotaExhausted as exc:
-                    if self._degrade(scorer, stats, exc):
-                        try:
-                            outcome = scorer.score_batch(payload, company, role)
-                        except Exception as exc2:  # noqa: BLE001
-                            stats.notes.append(f"fallback LLM also failed: {exc2}")
-                            return self._finish_llm(scorer, stats)
-                    else:
-                        return self._finish_llm(scorer, stats)
+                scorer, outcome = self._score_batch_with_degradation(
+                    scorer, payload, company, role, stats
+                )
+                if outcome is None:          # the whole chain is spent
+                    return self._finish_llm(scorer, stats)
 
                 self.repos.quota.consume(f"llm:{scorer.provider}", 1)
                 stats.llm_calls += 1
                 self._persist_verdicts(batch, outcome, company_id, role_id, prompt_version, stats)
                 done += len(batch)
-                self.progress("llm", f"{done}/{total} scored · {stats.llm_calls} calls", done, total)
+                self.progress(
+                    "llm",
+                    f"{done}/{total} scored · {stats.llm_calls} calls on {scorer.provider}",
+                    done,
+                    total,
+                )
 
         return self._finish_llm(scorer, stats)
+
+    def _score_batch_with_degradation(
+        self,
+        scorer: LLMScorer,
+        payload: list[dict[str, Any]],
+        company: Company | None,
+        role: Role | None,
+        stats: RunStats,
+    ) -> tuple[LLMScorer, Any | None]:
+        """One batch, retried down the provider chain.
+
+        Degradation is per batch and both halves are logged: which provider gave
+        up and which one took over. Two failures count as "this provider is
+        done" — a quota refusal, and a call that came back with nothing but an
+        error, which is what an unreachable or 5xx-ing provider looks like from
+        here. A model that merely answered badly is *not* a provider failure and
+        must not cost a degradation: the repair ladder already handles it.
+        """
+        while True:
+            try:
+                outcome = scorer.score_batch(payload, company, role)
+            except QuotaExhausted as exc:
+                failure: Exception = exc
+            else:
+                if not outcome.provider_error:
+                    return scorer, outcome
+                failure = LLMUnavailable(outcome.error or "the call failed")
+
+            nxt = self._degrade(scorer, stats, failure)
+            if nxt is None:
+                return scorer, None
+            scorer = nxt
 
     def _llm_payload(self, score_row: dict[str, Any]) -> dict[str, Any]:
         """The raw evidence the model judges — title and snippet, not our parse."""
@@ -640,6 +681,7 @@ class Pipeline:
                         reasons=_json_loads(row.get("reasons")),
                         red_flags=[outcome.error or "model omitted this candidate"],
                         model=outcome.model,
+                        provider=outcome.provider,
                         prompt_version=prompt_version,
                     )
                 )
@@ -664,6 +706,7 @@ class Pipeline:
                     reasons=[*_json_loads(row.get("reasons")), *verdict.reasons],
                     red_flags=verdict.red_flags,
                     model=outcome.model,
+                    provider=outcome.provider,
                     prompt_version=prompt_version,
                 )
             )
@@ -685,21 +728,75 @@ class Pipeline:
             final = min(final, 10.0)
         return round(max(0.0, min(100.0, final)), 2)
 
-    def _degrade(self, scorer: LLMScorer, stats: RunStats, exc: Exception) -> bool:
-        """Quota hit: switch to the local fallback if it is reachable (§5 step 6)."""
-        fallback = self.settings.llm_fallback
-        usable = fallback and fallback not in ("none", scorer.provider)
-        if usable and (fallback != "ollama" or ollama_reachable(self.settings.ollama_base_url)):
-            scorer.switch_to(fallback)
-            stats.notes.append(f"quota hit on {scorer.degraded_from}; degraded to {fallback}")
-            return True
+    def _open_scorer(self, stats: RunStats) -> LLMScorer | None:
+        """The first provider in the remaining chain that is actually usable.
+
+        Three ways to be unusable, and all three are silent skips rather than
+        run-ending failures:
+
+        * **no key** — a keyless cloud provider is simply not configured, which
+          is the normal state of zai and deepseek in a Groq-first setup;
+        * **daily cap spent** — a per-provider guard, so a spent groq quota now
+          moves to the next provider instead of ending the stage;
+        * **preflight** — a missing local model, or one whose context window is
+          too small for a full batch. Ollama truncates from the front, which
+          would silently delete the rubric and score everyone against nothing.
+        """
+        cap = self.settings.daily_llm_request_cap
+        while self._llm_remaining:
+            name = self._llm_remaining.pop(0)
+            try:
+                scorer = LLMScorer(self.settings, provider=name)
+                if not scorer.is_available():
+                    raise LLMUnavailable(f"{name} has no API key configured")
+                used = self.repos.quota.used_today(f"llm:{scorer.provider}")
+                if used >= cap * 0.95:
+                    raise LLMUnavailable(f"daily cap reached ({used}/{cap})")
+                scorer.preflight()
+            except (LLMUnavailable, ValueError) as exc:
+                log.warning("LLM provider %s unusable: %s", name, exc)
+                stats.notes.append(f"{name} skipped: {exc}")
+                continue
+            log.info("LLM provider: %s (%s)", scorer.provider, scorer.model)
+            return scorer
+        return None
+
+    def _degrade(self, scorer: LLMScorer, stats: RunStats, exc: Exception) -> LLMScorer | None:
+        """Walk to the next provider in the chain, mid-run, per batch.
+
+        Returns the new scorer, or None when the chain is exhausted — in which
+        case the remaining candidates stay `pending_llm` and nothing is lost.
+        """
+        stats.llm_tokens_in += scorer.usage.tokens_in
+        stats.llm_tokens_out += scorer.usage.tokens_out
+        stats.cost_estimate += scorer.estimated_cost()
+
+        while self._llm_remaining:
+            candidate = self._llm_remaining[0]
+            if candidate == "ollama" and not ollama_reachable(self.settings.ollama_base_url):
+                self._llm_remaining.pop(0)
+                stats.notes.append("ollama unreachable — cannot degrade to it")
+                continue
+            nxt = self._open_scorer(stats)
+            if nxt is None:
+                break
+            note = f"{scorer.provider} failed ({str(exc)[:120]}); degraded to {nxt.provider}"
+            log.warning(note)
+            stats.notes.append(note)
+            self.progress("llm", f"degraded to {nxt.provider}", 0, 0)
+            nxt.degraded_from = scorer.provider
+            return nxt
+
         stats.notes.append(
-            f"LLM quota exhausted ({exc}); remaining candidates left as pending_llm — progress saved"
+            f"every LLM provider in the chain failed ({str(exc)[:160]}); remaining "
+            "candidates left as pending_llm — progress saved"
         )
-        self.progress("llm", "quota exhausted — progress saved, nothing lost", 0, 0)
-        return False
+        self.progress("llm", "LLM chain exhausted — progress saved, nothing lost", 0, 0)
+        return None
 
     def _finish_llm(self, scorer: LLMScorer, stats: RunStats) -> RunStats:
+        """Bank the current scorer's usage. Every scorer retired by `_degrade`
+        was banked on its way out, so this only ever adds the live one."""
         stats.llm_tokens_in += scorer.usage.tokens_in
         stats.llm_tokens_out += scorer.usage.tokens_out
         stats.cost_estimate += scorer.estimated_cost()

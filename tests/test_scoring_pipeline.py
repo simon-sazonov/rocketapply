@@ -202,6 +202,10 @@ def test_a_quota_wall_saves_progress_instead_of_crashing(pipe, repos, monkeypatc
 
 
 def test_the_daily_cap_stops_the_stage_before_it_starts(pipe, repos, monkeypatch):
+    # The provider has to be *configured* for the cap to be the reason it is
+    # skipped — otherwise v2's chain drops it for the missing key first, which
+    # is true but is a different message (§0.4).
+    pipe.settings.zai_api_key = "sk-test"
     seed_pending(pipe, repos, 1)
     repos.quota.consume("llm:zai", pipe.settings.daily_llm_request_cap)
     stats = pipe.score_llm(RunParams(use_llm=True))

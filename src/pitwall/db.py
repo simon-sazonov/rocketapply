@@ -20,7 +20,7 @@ from typing import Any
 
 from .config import Settings, get_settings
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DDL = """
 PRAGMA journal_mode = WAL;
@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS scores (
     reasons             TEXT,      -- JSON array
     red_flags           TEXT,      -- JSON array
     model               TEXT,
+    provider            TEXT,      -- which LLM answered, so mixed-provider runs audit
     prompt_version      TEXT,
     scored_at           TEXT DEFAULT (datetime('now')),
     UNIQUE(candidate_id, company_id, role_id, prompt_version)
@@ -256,11 +257,27 @@ def init_schema(conn: sqlite3.Connection) -> int:
     return SCHEMA_VERSION
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> bool:
+    """Idempotent `ALTER TABLE … ADD COLUMN`. Returns True if it was added."""
+    if column in _columns(conn, table):
+        return False
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    return True
+
+
 def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
-    """Forward-only migrations. v1 -> v2 added `search_results.processed`."""
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(search_results)")}
-    if "processed" not in cols:
-        conn.execute("ALTER TABLE search_results ADD COLUMN processed INTEGER DEFAULT 0")
+    """Forward-only migrations, each safe to re-run.
+
+    * v1 -> v2 added `search_results.processed`.
+    * v2 -> v3 added `scores.provider` (§0.4) — the CREATE TABLE above only
+      applies to a fresh database, so an existing 2.0 MB file needs the ALTER.
+    """
+    _add_column(conn, "search_results", "processed", "INTEGER DEFAULT 0")
+    _add_column(conn, "scores", "provider", "TEXT")
 
 
 def vacuum(conn: sqlite3.Connection) -> None:
@@ -666,8 +683,9 @@ class ScoreRepo:
             INSERT INTO scores (candidate_id, company_id, role_id, heuristic_score,
                                 llm_score, final_score, verdict, is_current_employee,
                                 company_match, role_match, seniority, confidence,
-                                reasons, red_flags, model, prompt_version, scored_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'))
+                                reasons, red_flags, model, provider, prompt_version,
+                                scored_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'))
             ON CONFLICT(candidate_id, company_id, role_id, prompt_version) DO UPDATE SET
                 heuristic_score=excluded.heuristic_score,
                 llm_score=excluded.llm_score,
@@ -681,6 +699,7 @@ class ScoreRepo:
                 reasons=excluded.reasons,
                 red_flags=excluded.red_flags,
                 model=excluded.model,
+                provider=excluded.provider,
                 scored_at=datetime('now')
             """,
             (
@@ -699,6 +718,7 @@ class ScoreRepo:
                 _dumps(s.reasons),
                 _dumps(s.red_flags),
                 s.model,
+                getattr(s, "provider", None),
                 s.prompt_version,
             ),
         )

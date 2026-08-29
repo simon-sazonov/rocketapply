@@ -126,6 +126,11 @@ class BatchOutcome:
     provider: str = ""
     raw: str = ""
     error: str | None = None
+    #: True only when the *call* failed — unreachable host, 5xx, auth refusal.
+    #: A model that answered badly is not a provider failure: the repair ladder
+    #: already handles that, and degrading over it would burn the chain on a
+    #: problem the next provider is just as likely to have.
+    provider_error: bool = False
 
 
 # ─────────────────────────────── prompts ────────────────────────────────
@@ -429,7 +434,8 @@ class LLMScorer:
                 raise QuotaExhausted(str(exc)) from exc
             log.error("LLM call failed: %s", exc)
             return BatchOutcome(
-                needs_review=ids, model=self.model, provider=self.provider, error=str(exc)[:300]
+                needs_review=ids, model=self.model, provider=self.provider,
+                error=str(exc)[:300], provider_error=True,
             )
 
         parsed = parse_batch(text)
@@ -450,7 +456,8 @@ class LLMScorer:
                 if _is_quota_error(exc):
                     raise QuotaExhausted(str(exc)) from exc
                 return BatchOutcome(
-                    needs_review=ids, model=self.model, provider=self.provider, error=str(exc)[:300]
+                    needs_review=ids, model=self.model, provider=self.provider,
+                    error=str(exc)[:300], provider_error=True,
                 )
             parsed = parse_batch(text)
 

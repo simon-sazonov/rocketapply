@@ -81,6 +81,7 @@ YAML_MAP: dict[str, str] = {
     "llm.prompt_version": "prompt_version",
     "llm.model": "llm_model",
     "llm.reasoning_effort": "llm_reasoning_effort",
+    "llm.provider_chain": "llm_provider_chain",
     "llm.daily_request_cap": "daily_llm_request_cap",
     "llm.prices": "llm_prices",
     "crm.default_followup_days": "default_followup_days",
@@ -182,7 +183,18 @@ class Settings(BaseSettings):
 
     # ── LLM ──
     llm_provider: LLMProviderName = "groq"
+    #: Deprecated in favour of `llm_provider_chain`; still honoured so an
+    #: existing .env keeps working — `llm_chain()` folds both in.
     llm_fallback: LLMProviderName = "ollama"
+    #: The ordered degradation path. v1 had `LLM_FALLBACK=none`, which meant an
+    #: unreachable provider halted the pipeline mid-run. Providers without a key
+    #: are skipped silently, so leaving zai/deepseek empty costs nothing, and
+    #: ollama sits last on purpose: local CPU inference is the offline safety
+    #: net, not the working path.
+    llm_provider_chain: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["groq", "zai", "deepseek", "ollama"],
+        validation_alias=AliasChoices("llm_provider_chain", "LLM_PROVIDER_CHAIN"),
+    )
     #: Overrides the active provider's model when set. Groq's catalogue changes
     #: often, so the model is config, never a hardcoded constant: run
     #: `make groq-check` to list what your key can actually reach today.
@@ -268,6 +280,21 @@ class Settings(BaseSettings):
                 )
             if not v:
                 raise ValueError("SEARCH_PROVIDERS must list at least one provider")
+        return v
+
+    @field_validator("llm_provider_chain", mode="before")
+    @classmethod
+    def _split_llm_chain(cls, v: Any) -> Any:
+        """Accept `groq,zai` from .env and `[groq, zai]` from YAML."""
+        if isinstance(v, str):
+            v = [p.strip() for p in v.split(",") if p.strip()]
+        if isinstance(v, list):
+            allowed = {"groq", "zai", "deepseek", "ollama"}
+            bad = [p for p in v if p not in allowed]
+            if bad:
+                raise ValueError(
+                    f"unknown LLM provider(s) {bad}; allowed: {sorted(allowed)}"
+                )
         return v
 
     @field_validator("searxng_engines", mode="before")
@@ -390,6 +417,34 @@ class Settings(BaseSettings):
         if self.llm_model:
             cfg = {**cfg, "model": self.llm_model}
         return {"provider": provider, **cfg}
+
+    def llm_chain(self) -> list[str]:
+        """The ordered providers to try, most preferred first.
+
+        Folds the three settings into one list so that every existing .env keeps
+        working: an explicit `LLM_PROVIDER` still leads, `LLM_PROVIDER_CHAIN`
+        supplies the body, and a legacy `LLM_FALLBACK` is still reachable at the
+        end. `none` drops out; duplicates collapse, first mention wins.
+        """
+        ordered = [self.llm_provider, *self.llm_provider_chain, self.llm_fallback]
+        out: list[str] = []
+        for name in ordered:
+            if name and name != "none" and name not in out:
+                out.append(name)
+        return out
+
+    def llm_has_key(self, provider: str) -> bool:
+        """Ollama needs no key; every cloud provider does. A keyless provider is
+        skipped silently rather than failing the run."""
+        if provider == "ollama":
+            return True
+        try:
+            return bool(self.llm_config(provider).get("api_key"))
+        except ValueError:
+            return False
+
+    def usable_llm_chain(self) -> list[str]:
+        return [p for p in self.llm_chain() if self.llm_has_key(p)]
 
     def band_for(self, score: float) -> str:
         if score >= self.band_strong:

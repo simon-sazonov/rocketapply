@@ -57,6 +57,12 @@ def settings(project, tmp_path, monkeypatch):
         cache_dir=tmp_path / "cache",
         search_providers=["ddgs"],
         llm_provider="zai",
+        # One keyless cloud provider and nothing after it. Without this the v2
+        # chain would fall through to `ollama`, and on a machine where Ollama is
+        # actually running (this project's own setup) the suite would start
+        # making real inference calls.
+        llm_provider_chain=["zai"],
+        llm_fallback="none",
         max_queries_per_run=50,
         _env_file=None,
     )

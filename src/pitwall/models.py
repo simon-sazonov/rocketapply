@@ -379,6 +379,9 @@ class Score(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     red_flags: list[str] = Field(default_factory=list)
     model: str | None = None
+    #: Which LLM answered. Degradation is per batch, so one run can legitimately
+    #: mix providers — this is what makes such a run auditable afterwards.
+    provider: str | None = None
     prompt_version: str = "v1"
     scored_at: str | None = None
 
