@@ -9,7 +9,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from pitwall.ratelimit import RateLimiter, get_limiter, reset_limiters
-from pitwall.search import SerpCache, build_chain, build_provider, cache_key
+from pitwall.search import (
+    SerpCache,
+    build_chain,
+    build_provider,
+    cache_key,
+    chain_report,
+)
 from pitwall.search.base import ProviderError, QuotaExhausted, SearchHit
 
 HITS = [
@@ -183,3 +189,96 @@ def test_serper_refuses_without_a_key(settings):
 def test_hits_round_trip_through_json():
     restored = SearchHit.from_json(HITS[0].to_json())
     assert restored == HITS[0]
+
+
+# ───────────────────── the v2 chain guards (§0.2) ──────────────────────
+
+
+def test_the_shipped_chain_is_searxng_then_ddgs_then_serper():
+    from pitwall.config import Settings
+
+    assert Settings(_env_file=None).search_providers == ["searxng", "ddgs", "serper"]
+
+
+def test_searxng_drops_out_of_the_chain_when_it_is_not_running(settings, monkeypatch):
+    """No Docker must degrade to the v1 behaviour, not fail every query."""
+    from pitwall.search.searxng import SearxngProvider, reset_reachability_cache
+
+    reset_reachability_cache()
+    monkeypatch.setattr(SearxngProvider, "is_reachable", lambda self, **kw: False)
+    settings.search_providers = ["searxng", "ddgs"]
+    chain, skipped = chain_report(settings)
+    assert [p.name for p in chain] == ["ddgs"]
+    assert skipped and skipped[0][0] == "searxng"
+    assert "make searxng" in skipped[0][1]
+
+
+def test_searxng_leads_the_chain_when_it_is_running(settings, monkeypatch):
+    from pitwall.search.searxng import SearxngProvider, reset_reachability_cache
+
+    reset_reachability_cache()
+    monkeypatch.setattr(SearxngProvider, "is_reachable", lambda self, **kw: True)
+    settings.search_providers = ["searxng", "ddgs"]
+    chain = build_chain(settings)
+    assert [p.name for p in chain] == ["searxng", "ddgs"]
+    # This is what re-enables the operator templates in query_builder.
+    assert chain[0].supports_operators() is True
+
+
+def test_serper_is_held_back_at_the_credit_reserve(settings):
+    settings.search_providers = ["ddgs", "serper"]
+    settings.serper_api_key = "sk-test"
+    settings.serper_reserve_credits = 500
+
+    chain, skipped = chain_report(settings, credits={"serper": 480})
+    assert [p.name for p in chain] == ["ddgs"]
+    assert "reserve" in skipped[0][1]
+
+    chain, _ = chain_report(settings, credits={"serper": 501})
+    assert [p.name for p in chain] == ["ddgs", "serper"]
+
+
+def test_exactly_at_the_reserve_is_held_back(settings):
+    settings.search_providers = ["serper"]
+    settings.serper_api_key = "sk-test"
+    settings.serper_reserve_credits = 500
+    chain, _ = chain_report(settings, credits={"serper": 500})
+    assert chain == []
+
+
+def test_unknown_credits_fall_back_to_the_configured_grant(settings):
+    """A fresh database has no quota row; that must not read as `0 left`."""
+    settings.search_providers = ["serper"]
+    settings.serper_api_key = "sk-test"
+    settings.serper_credits = 2500
+    settings.serper_reserve_credits = 500
+    chain, _ = chain_report(settings, credits={"serper": None})
+    assert [p.name for p in chain] == ["serper"]
+
+
+def test_the_reserve_can_be_spent_deliberately(settings):
+    """`--use-serper` sets the floor to 0 for one run."""
+    settings.search_providers = ["serper"]
+    settings.serper_api_key = "sk-test"
+    overridden = settings.with_overrides(serper_reserve_credits=0)
+    chain, _ = chain_report(overridden, credits={"serper": 120})
+    assert [p.name for p in chain] == ["serper"]
+
+
+def test_the_pipeline_reads_credits_from_the_quota_table(settings, repos, monkeypatch):
+    """Reuse the `quota` table — §0.2 forbids a parallel counter."""
+    from pitwall.pipeline import Pipeline
+    from pitwall.search.searxng import SearxngProvider, reset_reachability_cache
+
+    reset_reachability_cache()
+    monkeypatch.setattr(SearxngProvider, "is_reachable", lambda self, **kw: False)
+    settings.search_providers = ["ddgs", "serper"]
+    settings.serper_api_key = "sk-test"
+    settings.serper_reserve_credits = 500
+
+    pipe = Pipeline(settings, repos)
+    repos.quota.set_credits("serper", 2000)
+    assert [p.name for p in pipe.chain()] == ["ddgs", "serper"]
+
+    repos.quota.set_credits("serper", 100)
+    assert [p.name for p in pipe.chain()] == ["ddgs"]

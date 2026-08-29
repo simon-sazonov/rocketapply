@@ -2,7 +2,9 @@
 # Precedence: CLI flags > .env > this file > code defaults.
 
 search:
-  providers: [ddgs, serper]
+  # Ordered fallback. searxng first for operator support; it drops out of the
+  # chain automatically when the container is not running (`make searxng`).
+  providers: [searxng, ddgs, serper]
   max_results_per_query: 20
   cache_ttl_days: 7
   region: uk-en
@@ -20,6 +22,9 @@ search:
   # (quoted: each list item is one comma-separated GROUP, not one engine)
   searxng_engines: ["google,duckduckgo", "bing,startpage", "brave,duckduckgo"]
   serper_credits: 2500          # tracked down to 0, then the provider disables itself
+  # One-time credits that never refill: below this floor the chain stops
+  # reaching for serper by itself. `--use-serper` overrides it for one run.
+  serper_reserve_credits: 500
 
 query_budget:
   max_queries_per_run: 200

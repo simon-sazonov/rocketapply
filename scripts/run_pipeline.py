@@ -37,7 +37,6 @@ from pitwall.inputs import load_and_sync  # noqa: E402
 from pitwall.logging_setup import setup_logging  # noqa: E402
 from pitwall.pipeline import Pipeline, RunParams  # noqa: E402
 from pitwall.query_builder import build_all  # noqa: E402
-from pitwall.search import build_chain  # noqa: E402
 
 app = typer.Typer(add_completion=False, help=__doc__, no_args_is_help=True)
 console = Console()
@@ -49,8 +48,12 @@ def _csv_list(value: str | None) -> list[str] | None:
     return [v.strip() for v in value.split(",") if v.strip()]
 
 
-def _bootstrap(verbose: bool = False):
+def _bootstrap(verbose: bool = False, *, use_serper: bool = False):
     settings = get_settings()
+    if use_serper:
+        # Serper's 2,500 credits are one-time. `--use-serper` is the deliberate
+        # "yes, spend into the reserve" switch — see SERPER_RESERVE_CREDITS.
+        settings = settings.with_overrides(serper_reserve_credits=0)
     settings.ensure_dirs()
     setup_logging(settings, console_level=logging.DEBUG if verbose else logging.WARNING,
                   handler=RichHandler(console=console, show_path=False))
@@ -96,7 +99,7 @@ def build_queries(
         console.print("[red]nothing to do — no active companies or roles[/]")
         raise typer.Exit(1)
 
-    provider = build_chain(settings)[0]
+    provider = pipe.chain()[0]
     specs, summary = build_all(
         comps, rls, settings,
         provider=provider.name,
@@ -130,10 +133,13 @@ def search(
     max_results: int | None = typer.Option(None, help="results per query"),
     no_cache: bool = typer.Option(False, "--no-cache", help="force a refetch"),
     cache_only: bool = typer.Option(False, "--cache-only", help="offline: cached results only"),
+    use_serper: bool = typer.Option(
+        False, "--use-serper", help="spend into the SERPER_RESERVE_CREDITS floor"
+    ),
     verbose: bool = typer.Option(False, "-v", "--verbose"),
 ) -> None:
     """Stage 2 — execute pending queries against the provider chain."""
-    settings = _bootstrap(verbose)
+    settings = _bootstrap(verbose, use_serper=use_serper)
     pipe = Pipeline(settings, on_progress=_progress)
     stats = pipe.search(
         RunParams(limit=limit, max_results=max_results, no_cache=no_cache, cache_only=cache_only)
@@ -208,10 +214,13 @@ def run(
     no_llm: bool = typer.Option(False, "--no-llm", help="skip the LLM stage"),
     no_cache: bool = typer.Option(False, "--no-cache"),
     cache_only: bool = typer.Option(False, "--cache-only"),
+    use_serper: bool = typer.Option(
+        False, "--use-serper", help="spend into the SERPER_RESERVE_CREDITS floor"
+    ),
     verbose: bool = typer.Option(False, "-v", "--verbose"),
 ) -> None:
     """All stages, end to end, resumable."""
-    settings = _bootstrap(verbose)
+    settings = _bootstrap(verbose, use_serper=use_serper)
     pipe = Pipeline(settings, on_progress=_progress)
     params = RunParams(
         companies=_csv_list(companies),

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     NoDecode,
@@ -60,6 +60,7 @@ YAML_MAP: dict[str, str] = {
     "search.searxng_engines": "searxng_engines",
     "search.searxng_timeout_seconds": "searxng_timeout_seconds",
     "search.serper_credits": "serper_credits",
+    "search.serper_reserve_credits": "serper_reserve_credits",
     "query_budget.max_queries_per_run": "max_queries_per_run",
     "query_budget.company_tier_weight": "company_tier_weight",
     "query_budget.role_priority_weight": "role_priority_weight",
@@ -134,13 +135,23 @@ class Settings(BaseSettings):
         extra="ignore",
         case_sensitive=False,
         validate_default=True,
+        # Fields carry an AliasChoices validation alias (SEARCH_PROVIDER_CHAIN
+        # etc.), which would otherwise make the field name unusable as a
+        # constructor kwarg and break `with_overrides` and every test.
+        populate_by_name=True,
     )
 
     # ── search ──
     # NoDecode: keep pydantic-settings from JSON-decoding "ddgs,serper" from .env;
     # the before-validator below understands both the CSV and the YAML list form.
+    #: The ordered fallback chain. `SEARCH_PROVIDER_CHAIN` is the v2 name;
+    #: `SEARCH_PROVIDERS` still works so an existing .env keeps running.
     search_providers: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["ddgs"]
+        default_factory=lambda: ["searxng", "ddgs", "serper"],
+        validation_alias=AliasChoices(
+            "search_provider_chain", "SEARCH_PROVIDER_CHAIN",
+            "search_providers", "SEARCH_PROVIDERS",
+        ),
     )
     serper_api_key: str = ""
     serpapi_api_key: str = ""
@@ -162,6 +173,10 @@ class Settings(BaseSettings):
     # proxies are not. §0.1 of PITWALL_V2_IMPLEMENTATION.md.
     searxng_queries_per_second: float = Field(default=1.0, gt=0)
     serper_credits: int = Field(default=2500, ge=0)
+    #: Serper's 2,500 free credits are one-time and never refill. At or below
+    #: this floor the chain stops reaching for serper on its own, so the burst
+    #: capacity survives a routine sweep. `--use-serper` sets it to 0 for one run.
+    serper_reserve_credits: int = Field(default=500, ge=0)
 
     # ── LLM ──
     llm_provider: LLMProviderName = "zai"

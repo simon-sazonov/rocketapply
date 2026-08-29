@@ -125,6 +125,19 @@ class Pipeline:
     def cancelled(self) -> bool:
         return bool(self._run_id and self.repos.runs.is_cancelled(self._run_id))
 
+    # ── provider chain ──
+
+    def chain(self) -> list[SearchProvider]:
+        """The chain, with serper's live credit balance folded in (§0.2).
+
+        Reads the `quota` table rather than a parallel counter — that table is
+        already the record of what has been spent.
+        """
+        return build_chain(self.settings, credits=self._provider_credits())
+
+    def _provider_credits(self) -> dict[str, int | None]:
+        return {name: self.repos.quota.credits(name) for name in ("serper", "serpapi")}
+
     # ─────────────────────── stage 0: inputs ────────────────────────
 
     def load_inputs(self, params: RunParams | None = None) -> tuple[list[Company], list[Role], Any]:
@@ -147,7 +160,7 @@ class Pipeline:
             self.progress("build", "no active companies or roles — check config/*.csv", 0, 0)
             return 0, {"planned": 0, "capped_to": 0, "errors": len(report.errors)}
 
-        chain = build_chain(self.settings)
+        chain = self.chain()
         provider = chain[0]
         specs, summary = build_all(
             companies,
@@ -174,7 +187,7 @@ class Pipeline:
     def search(self, params: RunParams | None = None, stats: RunStats | None = None) -> RunStats:
         params = params or RunParams()
         stats = stats or RunStats()
-        chain = build_chain(self.settings)
+        chain = self.chain()
         self._prime_credits(chain)
 
         max_results = params.max_results or self.settings.max_results_per_query
@@ -754,7 +767,7 @@ class Pipeline:
         """
         params = params or RunParams()
         companies, roles, report = self.load_inputs(params)
-        chain = build_chain(self.settings)
+        chain = self.chain()
         provider = chain[0]
         specs, summary = build_all(
             companies, roles, self.settings,
