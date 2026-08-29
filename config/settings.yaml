@@ -130,3 +130,18 @@ crm:
 
 retention:
   purge_ignored_after_days: 180
+
+# ── job openings (Phase 2) ──────────────────────────────────────────────
+jobs:
+  # ats_json    structured, keyless, legitimate — but thin motorsport coverage
+  # aggregator  a sitemap + schema.org JobPosting reader, robots-gated
+  # career_page opt-in: highest coverage, lowest yield, fetches arbitrary HTML
+  sources_enabled: [ats_json, aggregator]
+  # Says honestly what this is. If a site refuses it, that is the site's answer;
+  # the adapter records the refusal and yields nothing. Impersonating a browser
+  # to get past it would be working around it — see §2.1 and docs/JOB_SOURCES.md.
+  user_agent: "PitWall/2.0 (personal job-alerting; +robots-compliant)"
+  crawl_delay: 1.0          # floor; a site's own Crawl-delay wins if larger
+  timeout_seconds: 20
+  max_detail_fetches: 40    # per source per poll, so a big sitemap cannot run away
+  close_after_days: 7       # unseen for this long -> status `closed`, never deleted

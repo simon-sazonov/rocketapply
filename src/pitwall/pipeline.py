@@ -71,6 +71,10 @@ class RunStats:
     llm_needs_review: int = 0
     #: Deliberately not sent to the LLM this run — distinct from unfinished.
     llm_triaged: int = 0
+    jobs_seen: int = 0
+    jobs_new: int = 0
+    jobs_closed: int = 0
+    job_sources_failed: int = 0
     llm_tokens_in: int = 0
     llm_tokens_out: int = 0
     cost_estimate: float = 0.0
@@ -114,6 +118,8 @@ class RunParams:
     concurrency: int | None = None
     triage_min_heuristic: float | None = None
     triage_top_n: int | None = None
+    #: Which job-source kinds to poll; None = the configured set.
+    job_kinds: list[str] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1059,6 +1065,115 @@ class Pipeline:
         stats.cost_estimate += scorer.estimated_cost()
         return stats
 
+    # ─────────────────── stage 6: job openings (§2) ────────────────────
+
+    def poll_jobs(self, params: RunParams | None = None, stats: RunStats | None = None) -> RunStats:
+        """Refresh every enabled job source.
+
+        Two rules, both from §2.3:
+
+        * **A failing adapter is non-fatal.** Its `last_status` is recorded on
+          `job_sources` and the run continues. One dead career page must not
+          cost you the postings every other source found.
+        * **A posting that stops appearing is closed, not deleted.** "You missed
+          this one" is history worth keeping, and Appendix C forbids deleting it.
+        """
+        from .sources.jobs import SourceError, build_sources
+
+        params = params or RunParams()
+        stats = stats or RunStats()
+
+        companies = self.repos.companies.all(active_only=True)
+        by_name = {c["name"].casefold(): c for c in companies}
+        sources = build_sources(self.settings, companies, kinds=params.job_kinds)
+        total = len(sources)
+        self.progress("jobs", f"{total} job source(s) to poll", 0, total)
+        if not sources:
+            stats.notes.append(
+                "no job sources configured — run scripts/discover_ats.py, or add "
+                "entries to config/job_sources.yaml"
+            )
+            return stats
+
+        for i, source in enumerate(sources, start=1):
+            if self.cancelled():
+                stats.notes.append("cancelled during job polling")
+                break
+            source_id = self.repos.job_sources.upsert(
+                source.name, source.kind,
+                base_url=getattr(source, "url", None) or getattr(source, "base_url", None),
+                company_id=getattr(source, "company_id", None),
+            )
+            try:
+                postings = source.fetch(no_cache=params.no_cache)
+            except SourceError as exc:
+                log.warning("job source %s failed: %s", source.name, exc)
+                stats.job_sources_failed += 1
+                stats.notes.append(f"{source.name}: {exc}")
+                with self.repos.writing():
+                    self.repos.job_sources.mark_polled(source_id, str(exc))
+                continue
+            except Exception as exc:  # noqa: BLE001 - an adapter must never end the run
+                log.exception("job source %s raised", source.name)
+                stats.job_sources_failed += 1
+                stats.notes.append(f"{source.name}: {type(exc).__name__}: {exc}")
+                with self.repos.writing():
+                    self.repos.job_sources.mark_polled(source_id, f"{type(exc).__name__}: {exc}")
+                continue
+
+            seen: list[int] = []
+            with self.repos.writing():
+                for posting in postings:
+                    company_id = getattr(source, "company_id", None)
+                    if company_id is None:
+                        company_id = self._match_company(posting, by_name)
+                    job_id, is_new = self.repos.jobs.upsert(source_id, posting, company_id)
+                    seen.append(job_id)
+                    stats.jobs_new += int(is_new)
+                    stats.jobs_seen += 1
+                closed = self.repos.jobs.close_missing(source_id, seen)
+                stats.jobs_closed += closed
+                self.repos.job_sources.mark_polled(source_id, "ok")
+            self.progress(
+                "jobs",
+                f"{i}/{total} · {source.name}: {len(postings)} posting(s), "
+                f"{closed} closed",
+                i, total,
+            )
+
+        self.progress(
+            "jobs",
+            f"{stats.jobs_seen} posting(s) · {stats.jobs_new} new · "
+            f"{stats.jobs_closed} closed · {stats.job_sources_failed} source(s) failed",
+            total, total,
+        )
+        return stats
+
+    @staticmethod
+    def _match_company(posting: Any, by_name: dict[str, dict[str, Any]]) -> int | None:
+        """Link a posting to a company row, or leave it unlinked.
+
+        `jobs.company_id` is nullable on purpose: a posting that names a company
+        you do not track is still worth keeping, and guessing wrong is worse
+        than not guessing. Matching is on the canonical name and its aliases
+        only — no fuzzy matching, because a wrong link would put a person from
+        one team next to another team's vacancy.
+        """
+        from .db import loads
+
+        name = (posting.company_name or "").strip().casefold()
+        if not name:
+            return None
+        hit = by_name.get(name)
+        if hit:
+            return int(hit["id"])
+        for row in by_name.values():
+            aliases = row.get("aliases")
+            aliases = aliases if isinstance(aliases, list) else loads(aliases)
+            if any(str(a).strip().casefold() == name for a in aliases):
+                return int(row["id"])
+        return None
+
     # ───────────────────────── full run ───────────────────────────
 
     @contextlib.contextmanager
@@ -1076,6 +1191,10 @@ class Pipeline:
         `failed` row carrying the error, not a row stuck at `running`.
         """
         run_id = self.repos.runs.start(params.as_dict(), command)
+        # Anything still `running` now belongs to a process that is gone.
+        stale = self.repos.runs.reset_stale(before_id=run_id)
+        if stale:
+            log.info("closed %d run row(s) left open by an interrupted process", stale)
         self._run_id = run_id
         stats.run_id = run_id
         started = time.time()

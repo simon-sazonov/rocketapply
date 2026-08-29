@@ -1,0 +1,34 @@
+{
+ "offers": [
+  {
+   "id": 1841234,
+   "title": "Race Strategy Engineer",
+   "slug": "race-strategy-engineer",
+   "status": "published",
+   "employment_type_code": "fulltime",
+   "careers_url": "https://apex.recruitee.com/o/race-strategy-engineer",
+   "careers_apply_url": "https://apex.recruitee.com/o/race-strategy-engineer/c/new",
+   "city": "Vicenza",
+   "state_name": "Veneto",
+   "country": "Italy",
+   "department": "Race Engineering",
+   "company_name": "Apex Racing",
+   "published_at": "2026-08-25T09:12:00.000+02:00",
+   "created_at": "2026-08-24T16:00:00.000+02:00",
+   "description": "<p>Monte Carlo race simulation and in-race calls.</p>"
+  },
+  {
+   "id": 1841235,
+   "title": "Simulation Engineer",
+   "slug": "simulation-engineer",
+   "status": "published",
+   "employment_type_code": "fulltime",
+   "careers_url": "https://apex.recruitee.com/o/simulation-engineer",
+   "city": "Vicenza",
+   "country": "Italy",
+   "company_name": "Apex Racing",
+   "published_at": "2026-07-30T09:00:00.000+02:00",
+   "description": "<p>Driver-in-the-loop simulator development.</p>"
+  }
+ ]
+}

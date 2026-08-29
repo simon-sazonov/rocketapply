@@ -20,7 +20,7 @@ from typing import Any
 
 from .config import Settings, get_settings
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DDL = """
 PRAGMA journal_mode = WAL;
@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS companies (
     linkedin_slug     TEXT,
     domain            TEXT,
     series            TEXT,
+    careers_url       TEXT,            -- §2.2
+    ats_kind          TEXT,            -- greenhouse|lever|ashby|… discovered once
+    ats_token         TEXT,            -- the board slug on that ATS
     country           TEXT,
     tier              INTEGER DEFAULT 2,
     active            INTEGER DEFAULT 1,
@@ -196,6 +199,50 @@ CREATE TABLE IF NOT EXISTS run_progress (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- ─────────────────────────── job openings (§2.2) ───────────────────────
+-- Answers "who do I write to, and why now?" by cross-referencing live postings
+-- against people already in `candidates`.
+CREATE TABLE IF NOT EXISTS job_sources (
+    id             INTEGER PRIMARY KEY,
+    kind           TEXT NOT NULL,          -- ats_json|aggregator|career_page
+    name           TEXT NOT NULL UNIQUE,
+    base_url       TEXT,
+    company_id     INTEGER REFERENCES companies(id) ON DELETE CASCADE,
+    enabled        INTEGER DEFAULT 1,
+    last_polled_at TEXT,
+    last_status    TEXT,                   -- 'ok', 'http 403', 'robots: disallowed'…
+    created_at     TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id               INTEGER PRIMARY KEY,
+    -- Nullable on purpose: a posting may name a company that is not in
+    -- companies.csv, and losing it would be worse than not linking it.
+    company_id       INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+    source_id        INTEGER REFERENCES job_sources(id) ON DELETE CASCADE,
+    external_id      TEXT,
+    title            TEXT NOT NULL,
+    description      TEXT,
+    location         TEXT,
+    employment_type  TEXT,
+    url              TEXT NOT NULL,
+    posted_at        TEXT,
+    first_seen_at    TEXT DEFAULT (datetime('now')),
+    last_seen_at     TEXT DEFAULT (datetime('now')),
+    -- A posting that stops appearing is CLOSED, never deleted: "you missed this
+    -- one" is history worth keeping (§2.2, and Appendix C forbids the deletion).
+    status           TEXT DEFAULT 'open',   -- open|closed|unknown
+    raw_json         TEXT,
+    relevance_score  REAL,
+    relevance_reasons TEXT,                 -- JSON array
+    relevance_model  TEXT,
+    relevance_prompt_version TEXT,
+    UNIQUE(source_id, url)
+);
+CREATE INDEX IF NOT EXISTS ix_jobs_company ON jobs(company_id, status);
+CREATE INDEX IF NOT EXISTS ix_jobs_status  ON jobs(status, posted_at DESC);
+CREATE INDEX IF NOT EXISTS ix_jobs_seen    ON jobs(last_seen_at);
+
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 """
 
@@ -302,14 +349,23 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     """Forward-only migrations, each safe to re-run.
 
     * v1 -> v2 added `search_results.processed`.
-    * v2 -> v3 added `scores.provider` (§0.4) and `runs.command` (§0.5) — the
-      CREATE TABLE above only applies to a fresh database, so an existing 2.0 MB
-      file needs the ALTER.
+    * v2 -> v3 added `scores.provider` (§0.4), `runs.command` (§0.5) and
+      `candidates.template_count` (§1.4).
+    * v3 -> v4 added the `jobs` / `job_sources` tables and three `companies`
+      columns (§2.2).
+
+    `CREATE TABLE IF NOT EXISTS` covers a fresh database; an existing 2.0 MB file
+    only ever needs the ALTERs, which is why each one is guarded rather than
+    versioned. Nothing here drops or rewrites a row.
     """
     _add_column(conn, "search_results", "processed", "INTEGER DEFAULT 0")
     _add_column(conn, "scores", "provider", "TEXT")
     _add_column(conn, "runs", "command", "TEXT")
     _add_column(conn, "candidates", "template_count", "INTEGER DEFAULT 0")
+    # v3 -> v4: job openings. The CREATE TABLEs above are IF NOT EXISTS so a
+    # fresh database gets them for free; only `companies` needs altering.
+    for column in ("careers_url", "ats_kind", "ats_token"):
+        _add_column(conn, "companies", column, "TEXT")
 
 
 def vacuum(conn: sqlite3.Connection) -> None:
@@ -893,6 +949,25 @@ class RunRepo:
         )
         return run_id
 
+    def reset_stale(self, before_id: int | None = None) -> int:
+        """Close run rows left at `running` by a process that never came back.
+
+        A crash, a `kill`, or a laptop lid: SIGTERM does not raise in Python, so
+        `tracked()`'s `finally` never runs and the row stays open for ever. The
+        next run sweeps them, so history shows `interrupted` rather than a
+        handful of jobs that look like they are still going.
+        """
+        sql = (
+            "UPDATE runs SET status = 'interrupted', finished_at = datetime('now'),"
+            " error = COALESCE(error, 'process ended without closing this run')"
+            " WHERE status = 'running'"
+        )
+        args: tuple[Any, ...] = ()
+        if before_id is not None:
+            sql += " AND id < ?"
+            args = (before_id,)
+        return self.conn.execute(sql, args).rowcount or 0
+
     def bump(self, run_id: int, **counters: int | float) -> None:
         if not counters:
             return
@@ -998,6 +1073,166 @@ class QuotaRepo:
         ]
 
 
+class JobSourceRepo:
+    """Where postings come from, and whether that source is healthy (§2.3)."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def upsert(self, name: str, kind: str, base_url: str | None = None,
+               company_id: int | None = None, enabled: bool = True) -> int:
+        self.conn.execute(
+            """
+            INSERT INTO job_sources (name, kind, base_url, company_id, enabled)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(name) DO UPDATE SET
+                kind=excluded.kind, base_url=excluded.base_url,
+                company_id=excluded.company_id, enabled=excluded.enabled
+            """,
+            (name, kind, base_url, company_id, int(enabled)),
+        )
+        row = self.conn.execute("SELECT id FROM job_sources WHERE name = ?", (name,)).fetchone()
+        return int(row["id"])
+
+    def mark_polled(self, source_id: int, status: str) -> None:
+        """A failing adapter is non-fatal — it is recorded and the run goes on."""
+        self.conn.execute(
+            "UPDATE job_sources SET last_polled_at = datetime('now'), last_status = ?"
+            " WHERE id = ?",
+            (status[:200], source_id),
+        )
+
+    def all(self, *, enabled_only: bool = False) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM job_sources"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        return [dict(r) for r in self.conn.execute(sql + " ORDER BY kind, name")]
+
+    def get(self, name: str) -> dict[str, Any] | None:
+        r = self.conn.execute("SELECT * FROM job_sources WHERE name = ?", (name,)).fetchone()
+        return dict(r) if r else None
+
+
+class JobRepo:
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def upsert(self, source_id: int, job: Any, company_id: int | None = None) -> tuple[int, bool]:
+        """Insert or refresh one posting. Returns (job_id, is_new).
+
+        `last_seen_at` is bumped on every sighting; that timestamp plus a status
+        transition is how a closed posting is detected without deleting it.
+        """
+        existing = self.conn.execute(
+            "SELECT id FROM jobs WHERE source_id = ? AND url = ?", (source_id, job.url)
+        ).fetchone()
+        payload = (
+            company_id, source_id, job.external_id, job.title, job.description,
+            job.location, job.employment_type, job.url, job.posted_at,
+            json.dumps(job.raw, ensure_ascii=False, default=str)[:40000],
+        )
+        if existing is None:
+            cur = self.conn.execute(
+                """
+                INSERT INTO jobs (company_id, source_id, external_id, title, description,
+                                  location, employment_type, url, posted_at, raw_json,
+                                  status, first_seen_at, last_seen_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?, 'open', datetime('now'), datetime('now'))
+                """,
+                payload,
+            )
+            return int(cur.lastrowid or 0), True
+        self.conn.execute(
+            """
+            UPDATE jobs
+               SET company_id = COALESCE(?, company_id), title = ?, description = ?,
+                   location = ?, employment_type = ?, posted_at = COALESCE(?, posted_at),
+                   raw_json = ?, status = 'open', last_seen_at = datetime('now')
+             WHERE id = ?
+            """,
+            (company_id, job.title, job.description, job.location, job.employment_type,
+             job.posted_at, json.dumps(job.raw, ensure_ascii=False, default=str)[:40000],
+             existing["id"]),
+        )
+        return int(existing["id"]), False
+
+    def close_missing(self, source_id: int, seen_ids: Sequence[int]) -> int:
+        """Mark postings this source stopped returning as `closed`.
+
+        Not deleted. A vanished posting is the record of an opportunity that has
+        gone, and "you missed this one" is worth more than a tidy table
+        (§2.2; Appendix C forbids deleting job history outright).
+        """
+        keep = ",".join(str(int(i)) for i in seen_ids) or "0"
+        cur = self.conn.execute(
+            f"UPDATE jobs SET status = 'closed' WHERE source_id = ? AND status = 'open'"
+            f" AND id NOT IN ({keep})",
+            (source_id,),
+        )
+        return cur.rowcount or 0
+
+    def open_jobs(self, *, company_id: int | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        sql = """
+            SELECT j.*, c.name AS company_name, s.name AS source_name, s.kind AS source_kind
+              FROM jobs j
+              LEFT JOIN companies c   ON c.id = j.company_id
+              LEFT JOIN job_sources s ON s.id = j.source_id
+             WHERE j.status = 'open'
+        """
+        args: list[Any] = []
+        if company_id is not None:
+            sql += " AND j.company_id = ?"
+            args.append(company_id)
+        sql += " ORDER BY COALESCE(j.posted_at, j.first_seen_at) DESC"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        return [dict(r) for r in self.conn.execute(sql, args)]
+
+    def since(self, iso_timestamp: str) -> list[dict[str, Any]]:
+        """Postings first seen after `iso_timestamp` — the Home "new" panel."""
+        return [
+            dict(r)
+            for r in self.conn.execute(
+                """
+                SELECT j.*, c.name AS company_name
+                  FROM jobs j LEFT JOIN companies c ON c.id = j.company_id
+                 WHERE j.first_seen_at > ? AND j.status = 'open'
+                 ORDER BY j.first_seen_at DESC
+                """,
+                (iso_timestamp,),
+            )
+        ]
+
+    def set_relevance(self, job_id: int, score: float | None, reasons: list[str],
+                      model: str | None, prompt_version: str | None) -> None:
+        self.conn.execute(
+            "UPDATE jobs SET relevance_score = ?, relevance_reasons = ?,"
+            " relevance_model = ?, relevance_prompt_version = ? WHERE id = ?",
+            (score, _dumps(reasons), model, prompt_version, job_id),
+        )
+
+    def awaiting_relevance(self, prompt_version: str, limit: int | None = None) -> list[dict[str, Any]]:
+        sql = """
+            SELECT j.*, c.name AS company_name FROM jobs j
+              LEFT JOIN companies c ON c.id = j.company_id
+             WHERE j.status = 'open'
+               AND (j.relevance_score IS NULL OR j.relevance_prompt_version IS NOT ?)
+             ORDER BY COALESCE(j.posted_at, j.first_seen_at) DESC
+        """
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        return [dict(r) for r in self.conn.execute(sql, (prompt_version,))]
+
+    def counts_by_status(self) -> dict[str, int]:
+        return {
+            r["status"]: r["n"]
+            for r in self.conn.execute("SELECT status, COUNT(*) n FROM jobs GROUP BY status")
+        }
+
+    def count(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) n FROM jobs").fetchone()["n"])
+
+
 # ─────────────────────────── row adapters ───────────────────────────
 
 
@@ -1032,6 +1267,8 @@ class Repos:
         self.crm = CRMRepo(conn)
         self.runs = RunRepo(conn)
         self.quota = QuotaRepo(conn)
+        self.jobs = JobRepo(conn)
+        self.job_sources = JobSourceRepo(conn)
 
     @staticmethod
     def writing() -> Any:

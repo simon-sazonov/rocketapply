@@ -335,3 +335,21 @@ def test_the_stage_counters_land_on_the_run_row(pipeline, repos):
 def test_the_full_run_is_still_labelled_run(pipeline, repos):
     pipeline.run(_params())
     assert repos.runs.latest(1)[0]["command"] == "run"
+
+
+def test_a_run_left_open_by_a_killed_process_is_closed_by_the_next_one(pipeline, repos):
+    """SIGTERM does not raise in Python, so `finally` never runs and the row
+    would stay `running` for ever."""
+    orphan = repos.runs.start({}, "score")
+    assert repos.runs.get(orphan)["status"] == "running"
+
+    stats = RunStats()
+    with pipeline.tracked(_params(), stats, "search"):
+        pass
+
+    closed = repos.runs.get(orphan)
+    assert closed["status"] == "interrupted"
+    assert closed["finished_at"]
+    assert "without closing" in (closed["error"] or "")
+    # and the live run is untouched
+    assert repos.runs.get(stats.run_id)["status"] == "done"

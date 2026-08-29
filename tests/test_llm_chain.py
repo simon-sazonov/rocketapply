@@ -230,8 +230,8 @@ def test_a_spent_daily_cap_moves_down_the_chain(pipe, repos, monkeypatch):
 # ────────────────── the provider column, for auditability ────────────────
 
 
-def test_the_schema_is_at_version_three(repos):
-    assert init_schema(repos.conn) == SCHEMA_VERSION == 3
+def test_the_scores_table_records_which_provider_answered(repos):
+    assert init_schema(repos.conn) == SCHEMA_VERSION
     cols = {r["name"] for r in repos.conn.execute("PRAGMA table_info(scores)")}
     assert "provider" in cols
 

@@ -31,6 +31,7 @@ from pitwall.export import (  # noqa: E402
     filter_frame,
     funnel_counts,
     leads_frame,
+    openings_frame,
     sweep_report,
     zero_result_companies,
 )
@@ -333,6 +334,74 @@ def stats() -> None:
         )
         for z in zeros[:15]:
             console.print(f"  · {z['name']} (tier {z['tier']}, {z['queries']} queries)")
+
+
+@app.command()
+def jobs(
+    kinds: str | None = typer.Option(
+        None, help="comma-separated: ats_json, aggregator, career_page"
+    ),
+    no_cache: bool = typer.Option(False, "--no-cache", help="force a refetch"),
+    verbose: bool = typer.Option(False, "-v", "--verbose"),
+) -> None:
+    """Stage 6 — refresh live job postings from every enabled source (§2)."""
+    settings = _bootstrap(verbose)
+    pipe = Pipeline(settings, on_progress=_progress)
+    params = RunParams(job_kinds=_csv_list(kinds), no_cache=no_cache)
+    stats = RunStats()
+    with pipe.tracked(params, stats, "jobs"):
+        pipe.poll_jobs(params, stats)
+
+    console.print(
+        f"[green]{stats.jobs_seen}[/] posting(s) seen · "
+        f"[green]{stats.jobs_new}[/] new · {stats.jobs_closed} closed · "
+        f"{stats.job_sources_failed} source(s) failed"
+    )
+    counts = pipe.repos.jobs.counts_by_status()
+    console.print("jobs: " + (", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "none"))
+    for note in stats.notes:
+        console.print(f"[yellow]note:[/] {note}")
+
+
+@app.command()
+def openings(
+    company: str | None = typer.Option(None, help="one company name"),
+    top: int = typer.Option(20, help="how many openings to print"),
+    min_score: float = typer.Option(0.0, help="minimum person score to list"),
+) -> None:
+    """The §2.5 payoff: open jobs, and who you already know there."""
+    settings = _bootstrap()
+    repos = open_repos(settings)
+    rows = openings_frame(repos.conn, settings, company=company, min_score=min_score)
+    if not rows:
+        console.print(
+            "[yellow]No open postings yet.[/] Run "
+            "[bold]python scripts/run_pipeline.py jobs[/] first, and see "
+            "config/job_sources.yaml."
+        )
+        raise typer.Exit(1)
+
+    for row in rows[:top]:
+        age = f"{row['age_days']}d ago" if row["age_days"] is not None else "age unknown"
+        console.print(
+            f"\n[bold]{row['title']}[/] — {row['company_name'] or 'unknown company'}"
+            f" · {row['location'] or 'location unknown'} · {age}"
+        )
+        console.print(f"  [dim]{row['url']}[/]")
+        if not row["people"]:
+            console.print("  [dim]nobody in the database at this company yet[/]")
+            continue
+        uncontacted = [p for p in row["people"] if p["status"] in ("new", "saved")]
+        console.print(
+            f"  [green]{len(row['people'])} person/people you already have[/]"
+            + (f", {len(uncontacted)} not contacted" if uncontacted else "")
+        )
+        for person in row["people"][:5]:
+            console.print(
+                f"    · {person['name']} — {person['title'] or '—'} "
+                f"[dim](score {person['score']:.0f} · {person['status']} · "
+                f"{person['proximity']})[/]"
+            )
 
 
 @app.command()

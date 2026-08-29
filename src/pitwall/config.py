@@ -120,6 +120,12 @@ YAML_MAP: dict[str, str] = {
     "crm.default_followup_days": "default_followup_days",
     "crm.hide_ignored_by_default": "hide_ignored_by_default",
     "retention.purge_ignored_after_days": "retention_days",
+    "jobs.sources_enabled": "jobs_sources_enabled",
+    "jobs.user_agent": "jobs_user_agent",
+    "jobs.crawl_delay": "jobs_crawl_delay",
+    "jobs.timeout_seconds": "jobs_timeout_seconds",
+    "jobs.max_detail_fetches": "jobs_max_detail_fetches",
+    "jobs.close_after_days": "jobs_close_after_days",
 }
 
 
@@ -294,6 +300,24 @@ class Settings(BaseSettings):
         }
     )
 
+    # ── job openings (§2) ──
+    #: Which adapters run. `career_page` is off by default: highest coverage,
+    #: lowest yield per unit of effort, and it is the one that fetches arbitrary
+    #: HTML, so it is opt-in.
+    jobs_sources_enabled: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["ats_json", "aggregator"]
+    )
+    #: Says honestly what this is. If a site refuses it, that is an answer, not
+    #: an obstacle — see `sources/jobs/base.py`.
+    jobs_user_agent: str = "PitWall/2.0 (personal job-alerting; +robots-compliant)"
+    #: Floor on the gap between two requests to the same host. `Crawl-delay`
+    #: wins when the site asks for more.
+    jobs_crawl_delay: float = Field(default=1.0, ge=0)
+    jobs_timeout_seconds: float = Field(default=20.0, ge=1)
+    jobs_max_detail_fetches: int = Field(default=40, ge=0)
+    #: Days a posting can go unseen before `status` becomes `closed`.
+    jobs_close_after_days: int = Field(default=7, ge=1)
+
     # ── query budget ──
     max_queries_per_run: int = Field(default=200, ge=1)
     company_tier_weight: float = 3.0
@@ -345,6 +369,20 @@ class Settings(BaseSettings):
                 )
             if not v:
                 raise ValueError("SEARCH_PROVIDERS must list at least one provider")
+        return v
+
+    @field_validator("jobs_sources_enabled", mode="before")
+    @classmethod
+    def _split_job_sources(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = [p.strip() for p in v.split(",") if p.strip()]
+        if isinstance(v, list):
+            allowed = {"ats_json", "aggregator", "career_page"}
+            bad = [p for p in v if p not in allowed]
+            if bad:
+                raise ValueError(
+                    f"unknown job source kind(s) {bad}; allowed: {sorted(allowed)}"
+                )
         return v
 
     @field_validator("llm_provider_chain", mode="before")

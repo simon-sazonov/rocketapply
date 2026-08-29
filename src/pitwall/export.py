@@ -9,7 +9,7 @@ page, Analytics and the exporter all see exactly the same rows.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -295,6 +295,135 @@ def funnel_counts(conn: sqlite3.Connection, settings: Settings | None = None) ->
             settings.band_strong,
         ),
     }
+
+
+def role_family_for(title: str) -> str | None:
+    """Guess a role family from a job title, using the heuristic layer's own
+    keyword table — so a posting and a person are classified the same way."""
+    from .scoring.heuristics import FAMILY_KEYWORDS
+
+    low = " " + (title or "").lower() + " "
+    best: tuple[int, str] | None = None
+    for family, words in FAMILY_KEYWORDS.items():
+        for word in words:
+            if word in low and (best is None or len(word) > best[0]):
+                best = (len(word), family)
+    return best[1] if best else None
+
+
+PROXIMITY_LABELS = {
+    2: "same role family",
+    1: "adjacent family",
+    0: "different discipline",
+}
+
+
+def role_proximity(job_title: str, person_family: str | None, person_title: str | None) -> int:
+    """How close is this person's work to this posting? 2 / 1 / 0.
+
+    Deliberately coarse. The useful signal is "there is someone in that
+    department", not a similarity score — the person is not applying for the
+    job, they are the reason you have something to say about it.
+    """
+    job_family = role_family_for(job_title)
+    if job_family and person_family and job_family == person_family:
+        return 2
+    if job_family and person_title and role_family_for(person_title) == job_family:
+        return 2
+    if job_family and person_family:
+        return 1
+    return 0
+
+
+def openings_frame(
+    conn: sqlite3.Connection,
+    settings: Settings | None = None,
+    *,
+    company: str | None = None,
+    min_score: float = 0.0,
+    prompt_version: str | None = None,
+) -> list[dict[str, Any]]:
+    """**The point of Phase 2** — §2.5: each open posting, and the people you
+    already have at that company, ranked, with their CRM status.
+
+    The sentence this exists to produce is: "Alpine posted a Performance
+    Engineer role 3 days ago — you already have 4 people in that department,
+    none contacted."
+    """
+    settings = settings or get_settings()
+    version = prompt_version or settings.prompt_version
+
+    jobs = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT j.*, c.name AS company_name, s.name AS source_name
+              FROM jobs j
+              LEFT JOIN companies c   ON c.id = j.company_id
+              LEFT JOIN job_sources s ON s.id = j.source_id
+             WHERE j.status = 'open'
+             ORDER BY COALESCE(j.posted_at, j.first_seen_at) DESC
+            """
+        )
+    ]
+    if company:
+        jobs = [j for j in jobs if (j["company_name"] or "").casefold() == company.casefold()]
+    if not jobs:
+        return []
+
+    leads = leads_frame(conn, settings, prompt_version=version)
+    now = datetime.now(UTC)
+
+    out: list[dict[str, Any]] = []
+    for job in jobs:
+        people: list[dict[str, Any]] = []
+        if not leads.empty and job.get("company_id"):
+            same = leads[leads["target_company"] == job["company_name"]]
+            same = same[same["score"].fillna(0.0) >= min_score]
+            if settings.hide_ignored_by_default:
+                same = same[same["status"] != "ignored"]
+            for _, row in same.iterrows():
+                proximity = role_proximity(
+                    job["title"], row.get("role_family"), row.get("title")
+                )
+                people.append({
+                    "candidate_id": int(row["candidate_id"]),
+                    "name": row.get("name") or "—",
+                    "title": row.get("title"),
+                    "score": float(row.get("score") or 0.0),
+                    "status": row.get("status") or "new",
+                    "verdict": row.get("verdict") or "unscored",
+                    "profile_url": row.get("profile_url") or "",
+                    "proximity_rank": proximity,
+                    "proximity": PROXIMITY_LABELS[proximity],
+                })
+            # Closest discipline first, then best-scored — that is the order you
+            # would actually write to them in.
+            people.sort(key=lambda p: (-p["proximity_rank"], -p["score"]))
+
+        posted = job.get("posted_at") or job.get("first_seen_at")
+        age_days = None
+        if posted:
+            try:
+                stamp = datetime.fromisoformat(str(posted))
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=UTC)
+                age_days = max(0, (now - stamp).days)
+            except ValueError:
+                age_days = None
+
+        out.append({
+            **job,
+            "age_days": age_days,
+            "people": people,
+            "people_count": len(people),
+            "uncontacted_count": sum(1 for p in people if p["status"] in ("new", "saved")),
+            "same_family_count": sum(1 for p in people if p["proximity_rank"] == 2),
+        })
+
+    # Postings where you know someone come first — that is the whole ranking.
+    out.sort(key=lambda j: (-j["same_family_count"], -j["people_count"], j["age_days"] or 999))
+    return out
 
 
 def sweep_report(conn: sqlite3.Connection, settings: Settings | None = None) -> dict[str, Any]:
