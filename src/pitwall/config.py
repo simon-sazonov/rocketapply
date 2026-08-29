@@ -21,12 +21,36 @@ from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import AliasChoices, Field, field_validator, model_validator
-from pydantic_settings import (
-    BaseSettings,
-    NoDecode,
-    PydanticBaseSettingsSource,
-    SettingsConfigDict,
-)
+
+try:
+    from pydantic_settings import (
+        BaseSettings,
+        NoDecode,
+        PydanticBaseSettingsSource,
+        SettingsConfigDict,
+    )
+except ImportError as exc:  # pragma: no cover - depends on the interpreter
+    # `NoDecode` first shipped in pydantic-settings 2.7.0. Below that this import
+    # fails with a bare "cannot import name 'NoDecode'", which says nothing about
+    # the actual problem: you are running the wrong interpreter. On this machine
+    # the system `python3` is Anaconda, whose pydantic-settings predates it.
+    import sys as _sys
+
+    try:
+        from importlib.metadata import version as _version
+
+        _found = _version("pydantic-settings")
+    except Exception:  # noqa: BLE001
+        _found = "not installed"
+    raise ImportError(
+        f"pitwall needs pydantic-settings >= 2.7 (found {_found}) — the first "
+        f"release with `NoDecode`.\n"
+        f"  interpreter: {_sys.executable}\n"
+        f"  fix: use the project virtualenv, `.venv/bin/python`, or run "
+        f"`make venv` to create it.\n"
+        f"The system python3 on macOS is often Anaconda's, which ships an older "
+        f"pydantic-settings and cannot import this package."
+    ) from exc
 
 # ─────────────────────────────── paths ────────────────────────────────
 
