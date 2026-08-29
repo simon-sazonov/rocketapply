@@ -33,6 +33,14 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 #: base_url / model / key env per provider (§2.3).
 PROVIDERS: dict[str, dict[str, Any]] = {
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        # Not a constant on purpose — Groq deprecates model IDs on short notice.
+        # `Settings.groq_model` / `LLM_MODEL` is the real source, and
+        # `scripts/setup_groq.py` verifies it against GET /openai/v1/models.
+        "model": "openai/gpt-oss-20b",
+        "key_env": "GROQ_API_KEY",
+    },
     "zai": {
         "base_url": "https://api.z.ai/api/paas/v4",
         "model": "glm-4.7-flash",
@@ -62,6 +70,24 @@ _QUOTA_MARKERS = (
     "429", "quota", "rate limit", "rate_limit", "too many requests",
     "insufficient", "exceeded", "billing",
 )
+
+
+#: Models whose provider will enforce a JSON Schema at the token level. Strict
+#: mode is what removes the `needs_review` failure class almost entirely: the
+#: model is constrained while decoding and *cannot* emit a non-conforming reply,
+#: so the repair ladder below never has to run.
+#:
+#: Verified against console.groq.com/docs/structured-outputs on 29 Aug 2026.
+#: A model missing from this list still gets `{"type": "json_object"}`, which
+#: every OpenAI-compatible provider supports.
+STRICT_JSON_MODELS: frozenset[str] = frozenset(
+    {"openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"}
+)
+
+#: Models that emit a reasoning trace, and therefore accept `reasoning_effort`.
+#: The trace is billed as output and counts against Groq's free 8K tokens/minute,
+#: so for a classification task it is pure cost.
+REASONING_MODELS: tuple[str, ...] = ("openai/gpt-oss-", "qwen/qwen3")
 
 
 class QuotaExhausted(RuntimeError):
@@ -332,6 +358,30 @@ class LLMScorer:
 
     # ── the call ──
 
+    # ── per-model capabilities ──
+
+    def supports_strict_json(self) -> bool:
+        """Can this model be constrained to the schema while decoding?"""
+        return self.model in STRICT_JSON_MODELS
+
+    def is_reasoning_model(self) -> bool:
+        return any(self.model.startswith(prefix) for prefix in REASONING_MODELS)
+
+    def call_kwargs(self) -> dict[str, Any]:
+        """The provider-specific half of the Chat Completions call.
+
+        Everything here is additive and gated on the *model*, so a provider that
+        has never heard of these parameters never sees them — which is what
+        keeps zai, deepseek and ollama byte-identical to v1.
+        """
+        extra: dict[str, Any] = {}
+        if self.is_reasoning_model():
+            extra["reasoning_effort"] = self.settings.llm_reasoning_effort
+            # Groq rejects reasoning_format=raw when JSON mode is on (400), and
+            # `hidden` keeps the trace out of the content we have to parse.
+            extra["extra_body"] = {"reasoning_format": "hidden"}
+        return extra
+
     def _complete(self, messages: list[dict[str, str]]) -> str:
         resp = self.client.chat.completions.create(
             model=self.model,
@@ -339,7 +389,8 @@ class LLMScorer:
             temperature=self.settings.llm_temperature,
             top_p=1,
             max_tokens=self.settings.llm_max_tokens,
-            response_format=response_format(strict=False),
+            response_format=response_format(strict=self.supports_strict_json()),
+            **self.call_kwargs(),
         )
         usage = getattr(resp, "usage", None)
         self.usage.add(
@@ -468,6 +519,42 @@ def parse_num_ctx(parameters: str) -> int | None:
             except ValueError:
                 return None
     return None
+
+
+def list_models(
+    settings: Settings, provider: str = "groq", *, timeout: float = 15.0
+) -> list[str]:
+    """`GET {base_url}/models` — what this key can actually reach today.
+
+    Groq deprecates model IDs on short notice, so nothing in PitWall hardcodes
+    one: `scripts/setup_groq.py` calls this at setup time and checks the
+    configured `LLM_MODEL` against the answer. Every OpenAI-compatible provider
+    serves this endpoint, so it works for zai and deepseek too.
+    """
+    import httpx
+
+    cfg = settings.llm_config(provider)
+    key = cfg.get("api_key") or ""
+    if not key and provider != "ollama":
+        raise LLMUnavailable(
+            f"no API key for {provider!r} — set "
+            f"{PROVIDERS.get(provider, {}).get('key_env', 'the API key')} in .env"
+        )
+    url = f"{str(cfg['base_url']).rstrip('/')}/models"
+    try:
+        resp = httpx.get(url, headers={"Authorization": f"Bearer {key}"}, timeout=timeout)
+    except httpx.HTTPError as exc:
+        raise LLMUnavailable(f"cannot reach {url}: {exc}") from exc
+    if resp.status_code in (401, 403):
+        raise LLMUnavailable(
+            f"{provider} rejected the API key ({resp.status_code}). Check "
+            f"{PROVIDERS.get(provider, {}).get('key_env', 'the key')} in .env."
+        )
+    if resp.status_code >= 400:
+        raise LLMUnavailable(f"{url} returned {resp.status_code}: {resp.text[:200]}")
+    data = resp.json()
+    rows = data.get("data") if isinstance(data, dict) else data
+    return sorted(str(r.get("id")) for r in (rows or []) if isinstance(r, dict) and r.get("id"))
 
 
 def ollama_reachable(base_url: str, timeout: float = 2.0) -> bool:

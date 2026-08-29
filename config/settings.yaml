@@ -63,8 +63,17 @@ llm:
   # A batch of 8 takes ~3.5 min on a local CPU-only 7B model. The cloud
   # providers never come close to this ceiling.
   timeout_seconds: 900
+  # Empty = use each provider's own default model. Groq's catalogue changes
+  # often, so the model is configuration, not a constant. `make groq-check`
+  # lists what your key can reach today and verifies this value exists.
+  model: ""
+  # gpt-oss and Qwen3 on Groq are reasoning models. Reasoning tokens are billed
+  # against the same free-tier budget as the answer, and this is a
+  # rubric-following classification task, not a puzzle.
+  reasoning_effort: low
   # $ per 1M tokens, used for the cost estimate on the Run page
   prices:
+    groq:     { input: 0.0,   output: 0.0 }
     zai:      { input: 0.0,   output: 0.0 }
     deepseek: { input: 0.14,  output: 0.28 }
     ollama:   { input: 0.0,   output: 0.0 }

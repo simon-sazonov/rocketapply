@@ -79,6 +79,8 @@ YAML_MAP: dict[str, str] = {
     "llm.max_tokens": "llm_max_tokens",
     "llm.timeout_seconds": "llm_timeout_seconds",
     "llm.prompt_version": "prompt_version",
+    "llm.model": "llm_model",
+    "llm.reasoning_effort": "llm_reasoning_effort",
     "llm.daily_request_cap": "daily_llm_request_cap",
     "llm.prices": "llm_prices",
     "crm.default_followup_days": "default_followup_days",
@@ -123,7 +125,7 @@ class _YamlSource(PydanticBaseSettingsSource):
 # ───────────────────────────── the model ──────────────────────────────
 
 ProviderName = Literal["ddgs", "serper", "serpapi", "searxng"]
-LLMProviderName = Literal["zai", "deepseek", "ollama", "none"]
+LLMProviderName = Literal["groq", "zai", "deepseek", "ollama", "none"]
 
 
 class Settings(BaseSettings):
@@ -179,8 +181,24 @@ class Settings(BaseSettings):
     serper_reserve_credits: int = Field(default=500, ge=0)
 
     # ── LLM ──
-    llm_provider: LLMProviderName = "zai"
+    llm_provider: LLMProviderName = "groq"
     llm_fallback: LLMProviderName = "ollama"
+    #: Overrides the active provider's model when set. Groq's catalogue changes
+    #: often, so the model is config, never a hardcoded constant: run
+    #: `make groq-check` to list what your key can actually reach today.
+    llm_model: str = ""
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    #: Verified against console.groq.com/docs/models on 29 Aug 2026: a free-plan
+    #: production model, the fastest in the catalogue (~1,000 tok/s), and one of
+    #: the three that support strict structured outputs. This is a classification
+    #: task with all the evidence in the prompt, so the smallest capable model wins.
+    #: `make groq-check` re-verifies it against the live catalogue.
+    groq_model: str = "openai/gpt-oss-20b"
+    #: gpt-oss and Qwen3 on Groq are reasoning models. `low` is the right setting
+    #: for a rubric-following classifier: the reasoning tokens are billed against
+    #: the same 8K/min free-tier budget as the answer.
+    llm_reasoning_effort: Literal["none", "low", "medium", "high"] = "low"
     zai_api_key: str = ""
     zai_base_url: str = "https://api.z.ai/api/paas/v4"
     zai_model: str = "glm-4.7-flash"
@@ -199,6 +217,7 @@ class Settings(BaseSettings):
     daily_llm_request_cap: int = Field(default=900, ge=1)
     llm_prices: Annotated[dict[str, dict[str, float]], NoDecode] = Field(
         default_factory=lambda: {
+            "groq": {"input": 0.0, "output": 0.0},
             "zai": {"input": 0.0, "output": 0.0},
             "deepseek": {"input": 0.14, "output": 0.28},
             "ollama": {"input": 0.0, "output": 0.0},
@@ -344,6 +363,11 @@ class Settings(BaseSettings):
         """base_url / model / api_key for an OpenAI-compatible provider (§5)."""
         provider = provider or self.llm_provider
         table = {
+            "groq": {
+                "base_url": self.groq_base_url,
+                "model": self.groq_model,
+                "api_key": self.groq_api_key,
+            },
             "zai": {
                 "base_url": self.zai_base_url,
                 "model": self.zai_model,
@@ -363,6 +387,8 @@ class Settings(BaseSettings):
         cfg = table.get(provider)
         if cfg is None:
             raise ValueError(f"unknown LLM provider {provider!r}")
+        if self.llm_model:
+            cfg = {**cfg, "model": self.llm_model}
         return {"provider": provider, **cfg}
 
     def band_for(self, score: float) -> str:

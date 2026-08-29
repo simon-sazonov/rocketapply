@@ -98,16 +98,59 @@ SCHEMA_HINT = """{
 }"""
 
 
+#: JSON-Schema keywords that constrained decoding does not accept. They are
+#: assertions about a value, not about its shape, and a token-level constraint
+#: engine cannot express them. Dropping them is safe here because `LLMVerdict`
+#: clamps `score`/`confidence` and truncates `reasons` on the way in anyway.
+_STRICT_UNSUPPORTED = frozenset(
+    {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+     "minItems", "maxItems", "minLength", "maxLength", "pattern", "format",
+     "default", "multipleOf"}
+)
+
+
+def strict_variant(schema: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite a schema for strict/constrained decoding.
+
+    Two rules, both from the providers that implement it (OpenAI, and Groq for
+    `openai/gpt-oss-*`): every property must appear in `required`, and every
+    object must set `additionalProperties: false`. Optional fields stay optional
+    by being nullable, which they already are.
+    """
+    out: dict[str, Any] = {
+        k: v for k, v in schema.items() if k not in _STRICT_UNSUPPORTED
+    }
+    props = out.get("properties")
+    if isinstance(props, dict):
+        out["properties"] = {k: strict_variant(v) for k, v in props.items()}
+        out["required"] = list(props)
+        out["additionalProperties"] = False
+    items = out.get("items")
+    if isinstance(items, dict):
+        out["items"] = strict_variant(items)
+    return out
+
+
+#: The all-required, constraint-free form of BATCH_SCHEMA.
+STRICT_BATCH_SCHEMA: dict[str, Any] = strict_variant(BATCH_SCHEMA)
+
+
 def response_format(strict: bool = False) -> dict[str, Any]:
     """`response_format` for the Chat Completions call.
 
     Plain `json_object` by default — it is what every OpenAI-compatible free
-    tier supports. `strict=True` upgrades to a full json_schema for providers
-    that accept it.
+    tier supports. `strict=True` upgrades to a full json_schema with constrained
+    decoding, which is what removes the `needs_review` failure class: the model
+    is constrained at the token level and cannot emit a non-conforming reply.
+    Only some models support it; see `pitwall.scoring.llm.STRICT_JSON_MODELS`.
     """
     if not strict:
         return {"type": "json_object"}
     return {
         "type": "json_schema",
-        "json_schema": {"name": "pitwall_batch", "strict": True, "schema": BATCH_SCHEMA},
+        "json_schema": {
+            "name": "pitwall_batch",
+            "strict": True,
+            "schema": STRICT_BATCH_SCHEMA,
+        },
     }

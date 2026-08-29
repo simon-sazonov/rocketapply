@@ -1,0 +1,32 @@
+{
+  "id": "chatcmpl-7c1e0f2a-0a3f-4a6e-9a1d-2b7f0c5e11aa",
+  "object": "chat.completion",
+  "created": 1756400000,
+  "model": "openai/gpt-oss-20b",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"results\": [{\"candidate_id\": 1, \"is_person_profile\": true, \"full_name\": \"Jane Doe\", \"current_company\": \"McLaren Racing\", \"current_title\": \"Senior Data Scientist\", \"is_current_employee\": true, \"company_match\": \"exact\", \"role_match\": \"exact\", \"seniority\": \"senior\", \"motorsport_experience\": true, \"score\": 91, \"confidence\": 0.88, \"reasons\": [\"Title reads 'Senior Data Scientist - McLaren Racing'\"], \"red_flags\": []}, {\"candidate_id\": 2, \"is_person_profile\": true, \"full_name\": \"David Brooks\", \"current_company\": \"McLaren Health Care\", \"current_title\": \"Data Analyst\", \"is_current_employee\": false, \"company_match\": \"same_name_different_org\", \"role_match\": \"adjacent\", \"seniority\": \"mid\", \"motorsport_experience\": false, \"score\": 4, \"confidence\": 0.93, \"reasons\": [\"'McLaren Health Care, Macomb, Michigan' is a hospital group\"], \"red_flags\": [\"wrong McLaren\"]}]}",
+        "reasoning": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "queue_time": 0.019,
+    "prompt_tokens": 1832,
+    "prompt_time": 0.061,
+    "completion_tokens": 412,
+    "completion_time": 0.29,
+    "total_tokens": 2244,
+    "total_time": 0.351
+  },
+  "usage_breakdown": null,
+  "system_fingerprint": "fp_ab1c2d3e4f",
+  "x_groq": {
+    "id": "req_01k3n8pitwall0000000000"
+  }
+}
