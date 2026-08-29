@@ -63,6 +63,18 @@ scoring:
     same_name_different_org: 0.10
     role_unrelated: 0.40
     low_confidence: 0.80
+  # §1.4 corroboration, per EXTRA source beyond the first, capped.
+  # 285 of 384 people in the real database were found by exactly one query, so
+  # multi-source agreement is a strong and currently unused signal. Both are 0
+  # on purpose: the right weight is whatever the re-labelled eval set says, and
+  # §1.3's provenance guard applies here too. Measure with
+  #     python scripts/eval_scoring.py corroboration --path <labelled worksheet>
+  # then set them and record the before/after numbers.
+  corroboration:
+    per_query: 0
+    per_template: 0
+    max: 12
+
   bands:
     strong: 75
     possible: 55

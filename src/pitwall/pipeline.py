@@ -464,6 +464,7 @@ class Pipeline:
                 serp_snippet=ctx["serp_snippet"],
                 markers=self.markers,
                 allow_recruiters=allow_recruiters,
+                weights=self.settings.corroboration_weights(),
             )
             passed = heuristics.passes(result, threshold)
 

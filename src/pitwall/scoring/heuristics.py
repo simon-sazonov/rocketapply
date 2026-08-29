@@ -64,6 +64,21 @@ P_STUDENT = -12.0
 
 EVIDENCE_BONUS_AT = 3
 
+#: §1.4 corroboration. 285 of 384 candidates in the real database were surfaced
+#: by exactly one query, so multi-query agreement is a strong and currently
+#: unused quality signal.
+#:
+#: Both weights default to **0.0** and the brief is the reason: "do not guess the
+#: weight". They are per-extra-source bonuses, and the right value is whatever
+#: the re-labelled eval set says it is —
+#:     python scripts/eval_scoring.py corroboration --path <labelled worksheet>
+#: prints precision/recall/F1 across a grid. Until that has been run against
+#: SearXNG SERP shapes (§1.3), leaving these at zero keeps the scoring rubric
+#: byte-identical to v1's, which is the guard rail the 260 tests enforce.
+W_CORROBORATION_QUERY = 0.0
+W_CORROBORATION_TEMPLATE = 0.0
+W_CORROBORATION_MAX = 12.0
+
 #: Words that identify a role family inside a job title.
 FAMILY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "data_science": (
@@ -175,12 +190,17 @@ def score_candidate(
     serp_snippet: str | None = None,
     markers: dict[str, Any] | None = None,
     allow_recruiters: bool = False,
+    weights: dict[str, float] | None = None,
 ) -> HeuristicResult:
     """Score one candidate against one company×role pair.
 
     `serp_title` / `serp_snippet` should be the **raw** SERP strings when
     available — the parsed fields are used as a fallback so the function still
     works on a candidate row alone.
+
+    `weights` overrides the §1.4 corroboration bonuses for one call, which is
+    how `scripts/eval_scoring.py corroboration` sweeps them without mutating
+    module state.
     """
     markers = markers or {}
     past_markers = tuple(markers.get("past_tense_markers") or DEFAULT_PAST_TENSE)
@@ -288,6 +308,25 @@ def score_candidate(
     if evidence >= EVIDENCE_BONUS_AT:
         score += W_EVIDENCE
         reasons.append(f"+{W_EVIDENCE:.0f} surfaced by {evidence} distinct queries")
+
+    # The graded version of the same idea (§1.4): the step above is all-or-nothing
+    # at three queries, this scales with how much independent agreement there is.
+    # Zero-weighted until the eval set says otherwise.
+    templates = int(candidate.get("template_count") or 0)
+    w_query = W_CORROBORATION_QUERY if weights is None else weights.get("query", 0.0)
+    w_template = W_CORROBORATION_TEMPLATE if weights is None else weights.get("template", 0.0)
+    cap = W_CORROBORATION_MAX if weights is None else weights.get("max", W_CORROBORATION_MAX)
+    if (w_query or w_template) and (evidence > 1 or templates > 1):
+        bonus = min(
+            cap,
+            w_query * max(0, evidence - 1) + w_template * max(0, templates - 1),
+        )
+        if bonus:
+            score += bonus
+            reasons.append(
+                f"+{bonus:.1f} corroborated by {evidence} queries "
+                f"across {templates} template(s)"
+            )
 
     # ── negatives ──
     negatives = list(company.negative_keywords) if company else []

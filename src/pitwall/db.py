@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     current_company   TEXT,
     location          TEXT,
     evidence_count    INTEGER DEFAULT 0,      -- distinct queries that surfaced them
+    template_count    INTEGER DEFAULT 0,      -- distinct query TEMPLATES (§1.4)
     first_seen_at     TEXT DEFAULT (datetime('now')),
     last_seen_at      TEXT DEFAULT (datetime('now'))
 );
@@ -308,6 +309,7 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     _add_column(conn, "search_results", "processed", "INTEGER DEFAULT 0")
     _add_column(conn, "scores", "provider", "TEXT")
     _add_column(conn, "runs", "command", "TEXT")
+    _add_column(conn, "candidates", "template_count", "INTEGER DEFAULT 0")
 
 
 def vacuum(conn: sqlite3.Connection) -> None:
@@ -659,18 +661,29 @@ class CandidateRepo:
         return bool(cur.rowcount)
 
     def refresh_evidence_count(self, candidate_id: int) -> int:
-        """evidence_count = number of DISTINCT queries that surfaced this person."""
-        n = self.conn.execute(
+        """How many distinct queries — and distinct TEMPLATES — surfaced this person.
+
+        The two are different signals. Two near-identical queries finding the
+        same profile says little; `profile_exact` and `github_discovery` both
+        finding them is real corroboration, because the two look at different
+        corners of the web (§1.4).
+        """
+        row = self.conn.execute(
             """
-            SELECT COUNT(DISTINCT sr.query_id) AS n
+            SELECT COUNT(DISTINCT sr.query_id)   AS queries,
+                   COUNT(DISTINCT q.template_id) AS templates
               FROM candidate_sources cs
               JOIN search_results sr ON sr.id = cs.search_result_id
+              LEFT JOIN queries q    ON q.id = sr.query_id
              WHERE cs.candidate_id = ?
             """,
             (candidate_id,),
-        ).fetchone()["n"]
-        self.conn.execute("UPDATE candidates SET evidence_count = ? WHERE id = ?", (n, candidate_id))
-        return int(n)
+        ).fetchone()
+        self.conn.execute(
+            "UPDATE candidates SET evidence_count = ?, template_count = ? WHERE id = ?",
+            (row["queries"], row["templates"], candidate_id),
+        )
+        return int(row["queries"])
 
     def evidence(self, candidate_id: int) -> list[dict[str, Any]]:
         return [

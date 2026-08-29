@@ -47,7 +47,7 @@ EVAL_COLUMNS = [
     "candidate_id", "full_name", "serp_title", "serp_snippet", "profile_url",
     "target_company", "company_aliases", "company_negatives",
     "target_role", "role_aliases", "role_family", "role_seniority", "role_keywords",
-    "location", "evidence_count",
+    "location", "evidence_count", "template_count",
     # Provenance (§1.3). SearXNG returns a different snippet shape from `ddgs`,
     # so a label collected on one does not transfer to the other and a threshold
     # swept against the wrong provider is a number about a world that no longer
@@ -157,6 +157,7 @@ def _candidate(row: dict[str, str]) -> dict[str, object]:
         "headline": row.get("serp_snippet", ""),
         "location": row.get("location") or None,
         "evidence_count": int(row.get("evidence_count") or 0),
+        "template_count": int(row.get("template_count") or 0),
         "current_company": "",
     }
 
@@ -187,7 +188,8 @@ def bootstrap(
         for r in repos.conn.execute(
             f"""
             SELECT c.id AS candidate_id, c.full_name, c.profile_url, c.location,
-                   c.evidence_count, sr.title AS serp_title, sr.snippet AS serp_snippet,
+                   c.evidence_count, c.template_count,
+                   sr.title AS serp_title, sr.snippet AS serp_snippet,
                    sr.provider AS serp_provider,
                    co.name AS target_company, co.aliases AS company_aliases,
                    co.negative_keywords AS company_negatives,
@@ -534,6 +536,102 @@ def sweep(
         f"Currently configured: {settings.heuristic_threshold:g}.\n"
         f"[dim]Record the before/after precision and recall in config/settings.yaml "
         f"alongside the value — a threshold with no numbers next to it is a guess.[/]"
+    )
+
+
+@app.command()
+def corroboration(
+    path: Path = typer.Option(EVAL_CSV, help="the labelled eval set"),
+    per_query: str = typer.Option("0,1,2,3,4", help="comma-separated bonuses per extra query"),
+    per_template: str = typer.Option("0,2,4,6", help="comma-separated bonuses per extra template"),
+    threshold: float | None = typer.Option(None, help="heuristic threshold to hold fixed"),
+) -> None:
+    """Measure the §1.4 corroboration bonus instead of guessing it.
+
+    285 of 384 people in the real database were surfaced by exactly one query,
+    so agreement across queries — and especially across *templates*, which look
+    at different corners of the web — is a strong unused signal. What it is
+    worth in points is an empirical question, and this is how it gets answered.
+
+    Read the table the same way as `sweep`: the recall floor is 0.90, and among
+    the settings that clear it, more precision for the same recall is the win.
+    """
+    settings = get_settings()
+    rows = _load_eval(path)
+    stale = _warn_if_stale(rows, settings)
+    thr = threshold if threshold is not None else settings.heuristic_threshold
+
+    corroborated = sum(
+        1 for r in rows
+        if int(r.get("evidence_count") or 0) > 1 or int(r.get("template_count") or 0) > 1
+    )
+    if not corroborated:
+        console.print(
+            "[red]No row in this eval set has more than one source.[/] The bonus "
+            "cannot be measured against it — draft a worksheet from a sweep wide "
+            "enough that the same person is found twice."
+        )
+        raise typer.Exit(1)
+    console.print(
+        f"{corroborated} of {len(rows)} labelled rows have more than one source "
+        f"(threshold held at {thr:g})"
+    )
+
+    table = Table(title="corroboration bonus sweep")
+    for column in ("per query", "per template", "precision", "recall", "F1", "kept"):
+        table.add_column(column, justify="right")
+
+    best: tuple[float, float, float] | None = None   # (f1, precision, ...)
+    rowset = []
+    for q_raw in per_query.split(","):
+        for t_raw in per_template.split(","):
+            wq, wt = float(q_raw), float(t_raw)
+            m = Metrics()
+            kept = 0
+            for row in rows:
+                result = score_candidate(
+                    _candidate(row), _company(row), _role(row),
+                    serp_title=row.get("serp_title", ""),
+                    serp_snippet=row.get("serp_snippet", ""),
+                    weights={"query": wq, "template": wt,
+                             "max": settings.corroboration_max},
+                )
+                predicted = passes(result, thr)
+                kept += int(predicted)
+                m.add(predicted, _truth(row))
+            safe = m.recall >= 0.90
+            style = "[green]" if safe else "[red]"
+            table.add_row(
+                f"{wq:g}", f"{wt:g}", f"{m.precision:.2f}",
+                f"{style}{m.recall:.2f}", f"{m.f1:.2f}", str(kept),
+            )
+            rowset.append((wq, wt, m.precision, m.recall, m.f1))
+    console.print(table)
+
+    safe_rows = [r for r in rowset if r[3] >= 0.90]
+    if not safe_rows:
+        console.print("[red]nothing in this grid clears the 0.90 recall floor[/]")
+        return
+    baseline = next((r for r in rowset if r[0] == 0 and r[1] == 0), None)
+    best = max(safe_rows, key=lambda r: (r[4], r[2]))
+    if baseline and best[4] <= baseline[4] + 0.005:
+        console.print(
+            "[yellow]No corroboration weight beats the zero baseline on this set.[/] "
+            "Leave scoring.corroboration at 0 — that is a result, not a failure."
+        )
+        return
+    if stale:
+        console.print(
+            f"[red]Not recommending a weight.[/] These labels were collected on "
+            f"`{stale[0]}` and the active provider is `{stale[1]}` — see §1.3."
+        )
+        return
+    console.print(
+        f"[green]Best: per_query = {best[0]:g}, per_template = {best[1]:g}[/] "
+        f"(precision {best[2]:.2f}, recall {best[3]:.2f}, F1 {best[4]:.2f}"
+        + (f" vs F1 {baseline[4]:.2f} at zero)" if baseline else ")")
+        + "\nSet it in config/settings.yaml under scoring.corroboration and record "
+        "these numbers next to it."
     )
 
 

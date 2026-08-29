@@ -96,6 +96,9 @@ YAML_MAP: dict[str, str] = {
     "scoring.penalties.same_name_different_org": "penalty_same_name_different_org",
     "scoring.penalties.role_unrelated": "penalty_role_unrelated",
     "scoring.penalties.low_confidence": "penalty_low_confidence",
+    "scoring.corroboration.per_query": "corroboration_query_bonus",
+    "scoring.corroboration.per_template": "corroboration_template_bonus",
+    "scoring.corroboration.max": "corroboration_max",
     "scoring.bands.strong": "band_strong",
     "scoring.bands.possible": "band_possible",
     "scoring.bands.weak": "band_weak",
@@ -294,6 +297,13 @@ class Settings(BaseSettings):
     penalty_same_name_different_org: float = Field(default=0.10, ge=0, le=1)
     penalty_role_unrelated: float = Field(default=0.40, ge=0, le=1)
     penalty_low_confidence: float = Field(default=0.80, ge=0, le=1)
+    #: §1.4 corroboration, per extra corroborating source, capped. Both zero
+    #: until the re-labelled eval set says what they should be — see
+    #: `scripts/eval_scoring.py corroboration`.
+    corroboration_query_bonus: float = Field(default=0.0, ge=0, le=20)
+    corroboration_template_bonus: float = Field(default=0.0, ge=0, le=20)
+    corroboration_max: float = Field(default=12.0, ge=0, le=50)
+
     band_strong: float = 75.0
     band_possible: float = 55.0
     band_weak: float = 35.0
@@ -462,6 +472,13 @@ class Settings(BaseSettings):
         if self.llm_model:
             cfg = {**cfg, "model": self.llm_model}
         return {"provider": provider, **cfg}
+
+    def corroboration_weights(self) -> dict[str, float]:
+        return {
+            "query": self.corroboration_query_bonus,
+            "template": self.corroboration_template_bonus,
+            "max": self.corroboration_max,
+        }
 
     def llm_chain(self) -> list[str]:
         """The ordered providers to try, most preferred first.
