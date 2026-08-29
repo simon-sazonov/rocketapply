@@ -131,12 +131,32 @@ def test_rows_without_a_url_are_skipped(provider, monkeypatch):
 # ────────────────── unresponsive engines are NOT zero results ──────────────
 
 
-def test_a_blocked_engine_raises_instead_of_reporting_zero_results(provider, monkeypatch):
+def test_a_blocked_engine_raises_instead_of_reporting_zero_results(settings, monkeypatch):
     """HTTP 200 + empty results + unresponsive_engines == captcha, not emptiness."""
+    settings.searxng_engines = []          # no narrowing, so one request per attempt
+    provider = SearxngProvider(settings)
     install(monkeypatch, *[FakeResponse(BLOCKED) for _ in range(ATTEMPTS)])
     with pytest.raises(RateLimited) as exc:
         provider.search("x")
     assert "google" in str(exc.value) and "bing" in str(exc.value)
+
+
+def test_a_dead_engine_group_widens_before_giving_up(provider, monkeypatch):
+    """A captcha'd group and a group this instance does not have look identical
+    from here, and the remedy is the same: ask the full default set once."""
+    calls = install(monkeypatch, FakeResponse(BLOCKED), FakeResponse(PREMA))
+    hits = provider.search("x")
+    assert len(calls) == 2
+    assert "engines" in calls[0]["params"]
+    assert "engines" not in calls[1]["params"]
+    assert len(hits) == len(PREMA["results"])
+
+
+def test_a_blocked_narrowed_group_still_raises_when_widening_fails(provider, monkeypatch):
+    # narrow + widened, three times over
+    install(monkeypatch, *[FakeResponse(BLOCKED) for _ in range(ATTEMPTS * 2)])
+    with pytest.raises(RateLimited):
+        provider.search("x")
 
 
 def test_partial_engine_failure_still_returns_the_rows_it_got(provider, monkeypatch):
@@ -185,6 +205,22 @@ def test_no_engine_parameter_when_rotation_is_disabled(settings, monkeypatch):
     calls = install(monkeypatch, FakeResponse(PREMA))
     provider.search("x")
     assert "engines" not in calls[0]["params"]
+    assert calls[0]["params"]["categories"] == "general"
+
+
+def test_engines_and_categories_are_never_sent_together(settings, monkeypatch):
+    """SearXNG UNIONS the two (searx/webadapter.py::parse_generic).
+
+    Sending both runs every general engine on every query and makes the rotation
+    a silent no-op — which is what it did until it was measured against a live
+    container.
+    """
+    settings.searxng_engines = ["bing"]
+    provider = SearxngProvider(settings)
+    calls = install(monkeypatch, FakeResponse(PREMA))
+    provider.search("x")
+    assert calls[0]["params"]["engines"] == "bing"
+    assert "categories" not in calls[0]["params"]
 
 
 def test_engine_groups_survive_the_env_csv_form(settings):

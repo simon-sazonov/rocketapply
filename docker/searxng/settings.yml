@@ -34,6 +34,18 @@ search:
   formats:
     - html
     - json
+  # Upstream suspends an engine for a FULL DAY after one captcha (86400s) and a
+  # week after a recaptcha. That is sized for a public instance serving
+  # strangers; on a personal 1 q/s sweep it means a single blip costs a day of
+  # coverage from your best engine. An hour is long enough to stop hammering a
+  # blocked engine and short enough that the next session gets it back.
+  suspended_times:
+    SearxEngineCaptcha: 3600
+    SearxEngineAccessDenied: 3600
+    SearxEngineTooManyRequests: 900
+    cf_SearxEngineCaptcha: 3600
+    cf_SearxEngineAccessDenied: 3600
+    recaptcha_SearxEngineCaptcha: 3600
 
 server:
   port: 8080

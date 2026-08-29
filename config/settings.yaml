@@ -20,7 +20,7 @@ search:
   # upstream SearXNG ships both disabled. Leave empty to use whatever the
   # instance itself considers its default general engines.
   # (quoted: each list item is one comma-separated GROUP, not one engine)
-  searxng_engines: ["google,duckduckgo", "bing,startpage", "brave,duckduckgo"]
+  searxng_engines: ["google,duckduckgo", "bing,startpage", "brave,mojeek,qwant"]
   serper_credits: 2500          # tracked down to 0, then the provider disables itself
   # One-time credits that never refill: below this floor the chain stops
   # reaching for serper by itself. `--use-serper` overrides it for one run.

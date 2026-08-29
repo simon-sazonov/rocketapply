@@ -63,6 +63,15 @@ _reach_cache: dict[str, tuple[float, bool]] = {}
 _reach_lock = threading.Lock()
 
 
+def _engine_names(unresponsive: list) -> str:
+    """`[["google", "CAPTCHA", true], …]` -> `"bing, google"`."""
+    names = {
+        str(row[0]) if isinstance(row, list | tuple) and row else str(row)
+        for row in unresponsive
+    }
+    return ", ".join(sorted(names))
+
+
 def reset_reachability_cache() -> None:
     """Test helper — forget every memoised probe."""
     with _reach_lock:
@@ -134,26 +143,32 @@ class SearxngProvider:
     ) -> list[SearchHit]:
         engines = self.next_engine_group()
         hits, dead = self._request(query, max_results=max_results, region=region, engines=engines)
-
         if hits:
             return hits
 
-        # Empty + engines complained = blocked upstream, not "no such people".
-        # Raising is what makes tenacity back off and the chain fall through;
-        # returning [] here would write a false negative into the database.
+        # Zero results on a narrowed engine set means one of two things and we
+        # cannot tell which from here: the group is captcha'd, or it is not
+        # enabled on this instance. Either way the answer is the same — widen to
+        # whatever the instance itself considers its general engines and ask
+        # once more, before drawing any conclusion about the query.
+        if engines:
+            log.info(
+                "searxng: 0 results on engines=%s (%d unresponsive) — widening to the "
+                "instance defaults", engines, len(dead),
+            )
+            hits, dead = self._request(query, max_results=max_results, region=region, engines=None)
+            if hits:
+                return hits
+
+        # Still nothing, and the engines said why: blocked upstream, not "no
+        # such people". Raising is what makes tenacity back off and lets the
+        # chain fall through; returning [] would write a false negative into the
+        # database that is indistinguishable from a company nobody works for.
         if dead:
-            names = ", ".join(sorted({str(d[0]) if isinstance(d, list | tuple) else str(d) for d in dead}))
+            names = _engine_names(dead)
             log.warning("searxng: no results and %d unresponsive engine(s): %s", len(dead), names)
             raise RateLimited(f"searxng upstream engines unresponsive: {names}")
 
-        # Empty, nothing complained, and we had narrowed the engine set: the
-        # group may simply not be enabled on this instance. Ask once more with
-        # the instance's own defaults before believing the zero.
-        if engines:
-            log.info("searxng: 0 results on engines=%s — retrying with the instance defaults", engines)
-            hits, dead = self._request(query, max_results=max_results, region=region, engines=None)
-            if not hits and dead:
-                raise RateLimited("searxng upstream engines unresponsive on the default set")
         return hits
 
     def _request(
@@ -166,10 +181,16 @@ class SearxngProvider:
             "format": "json",
             "language": _REGION_TO_LANG.get(region, "en-GB"),
             "safesearch": "0",
-            "categories": "general",
         }
+        # `engines` and `categories` are a UNION, not an intersection
+        # (searx/webadapter.py::parse_generic). Sending both would quietly run
+        # every general engine on every query and make the rotation a no-op —
+        # which is exactly what it did until this was measured against a live
+        # container. Send one or the other, never both.
         if engines:
             params["engines"] = engines
+        else:
+            params["categories"] = "general"
         try:
             resp = httpx.get(
                 f"{self.base_url}/search",

@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     #: absorbs the whole sweep and starts answering captchas. Empty = let the
     #: instance pick, which is the right setting for a SearXNG you do not own.
     searxng_engines: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["google,duckduckgo", "bing,startpage", "brave,duckduckgo"]
+        default_factory=lambda: ["google,duckduckgo", "bing,startpage", "brave,mojeek,qwant"]
     )
     searxng_timeout_seconds: float = Field(default=30.0, ge=1)
     region: str = "uk-en"

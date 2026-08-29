@@ -57,10 +57,29 @@ Three defences, all on by default:
 
 Upstream SearXNG ships `google` and `bing` **disabled**. [`settings.yml`](settings.yml)
 turns them back on, because they are the two that handle
-`site:linkedin.com/in "…"` best. If you point `SEARXNG_BASE_URL` at an instance you
-do not control, clear `search.searxng_engines` so the adapter uses whatever that
-instance considers its defaults — otherwise you are asking for engines it may not
-have, and the adapter has to spend an extra request discovering that.
+`site:linkedin.com/in "…"` best. The instance's own live list is at
+`http://localhost:8888/config` — that, not this file, is the authority on which
+engine names `search.searxng_engines` may use.
+
+### What this actually looks like in practice
+
+Measured against a fresh container on 29 Aug 2026, from a home connection:
+
+- the operator query returned **30 results, 20 of them `linkedin.com/in` profile
+  URLs** — the capability `ddgs` does not have, working;
+- but within a handful of queries `google`, `duckduckgo`, `startpage`, `brave`,
+  `qwant` and `mojeek` all answered with captchas or `access denied`, leaving
+  `bing`.
+
+That is normal and it is why the adapter is built the way it is. Expect a good
+first pass, a thinner second one, and recovery after an hour. Two knobs matter
+when it happens: lower `search.searxng_queries_per_second`, and check that
+`search.suspended_times` in [`settings.yml`](settings.yml) is still overriding
+upstream's 24-hour captcha ban with the one-hour value.
+
+If you point `SEARXNG_BASE_URL` at an instance you do not control, clear
+`search.searxng_engines` so the adapter uses whatever that instance considers its
+defaults — otherwise every query pays an extra widening request.
 
 ## No Docker?
 
