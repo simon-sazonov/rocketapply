@@ -1,0 +1,182 @@
+{
+  "query": "site:linkedin.com/in \"race engineer\" \"PREMA\"",
+  "number_of_results": 0,
+  "results": [
+    {
+      "url": "https://www.linkedin.com/in/elena-marchetti-race/",
+      "title": "Elena Marchetti - Race Engineer - PREMA Racing | LinkedIn",
+      "content": "Race Engineer at PREMA Racing · Experience: PREMA Racing · Education: Politecnico di Milano · Location: Vicenza · 500+ connections on LinkedIn.",
+      "publishedDate": null,
+      "thumbnail": null,
+      "engine": "google",
+      "template": "default.html",
+      "parsed_url": [
+        "https",
+        "www.linkedin.com",
+        "/in/elena-marchetti-race/",
+        "",
+        "",
+        ""
+      ],
+      "img_src": "",
+      "priority": "",
+      "engines": [
+        "google",
+        "bing"
+      ],
+      "positions": [
+        1,
+        1
+      ],
+      "score": 6.0,
+      "category": "general"
+    },
+    {
+      "url": "https://www.linkedin.com/in/tomas-lindqvist-motorsport/",
+      "title": "Tomas Lindqvist - Performance Engineer at PREMA Powerteam - LinkedIn",
+      "content": "Performance Engineer at PREMA Powerteam. Formula 2 and Formula 3 programmes. Location: Padova, Veneto, Italy.",
+      "publishedDate": null,
+      "thumbnail": null,
+      "engine": "google",
+      "template": "default.html",
+      "parsed_url": [
+        "https",
+        "www.linkedin.com",
+        "/in/tomas-lindqvist-motorsport/",
+        "",
+        "",
+        ""
+      ],
+      "img_src": "",
+      "priority": "",
+      "engines": [
+        "google"
+      ],
+      "positions": [
+        2
+      ],
+      "score": 3.5,
+      "category": "general"
+    },
+    {
+      "url": "https://www.linkedin.com/in/priya-raghavan-data/",
+      "title": "Priya Raghavan – Senior Race Engineer – PREMA Racing | LinkedIn",
+      "content": "Senior Race Engineer at PREMA Racing · Previously Trackside Data Engineer at Carlin. Location: Vicenza, Italy.",
+      "publishedDate": null,
+      "thumbnail": null,
+      "engine": "bing",
+      "template": "default.html",
+      "parsed_url": [
+        "https",
+        "www.linkedin.com",
+        "/in/priya-raghavan-data/",
+        "",
+        "",
+        ""
+      ],
+      "img_src": "",
+      "priority": "",
+      "engines": [
+        "bing",
+        "startpage"
+      ],
+      "positions": [
+        3,
+        2
+      ],
+      "score": 3.0,
+      "category": "general"
+    },
+    {
+      "url": "https://www.linkedin.com/in/marc-devries-eng/",
+      "title": "Marc de Vries - Former Race Engineer at PREMA Racing | LinkedIn",
+      "content": "Ex-Race Engineer at PREMA Racing (2019-2023). Now Vehicle Dynamics Engineer at an OEM. Location: Eindhoven.",
+      "publishedDate": null,
+      "thumbnail": null,
+      "engine": "google",
+      "template": "default.html",
+      "parsed_url": [
+        "https",
+        "www.linkedin.com",
+        "/in/marc-devries-eng/",
+        "",
+        "",
+        ""
+      ],
+      "img_src": "",
+      "priority": "",
+      "engines": [
+        "google"
+      ],
+      "positions": [
+        4
+      ],
+      "score": 2.0,
+      "category": "general"
+    },
+    {
+      "url": "https://www.linkedin.com/company/prema-racing/",
+      "title": "PREMA Racing | LinkedIn",
+      "content": "PREMA Racing | 24,801 followers on LinkedIn. Motorsport team competing in Formula 2, Formula 3 and WEC.",
+      "publishedDate": null,
+      "thumbnail": null,
+      "engine": "google",
+      "template": "default.html",
+      "parsed_url": [
+        "https",
+        "www.linkedin.com",
+        "/company/prema-racing/",
+        "",
+        "",
+        ""
+      ],
+      "img_src": "",
+      "priority": "",
+      "engines": [
+        "google",
+        "bing"
+      ],
+      "positions": [
+        5,
+        4
+      ],
+      "score": 2.5,
+      "category": "general"
+    },
+    {
+      "url": "https://www.linkedin.com/in/samuel-okonkwo-strategy/",
+      "title": "Samuel Okonkwo - Race Strategy Engineer - PREMA Racing",
+      "content": "Race Strategy Engineer at PREMA Racing. Monte Carlo simulation, tyre degradation modelling. Location: Vicenza, Italy.",
+      "publishedDate": null,
+      "thumbnail": null,
+      "engine": "startpage",
+      "template": "default.html",
+      "parsed_url": [
+        "https",
+        "www.linkedin.com",
+        "/in/samuel-okonkwo-strategy/",
+        "",
+        "",
+        ""
+      ],
+      "img_src": "",
+      "priority": "",
+      "engines": [
+        "startpage"
+      ],
+      "positions": [
+        3
+      ],
+      "score": 1.5,
+      "category": "general"
+    }
+  ],
+  "answers": [],
+  "corrections": [],
+  "infoboxes": [],
+  "suggestions": [
+    "prema racing engineer jobs",
+    "prema powerteam staff"
+  ],
+  "unresponsive_engines": []
+}

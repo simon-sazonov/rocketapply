@@ -8,7 +8,17 @@ search:
   region: uk-en
   ddgs_queries_per_second: 0.25
   serper_queries_per_second: 5
-  searxng_queries_per_second: 2
+  # 1 q/s, not unbounded. "Unlimited" describes the container, not the Google
+  # and Bing sessions it proxies — sweep those and they answer captchas.
+  searxng_queries_per_second: 1
+  searxng_timeout_seconds: 30
+  # `;`-separated engine groups, one per query, round-robin, so no single
+  # upstream engine absorbs the whole sweep. These names must be ENABLED on the
+  # instance: docker/searxng/settings.yml turns google and bing back on, since
+  # upstream SearXNG ships both disabled. Leave empty to use whatever the
+  # instance itself considers its default general engines.
+  # (quoted: each list item is one comma-separated GROUP, not one engine)
+  searxng_engines: ["google,duckduckgo", "bing,startpage", "brave,duckduckgo"]
   serper_credits: 2500          # tracked down to 0, then the provider disables itself
 
 query_budget:

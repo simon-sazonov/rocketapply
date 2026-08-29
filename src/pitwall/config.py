@@ -57,6 +57,8 @@ YAML_MAP: dict[str, str] = {
     "search.ddgs_queries_per_second": "ddgs_queries_per_second",
     "search.serper_queries_per_second": "serper_queries_per_second",
     "search.searxng_queries_per_second": "searxng_queries_per_second",
+    "search.searxng_engines": "searxng_engines",
+    "search.searxng_timeout_seconds": "searxng_timeout_seconds",
     "search.serper_credits": "serper_credits",
     "query_budget.max_queries_per_run": "max_queries_per_run",
     "query_budget.company_tier_weight": "company_tier_weight",
@@ -143,12 +145,22 @@ class Settings(BaseSettings):
     serper_api_key: str = ""
     serpapi_api_key: str = ""
     searxng_base_url: str = "http://localhost:8888"
+    #: `;`-separated engine groups, each a `,`-separated SearXNG engine list.
+    #: One group is used per query, round-robin, so no single upstream engine
+    #: absorbs the whole sweep and starts answering captchas. Empty = let the
+    #: instance pick, which is the right setting for a SearXNG you do not own.
+    searxng_engines: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["google,duckduckgo", "bing,startpage", "brave,duckduckgo"]
+    )
+    searxng_timeout_seconds: float = Field(default=30.0, ge=1)
     region: str = "uk-en"
     max_results_per_query: int = Field(default=20, ge=1, le=100)
     cache_ttl_days: int = Field(default=7, ge=0)
     ddgs_queries_per_second: float = Field(default=0.25, gt=0)
     serper_queries_per_second: float = Field(default=5.0, gt=0)
-    searxng_queries_per_second: float = Field(default=2.0, gt=0)
+    # 1 q/s, not unbounded: the container is free, the Google/Bing sessions it
+    # proxies are not. §0.1 of PITWALL_V2_IMPLEMENTATION.md.
+    searxng_queries_per_second: float = Field(default=1.0, gt=0)
     serper_credits: int = Field(default=2500, ge=0)
 
     # ── LLM ──
@@ -222,6 +234,17 @@ class Settings(BaseSettings):
                 )
             if not v:
                 raise ValueError("SEARCH_PROVIDERS must list at least one provider")
+        return v
+
+    @field_validator("searxng_engines", mode="before")
+    @classmethod
+    def _split_engine_groups(cls, v: Any) -> Any:
+        """Accept `google,ddg;bing` from .env and a YAML list of group strings."""
+        if isinstance(v, str):
+            v = [g.strip() for g in v.split(";") if g.strip()]
+        if isinstance(v, list):
+            v = [",".join(p.strip() for p in str(g).split(",") if p.strip()) for g in v]
+            v = [g for g in v if g]
         return v
 
     @field_validator("log_level", mode="before")
