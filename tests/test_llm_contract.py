@@ -12,6 +12,7 @@ import pytest
 
 from pitwall.models import LLMVerdict
 from pitwall.scoring.llm import (
+    LLMRateLimited,
     LLMScorer,
     LLMUnavailable,
     QuotaExhausted,
@@ -199,11 +200,30 @@ def test_omitted_candidates_are_marked_needs_review(settings):
     assert out.needs_review == [2]
 
 
-def test_a_429_raises_quota_exhausted(settings):
-    err = RuntimeError("Error code: 429 - rate limit exceeded")
-    client = FakeClient([err])
-    with pytest.raises(QuotaExhausted):
-        LLMScorer(settings, client=client).score_batch(payload(1), None, None)
+def test_a_plain_429_is_a_pause_not_an_exhaustion(settings):
+    """§0.4/§1.1: a per-minute ceiling clears in seconds.
+
+    v1 mapped every 429 to QuotaExhausted, which meant the first real Groq run
+    abandoned a 1,000 tok/s cloud model for a local CPU one over a limit that
+    would have cleared in ten seconds.
+    """
+    err = RuntimeError("Error code: 429 - rate limit exceeded. Please try again in 9.6s")
+    with pytest.raises(LLMRateLimited) as exc:
+        LLMScorer(settings, client=FakeClient([err])).score_batch(payload(1), None, None)
+    assert exc.value.retry_after == pytest.approx(9.6)
+
+
+def test_a_terminal_429_still_raises_quota_exhausted(settings):
+    """Out of daily allowance or out of credits: only a new provider helps."""
+    for message in (
+        "Error code: 429 - rate limit reached on requests per day (RPD): Limit 1000",
+        "Error code: 429 - quota exceeded",
+        "Error code: 402 - insufficient credits",
+    ):
+        with pytest.raises(QuotaExhausted):
+            LLMScorer(settings, client=FakeClient([RuntimeError(message)])).score_batch(
+                payload(1), None, None
+            )
 
 
 def test_an_ordinary_error_does_not_lose_the_batch(settings):

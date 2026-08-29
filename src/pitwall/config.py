@@ -106,6 +106,8 @@ YAML_MAP: dict[str, str] = {
     "llm.concurrency": "llm_concurrency",
     "llm.triage.min_heuristic": "llm_triage_min_heuristic",
     "llm.triage.top_n": "llm_triage_top_n",
+    "llm.rate_limit.retries": "llm_rate_limit_retries",
+    "llm.rate_limit.max_wait_seconds": "llm_rate_limit_max_wait",
     "llm.temperature": "llm_temperature",
     "llm.max_tokens": "llm_max_tokens",
     "llm.timeout_seconds": "llm_timeout_seconds",
@@ -268,6 +270,14 @@ class Settings(BaseSettings):
     llm_triage_min_heuristic: float | None = Field(default=None, ge=0, le=100)
     #: Optional hard cap on LLM calls per run, highest heuristic first.
     llm_triage_top_n: int | None = Field(default=None, ge=1)
+    #: How many consecutive rate-limited waves to wait out before giving up on a
+    #: provider. Groq's free tier is 8,000 tokens/minute and a full sweep trips
+    #: it every few batches, so degrading on the first one would abandon the
+    #: fastest provider in the chain for a local CPU model.
+    llm_rate_limit_retries: int = Field(default=6, ge=0, le=50)
+    #: Ceiling on any single wait, so a provider asking for an hour cannot hang
+    #: the run.
+    llm_rate_limit_max_wait: float = Field(default=90.0, ge=1, le=3600)
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=1500, ge=256)
     # Local CPU inference is minutes per batch, not seconds. Cloud providers are

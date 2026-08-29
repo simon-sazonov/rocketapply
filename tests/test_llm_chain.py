@@ -309,3 +309,93 @@ def test_a_mixed_provider_run_is_auditable_afterwards(pipe, repos, monkeypatch):
         for r in repos.conn.execute("SELECT candidate_id, provider FROM scores")
     }
     assert set(providers.values()) == {"groq", "zai"}
+
+
+# ──────────── a pause is not an exhaustion (§0.4, learned the hard way) ─────
+
+
+def test_a_rate_limit_waits_and_retries_the_same_provider(pipe, repos, monkeypatch):
+    """The first real Groq run degraded to a local CPU model over a per-minute
+    token ceiling that would have cleared in ten seconds. It must not."""
+    pipe.settings.llm_provider = "groq"
+    pipe.settings.llm_provider_chain = ["groq", "zai"]
+    pipe.settings.groq_api_key = "gsk_x"
+    pipe.settings.zai_api_key = "sk-zai"
+    pipe.settings.llm_rate_limit_max_wait = 0.01
+
+    clients = {
+        "groq": FakeClient([
+            RuntimeError("429 rate limit reached on tokens per minute (TPM). "
+                         "Please try again in 0.01s"),
+            json.dumps(GOOD),
+        ]),
+        "zai": FakeClient([json.dumps(GOOD)]),
+    }
+    monkeypatch.setattr("pitwall.pipeline.LLMScorer", scorer_factory(clients))
+
+    seed_pending(pipe, repos, 1)
+    stats = pipe.score_llm(RunParams(use_llm=True))
+
+    assert stats.llm_scored == 1
+    assert len(clients["groq"].calls) == 2, "the same provider was asked again"
+    assert clients["zai"].calls == [], "the chain was never walked"
+    assert not any("degraded" in n for n in stats.notes)
+
+
+def test_a_persistent_rate_limit_eventually_degrades(pipe, repos, monkeypatch):
+    """Waiting for ever is not resilience."""
+    pipe.settings.llm_provider = "groq"
+    pipe.settings.llm_provider_chain = ["groq", "zai"]
+    pipe.settings.groq_api_key = "gsk_x"
+    pipe.settings.zai_api_key = "sk-zai"
+    pipe.settings.llm_rate_limit_retries = 2
+    pipe.settings.llm_rate_limit_max_wait = 0.01
+
+    limit = RuntimeError("429 rate limit reached (TPM). Please try again in 0.01s")
+    clients = {
+        "groq": FakeClient([limit, limit, limit, limit]),
+        "zai": FakeClient([json.dumps(GOOD)]),
+    }
+    monkeypatch.setattr("pitwall.pipeline.LLMScorer", scorer_factory(clients))
+
+    seed_pending(pipe, repos, 1)
+    stats = pipe.score_llm(RunParams(use_llm=True))
+
+    assert stats.llm_scored == 1
+    assert any("rate limited" in n and "unusable" in n for n in stats.notes)
+    assert any("degraded to zai" in n for n in stats.notes)
+
+
+def test_a_daily_ceiling_degrades_immediately(pipe, repos, monkeypatch):
+    """Per-day is not per-minute: no amount of waiting inside one run fixes it."""
+    pipe.settings.llm_provider = "groq"
+    pipe.settings.llm_provider_chain = ["groq", "zai"]
+    pipe.settings.groq_api_key = "gsk_x"
+    pipe.settings.zai_api_key = "sk-zai"
+    clients = {
+        "groq": FakeClient([RuntimeError(
+            "429 rate limit reached on requests per day (RPD): Limit 1000, Used 1000"
+        )]),
+        "zai": FakeClient([json.dumps(GOOD)]),
+    }
+    monkeypatch.setattr("pitwall.pipeline.LLMScorer", scorer_factory(clients))
+
+    seed_pending(pipe, repos, 1)
+    stats = pipe.score_llm(RunParams(use_llm=True))
+    assert stats.llm_scored == 1
+    assert len(clients["groq"].calls) == 1, "no point waiting out a daily limit"
+    assert any("degraded to zai" in n for n in stats.notes)
+
+
+def test_a_rate_limit_also_lowers_the_concurrency(pipe, repos, monkeypatch):
+    pipe.settings.llm_provider = "zai"
+    pipe.settings.zai_api_key = "sk-zai"
+    pipe.settings.llm_rate_limit_max_wait = 0.01
+    clients = {"zai": FakeClient([
+        RuntimeError("429 tokens per minute. Please try again in 0.01s"),
+        json.dumps(GOOD), json.dumps(GOOD),
+    ])}
+    monkeypatch.setattr("pitwall.pipeline.LLMScorer", scorer_factory(clients))
+    seed_pending(pipe, repos, 1)
+    stats = pipe.score_llm(RunParams(use_llm=True, concurrency=4))
+    assert any("concurrency reduced" in n for n in stats.notes)

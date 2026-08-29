@@ -94,6 +94,14 @@ llm:
   triage:
     min_heuristic:
     top_n:
+  # A per-MINUTE ceiling is a pause, not a provider failure. Groq's free tier
+  # allows 8,000 tokens/minute and a full sweep trips it every few batches;
+  # the first real run degraded to a local CPU model over a limit that would
+  # have cleared in ten seconds. Wait it out, at halved concurrency, this many
+  # times in a row before concluding the provider cannot serve the run.
+  rate_limit:
+    retries: 6
+    max_wait_seconds: 90
   temperature: 0
   max_tokens: 1500
   prompt_version: v1

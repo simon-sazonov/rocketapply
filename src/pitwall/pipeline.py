@@ -32,9 +32,9 @@ from .query_builder import build_all
 from .ratelimit import AdaptiveConcurrency
 from .scoring import heuristics
 from .scoring.llm import (
+    LLMRateLimited,
     LLMScorer,
     LLMUnavailable,
-    QuotaExhausted,
     batched,
     ollama_reachable,
 )
@@ -137,6 +137,8 @@ class Pipeline:
         self._run_id: int | None = None
         #: Providers still to try in this LLM stage; `_degrade` pops from it.
         self._llm_remaining: list[str] = []
+        #: Consecutive rate-limited waves; reset by any successful batch.
+        self._llm_rate_limit_hits = 0
 
     # ── progress plumbing ──
 
@@ -638,6 +640,7 @@ class Pipeline:
         # The chain, not one provider. Everything after the first entry is the
         # degradation path (§0.4); keyless providers drop out silently.
         self._llm_remaining = self.settings.llm_chain()
+        self._llm_rate_limit_hits = 0
         scorer = self._open_scorer(stats)
         if scorer is None:
             tried = ", ".join(self.settings.llm_chain()) or "none"
@@ -716,11 +719,18 @@ class Pipeline:
 
                 requeue: list[_LLMJob] = []
                 failure: Exception | None = None
+                throttled: float = 0.0
                 for job, outcome, err in pool.map(call, wave):
                     if err is not None or (outcome is not None and outcome.provider_error):
-                        if isinstance(err, QuotaExhausted):
-                            throttle.reduce(f"{active.provider} quota")
-                        failure = err or LLMUnavailable(outcome.error or "the call failed")
+                        if isinstance(err, LLMRateLimited):
+                            # NOT a reason to change provider. Groq's free tier
+                            # is 8,000 tokens a minute; a real sweep trips this
+                            # every few batches and it clears in seconds.
+                            throttled = max(throttled, err.retry_after or 5.0)
+                        else:
+                            failure = err or LLMUnavailable(
+                                outcome.error or "the call failed"
+                            )
                         requeue.append(job)
                         continue
 
@@ -732,11 +742,20 @@ class Pipeline:
                             prompt_version, stats,
                         )
                     done += len(job.rows)
+                    self._llm_rate_limit_hits = 0   # progress resets the streak
 
                 if requeue:
-                    # Put the failed batches back at the FRONT, so nobody is
-                    # skipped, and move to the next provider before retrying.
+                    # Back at the FRONT of the queue, so a handover or a pause
+                    # never silently skips anyone.
                     queue.extendleft(reversed(requeue))
+
+                if throttled and failure is None:
+                    scorer = self._wait_out_rate_limit(scorer, stats, throttle, throttled)
+                    if scorer is None:
+                        break
+                    continue
+
+                if requeue:
                     nxt = self._degrade(scorer, stats, failure or LLMUnavailable("unknown"))
                     if nxt is None:
                         break
@@ -955,6 +974,49 @@ class Pipeline:
             log.info("LLM provider: %s (%s)", scorer.provider, scorer.model)
             return scorer
         return None
+
+    def _wait_out_rate_limit(
+        self,
+        scorer: LLMScorer,
+        stats: RunStats,
+        throttle: AdaptiveConcurrency,
+        seconds: float,
+    ) -> LLMScorer | None:
+        """A per-minute ceiling is a pause, not a provider failure — §0.4/§1.1.
+
+        The first real run of this stage degraded from Groq to a local CPU model
+        on a token-per-minute limit that would have cleared in ten seconds. So:
+        halve the concurrency, wait the interval the provider itself asked for,
+        and ask the same provider again. Only after `llm_rate_limit_retries`
+        consecutive pauses is it treated as a provider that cannot serve this run.
+        """
+        self._llm_rate_limit_hits += 1
+        cap = self.settings.llm_rate_limit_retries
+        throttle.reduce(f"{scorer.provider} rate limited")
+
+        if self._llm_rate_limit_hits > cap:
+            note = (
+                f"{scorer.provider} rate limited {self._llm_rate_limit_hits}× in a row; "
+                "treating it as unusable for this run"
+            )
+            log.warning(note)
+            stats.notes.append(note)
+            self._llm_rate_limit_hits = 0
+            return self._degrade(scorer, stats, LLMUnavailable("persistently rate limited"))
+
+        wait = max(1.0, min(float(seconds), self.settings.llm_rate_limit_max_wait))
+        log.info(
+            "%s rate limited; waiting %.1fs (%d/%d) at concurrency %d",
+            scorer.provider, wait, self._llm_rate_limit_hits, cap, throttle.limit,
+        )
+        self.progress(
+            "llm",
+            f"{scorer.provider} rate limited — waiting {wait:.0f}s "
+            f"({self._llm_rate_limit_hits}/{cap})",
+            0, 0,
+        )
+        time.sleep(wait)
+        return scorer
 
     def _degrade(self, scorer: LLMScorer, stats: RunStats, exc: Exception) -> LLMScorer | None:
         """Walk to the next provider in the chain, mid-run, per batch.

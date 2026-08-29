@@ -14,6 +14,7 @@ model misbehaved:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -67,9 +68,21 @@ PROVIDERS: dict[str, dict[str, Any]] = {
 #: Headroom over the estimated prompt + max_tokens, for tokenizer variance.
 CONTEXT_MARGIN = 512
 
-_QUOTA_MARKERS = (
-    "429", "quota", "rate limit", "rate_limit", "too many requests",
-    "insufficient", "exceeded", "billing",
+#: A refusal you cannot wait out: out of credits, out of daily allowance, or a
+#: billing problem. The only remedy is a different provider.
+#: Checked BEFORE the rate-limit markers, because a message can carry both:
+#: "429 … insufficient credits" is terminal, "429 … tokens per minute" is not.
+_TERMINAL_MARKERS = (
+    "insufficient", "billing", "payment", "credit", "per day", "per-day",
+    "requests per day", "rpd", "daily", "exhausted", "expired",
+    "quota exceeded", "out of quota",
+)
+
+#: A refusal you *can* wait out. Groq's free tier is 8,000 tokens/minute, so a
+#: full sweep trips this every couple of batches and it clears in seconds.
+_RATE_LIMIT_MARKERS = (
+    "429", "rate limit", "rate_limit", "too many requests", "tpm", "rpm",
+    "tokens per minute", "requests per minute",
 )
 
 
@@ -92,7 +105,22 @@ REASONING_MODELS: tuple[str, ...] = ("openai/gpt-oss-", "qwen/qwen3")
 
 
 class QuotaExhausted(RuntimeError):
-    """The LLM provider refused on quota grounds — degrade or stop cleanly."""
+    """The provider refused for good — degrade to the next one in the chain."""
+
+
+class LLMRateLimited(RuntimeError):
+    """The provider refused *for now*.
+
+    Emphatically not the same thing as :class:`QuotaExhausted`. Groq's free tier
+    allows 8,000 tokens a minute, so a real sweep trips this every few batches
+    and it clears in seconds. Degrading over it would abandon the fastest
+    provider in the chain for a local CPU model a thousand times slower — which
+    is exactly what happened the first time this was run against the real 301.
+    """
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class LLMUnavailable(RuntimeError):
@@ -437,7 +465,10 @@ class LLMScorer:
         try:
             text = self._complete(messages)
         except Exception as exc:  # noqa: BLE001 - provider SDKs raise many shapes
-            if _is_quota_error(exc):
+            kind = classify_error(exc)
+            if kind == "rate_limit":
+                raise LLMRateLimited(str(exc), retry_after_seconds(exc)) from exc
+            if kind == "quota":
                 raise QuotaExhausted(str(exc)) from exc
             log.error("LLM call failed: %s", exc)
             return BatchOutcome(
@@ -460,7 +491,10 @@ class LLMScorer:
             try:
                 text = self._complete(messages)
             except Exception as exc:  # noqa: BLE001
-                if _is_quota_error(exc):
+                kind = classify_error(exc)
+                if kind == "rate_limit":
+                    raise LLMRateLimited(str(exc), retry_after_seconds(exc)) from exc
+                if kind == "quota":
                     raise QuotaExhausted(str(exc)) from exc
                 return BatchOutcome(
                     needs_review=ids, model=self.model, provider=self.provider,
@@ -502,14 +536,47 @@ class LLMScorer:
         return self.usage.cost(prices)
 
 
-def _is_quota_error(exc: Exception) -> bool:
+def classify_error(exc: Exception) -> str:
+    """`"quota"` | `"rate_limit"` | `"error"`.
+
+    The distinction is the whole point: one means "use a different provider",
+    the other means "wait a moment and ask the same one again".
+    """
     text = f"{type(exc).__name__} {exc}".lower()
     status = getattr(exc, "status_code", None) or getattr(
         getattr(exc, "response", None), "status_code", None
     )
-    if status in (429, 402):
-        return True
-    return any(m in text for m in _QUOTA_MARKERS)
+    if status == 402 or any(m in text for m in _TERMINAL_MARKERS):
+        return "quota"
+    if status == 429 or any(m in text for m in _RATE_LIMIT_MARKERS):
+        return "rate_limit"
+    return "error"
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    """For callers that only care that the provider said no."""
+    return classify_error(exc) in {"quota", "rate_limit"}
+
+
+#: Groq spells the wait out in prose: "Please try again in 9.622s", or
+#: "...in 1m3.2s". The SDK surfaces a `retry-after` header when there is one.
+_RETRY_AFTER_RE = re.compile(r"try again in\s+(?:(\d+)m)?([\d.]+)s", re.I)
+
+
+def retry_after_seconds(exc: Exception, default: float = 5.0) -> float:
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    if headers is not None:
+        for key in ("retry-after", "Retry-After", "x-ratelimit-reset-tokens"):
+            raw = None
+            with contextlib.suppress(Exception):
+                raw = headers.get(key)
+            if raw:
+                with contextlib.suppress(TypeError, ValueError):
+                    return max(0.0, float(str(raw).rstrip("s")))
+    match = _RETRY_AFTER_RE.search(str(exc))
+    if match:
+        return float(match.group(1) or 0) * 60 + float(match.group(2))
+    return default
 
 
 def batched(items: list[Any], size: int) -> list[list[Any]]:
