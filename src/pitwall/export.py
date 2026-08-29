@@ -297,6 +297,74 @@ def funnel_counts(conn: sqlite3.Connection, settings: Settings | None = None) ->
     }
 
 
+def sweep_report(conn: sqlite3.Connection, settings: Settings | None = None) -> dict[str, Any]:
+    """What a sweep actually achieved — §1.5's "record the result".
+
+    Coverage before precision: v1 had searched 7 of 49 companies, so the next
+    volume of leads was in the 42 that had never been looked at, not in a better
+    threshold. `extraction` is the other half of the story — operator queries
+    return cleaner titles, so those gaps should close as coverage grows.
+    """
+    settings = settings or get_settings()
+    q = lambda sql, *a: int(conn.execute(sql, a).fetchone()[0])  # noqa: E731
+
+    companies = q("SELECT COUNT(*) FROM companies WHERE active = 1")
+    searched = q(
+        """
+        SELECT COUNT(DISTINCT q.company_id) FROM queries q
+         WHERE q.status = 'done' AND q.company_id IS NOT NULL
+        """
+    )
+    with_rows = q(
+        """
+        SELECT COUNT(DISTINCT q.company_id) FROM queries q
+          JOIN search_results sr ON sr.query_id = q.id
+         WHERE q.company_id IS NOT NULL
+        """
+    )
+    with_people = q(
+        """
+        SELECT COUNT(DISTINCT q.company_id)
+          FROM candidate_sources cs
+          JOIN search_results sr ON sr.id = cs.search_result_id
+          JOIN queries q         ON q.id = sr.query_id
+         WHERE q.company_id IS NOT NULL
+        """
+    )
+    candidates = q("SELECT COUNT(*) FROM candidates")
+    return {
+        "companies_active": companies,
+        "companies_searched": searched,
+        "companies_with_serp_rows": with_rows,
+        "companies_with_people": with_people,
+        "templates_fired": [
+            r["template_id"]
+            for r in conn.execute(
+                "SELECT DISTINCT template_id FROM queries WHERE status = 'done'"
+                " ORDER BY template_id"
+            )
+        ],
+        "queries_done": q("SELECT COUNT(*) FROM queries WHERE status = 'done'"),
+        "queries_failed": q("SELECT COUNT(*) FROM queries WHERE status = 'failed'"),
+        "serp_rows": q("SELECT COUNT(*) FROM search_results"),
+        "candidates": candidates,
+        # The extraction gaps of §1.5: these should shrink as operator templates
+        # replace the soft ones, because a `site:` result has a cleaner title.
+        "extraction": {
+            "no_company": q("SELECT COUNT(*) FROM candidates WHERE current_company IS NULL OR current_company = ''"),
+            "no_title": q("SELECT COUNT(*) FROM candidates WHERE current_title IS NULL OR current_title = ''"),
+            "no_location": q("SELECT COUNT(*) FROM candidates WHERE location IS NULL OR location = ''"),
+            "single_source": q("SELECT COUNT(*) FROM candidates WHERE evidence_count <= 1"),
+        },
+        "verdicts": {
+            r["verdict"] or "unscored": r["n"]
+            for r in conn.execute(
+                "SELECT verdict, COUNT(*) n FROM scores GROUP BY verdict ORDER BY n DESC"
+            )
+        },
+    }
+
+
 def zero_result_companies(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """Companies whose queries all came back empty — almost always a bad alias."""
     return [

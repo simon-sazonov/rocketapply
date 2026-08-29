@@ -31,12 +31,13 @@ from pitwall.export import (  # noqa: E402
     filter_frame,
     funnel_counts,
     leads_frame,
+    sweep_report,
     zero_result_companies,
 )
 from pitwall.inputs import load_and_sync  # noqa: E402
 from pitwall.logging_setup import setup_logging  # noqa: E402
 from pitwall.pipeline import Pipeline, RunParams, RunStats  # noqa: E402
-from pitwall.query_builder import build_all  # noqa: E402
+from pitwall.query_builder import build_all, load_templates  # noqa: E402
 
 app = typer.Typer(add_completion=False, help=__doc__, no_args_is_help=True)
 console = Console()
@@ -332,6 +333,58 @@ def stats() -> None:
         )
         for z in zeros[:15]:
             console.print(f"  · {z['name']} (tier {z['tier']}, {z['queries']} queries)")
+
+
+@app.command()
+def coverage() -> None:
+    """What the sweep has actually covered — §1.5's "record the result".
+
+    Coverage before precision: v1 had searched 7 of 49 companies, so the next
+    volume of leads was in the 42 nobody had looked at yet, not in a better
+    threshold. Run this before and after a sweep and keep both.
+    """
+    settings = _bootstrap()
+    repos = open_repos(settings)
+    report = sweep_report(repos.conn, settings)
+
+    searched = report["companies_searched"]
+    total = report["companies_active"]
+    pct = (searched / total * 100) if total else 0.0
+    table = Table(title=f"coverage — {searched} of {total} companies ({pct:.0f}%)")
+    table.add_column("metric")
+    table.add_column("value", justify="right")
+    for key in ("companies_searched", "companies_with_serp_rows", "companies_with_people",
+                "queries_done", "queries_failed", "serp_rows", "candidates"):
+        table.add_row(key.replace("_", " "), f"{report[key]:,}")
+    console.print(table)
+
+    fired = report["templates_fired"]
+    all_templates = [t.id for t in load_templates()]
+    console.print(
+        f"\ntemplates fired: [green]{len(fired)}[/] of {len(all_templates)} — "
+        + ", ".join(fired)
+    )
+    missing = [t for t in all_templates if t not in fired]
+    if missing:
+        console.print(f"[yellow]never fired:[/] {', '.join(missing)}")
+
+    gaps = Table(title="extraction gaps (lower is better)")
+    gaps.add_column("field")
+    gaps.add_column("missing", justify="right")
+    gaps.add_column("of candidates", justify="right")
+    n = max(1, report["candidates"])
+    for key, label in (
+        ("no_company", "current company"), ("no_title", "current title"),
+        ("no_location", "location"), ("single_source", "only one source"),
+    ):
+        value = report["extraction"][key]
+        gaps.add_row(label, f"{value:,}", f"{value / n * 100:.0f}%")
+    console.print(gaps)
+
+    console.print(
+        "verdicts: "
+        + ", ".join(f"{k}={v:,}" for k, v in report["verdicts"].items())
+    )
 
 
 @app.command()

@@ -11,7 +11,8 @@ SXNG_URL := http://localhost:8888
 
 .DEFAULT_GOAL := help
 .PHONY: help venv test lint typecheck searxng searxng-env searxng-check \
-        searxng-stop searxng-logs searxng-pull groq-check app cli
+        searxng-stop searxng-logs searxng-pull groq-check app cli \
+        coverage sweep relabel
 
 help:  ## show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -67,6 +68,27 @@ searxng-pull:  ## update the image
 
 groq-check:  ## list the Groq models your key can reach and verify LLM_MODEL
 	$(PY) scripts/setup_groq.py
+
+# ─────────────────────────────── sweeps ────────────────────────────────
+
+coverage:  ## how much of the company list has actually been searched
+	$(PY) scripts/run_pipeline.py coverage
+
+# The §1.5 full sweep. Deliberately NOT a plain `run`:
+#   · 49 companies x 17 roles x 12 templates is ~13,000 unique queries, so the
+#     budget is what makes this finish. 1,200 at 1 q/s is about 20 minutes of
+#     searching, and covers every company at least once.
+#   · --no-llm because searching and scoring have completely different rate
+#     limits; score afterwards, in tranches, and the run stays resumable.
+#   · run `make coverage` before and after, and keep both.
+SWEEP_QUERIES ?= 1200
+sweep:  ## full sweep across every company (searching only, no LLM)
+	$(PY) scripts/run_pipeline.py coverage
+	$(PY) scripts/run_pipeline.py run --max-queries $(SWEEP_QUERIES) --no-llm -v
+	$(PY) scripts/run_pipeline.py coverage
+
+relabel:  ## §1.3: small sweep on the current provider + a labelling worksheet
+	$(PY) scripts/eval_scoring.py relabel
 
 # ──────────────────────────────── app ──────────────────────────────────
 

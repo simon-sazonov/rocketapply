@@ -399,3 +399,31 @@ def test_a_rate_limit_also_lowers_the_concurrency(pipe, repos, monkeypatch):
     seed_pending(pipe, repos, 1)
     stats = pipe.score_llm(RunParams(use_llm=True, concurrency=4))
     assert any("concurrency reduced" in n for n in stats.notes)
+
+
+def test_groqs_own_rate_limit_message_is_not_read_as_a_dead_account():
+    """Groq ends every 429 with an upgrade link containing the word `billing`.
+
+    A substring match on that read a ten-second pause as an exhausted account,
+    twice, on the first real run — and sent 300 candidates to a local CPU model.
+    """
+    from pitwall.scoring.llm import classify_error, retry_after_seconds
+
+    class Err(RuntimeError):
+        status_code = 429
+
+    tpm = Err(
+        "Error code: 429 - {'error': {'message': 'Rate limit reached for model "
+        "`openai/gpt-oss-20b` in organization `org_x` service tier `on_demand` on "
+        "tokens per minute (TPM): Limit 8000, Used 7863, Requested 1421. Please try "
+        "again in 9.622s. Need more tokens? Upgrade to Dev Tier today at "
+        "https://console.groq.com/settings/billing', 'code': 'rate_limit_exceeded'}}"
+    )
+    assert classify_error(tpm) == "rate_limit"
+    assert retry_after_seconds(tpm) == pytest.approx(9.622)
+
+    rpd = Err(
+        "Error code: 429 - Rate limit reached on requests per day (RPD): Limit 1000, "
+        "Used 1000. Upgrade at https://console.groq.com/settings/billing"
+    )
+    assert classify_error(rpd) == "quota", "per-day is terminal even with a billing link"

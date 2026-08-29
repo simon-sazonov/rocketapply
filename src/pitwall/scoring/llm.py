@@ -70,19 +70,29 @@ CONTEXT_MARGIN = 512
 
 #: A refusal you cannot wait out: out of credits, out of daily allowance, or a
 #: billing problem. The only remedy is a different provider.
-#: Checked BEFORE the rate-limit markers, because a message can carry both:
-#: "429 … insufficient credits" is terminal, "429 … tokens per minute" is not.
+#: Unambiguous "this will not clear inside one run": a per-DAY ceiling, an empty
+#: balance, a dead key.
 _TERMINAL_MARKERS = (
-    "insufficient", "billing", "payment", "credit", "per day", "per-day",
-    "requests per day", "rpd", "daily", "exhausted", "expired",
-    "quota exceeded", "out of quota",
+    "per day", "per-day", "requests per day", "(rpd)", "daily limit",
+    "insufficient", "out of credit", "no credits", "credit balance",
+    "payment required", "quota exceeded", "out of quota", "exhausted", "expired",
 )
 
-#: A refusal you *can* wait out. Groq's free tier is 8,000 tokens/minute, so a
-#: full sweep trips this every couple of batches and it clears in seconds.
+#: Unambiguous "wait a moment": a per-MINUTE ceiling.
+#:
+#: Checked BEFORE the terminal markers, and that ordering is not cosmetic. Groq
+#: ends every rate-limit message with an upgrade link —
+#: `https://console.groq.com/settings/billing` — so a naive substring match on
+#: "billing" reads a ten-second pause as a dead account. It did exactly that on
+#: the first real run, twice.
+_TRANSIENT_MARKERS = (
+    "per minute", "per-minute", "(tpm)", "(rpm)", "tokens per minute",
+    "requests per minute", "rate_limit_exceeded", "try again in",
+)
+
+#: Weaker signals, only consulted once neither of the above matched.
 _RATE_LIMIT_MARKERS = (
-    "429", "rate limit", "rate_limit", "too many requests", "tpm", "rpm",
-    "tokens per minute", "requests per minute",
+    "429", "rate limit", "rate_limit", "too many requests",
 )
 
 
@@ -546,7 +556,14 @@ def classify_error(exc: Exception) -> str:
     status = getattr(exc, "status_code", None) or getattr(
         getattr(exc, "response", None), "status_code", None
     )
-    if status == 402 or any(m in text for m in _TERMINAL_MARKERS):
+    # Specific beats generic, in both directions: "requests per day" is terminal
+    # even alongside "try again in", and "tokens per minute" is transient even
+    # alongside a billing URL.
+    if any(m in text for m in _TERMINAL_MARKERS):
+        return "quota"
+    if any(m in text for m in _TRANSIENT_MARKERS):
+        return "rate_limit"
+    if status == 402:
         return "quota"
     if status == 429 or any(m in text for m in _RATE_LIMIT_MARKERS):
         return "rate_limit"

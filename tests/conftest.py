@@ -122,3 +122,74 @@ def write_inputs(project):
         save_roles(roles, project / "config" / "roles.csv")
 
     return _write
+
+
+# ─────────────── a pipeline with the network stubbed out ────────────────
+
+from pitwall.search.base import SearchHit  # noqa: E402
+
+STUB_HITS = [
+    SearchHit(0, "https://uk.linkedin.com/in/jane-doe",
+              "Jane Doe - Data Scientist - McLaren Racing | LinkedIn",
+              "Data Scientist at McLaren Racing · Woking, England, United Kingdom", {}),
+    SearchHit(1, "https://www.linkedin.com/in/david-brooks",
+              "David Brooks - Data Analyst - McLaren Health Care | LinkedIn",
+              "Macomb, Michigan, United States", {}),
+    SearchHit(2, "https://www.linkedin.com/in/luca-rossi",
+              "Luca Rossi - Strategy Consultant | LinkedIn",
+              "Ex-McLaren Racing data scientist, now at Bain", {}),
+    SearchHit(3, "https://www.linkedin.com/posts/someone_activity-1",
+              "A post about F1 data", "not a person", {}),
+    SearchHit(4, "https://uk.linkedin.com/in/Jane-Doe/",   # same person, mirror host
+              "Jane Doe - Senior Data Scientist - McLaren Racing | LinkedIn",
+              "Senior Data Scientist at McLaren Racing, working on tyre degradation and "
+              "Monte Carlo race simulation · Woking, England, United Kingdom", {}),
+]
+
+
+class StubProvider:
+    """A deterministic stand-in for a real search provider."""
+
+    name = "ddgs"
+
+    def __init__(self, hits=None):
+        self.hits = STUB_HITS if hits is None else hits
+        self.calls = 0
+
+    def supports_operators(self) -> bool:
+        return False
+
+    def remaining_quota(self):
+        return None
+
+    def search(self, query, *, max_results=20, region="wt-wt"):
+        """First query returns the short Jane headline, later queries the long one.
+
+        Two URLs that canonicalize identically inside ONE result page are the
+        same row and collapse there (UNIQUE(query_id, canonical_url)); the
+        longest-wins merge only has anything to do across different queries.
+        """
+        self.calls += 1
+        page = list(self.hits)
+        if self.calls > 1 and len(page) >= 5:
+            page = [page[4], *page[1:4]]
+        else:
+            page = page[:4]
+        return page[:max_results]
+
+
+
+@pytest.fixture()
+def pipeline(settings, repos, monkeypatch, company, role):
+    """A Pipeline whose provider chain is a stub — no test makes a request."""
+    from pitwall.inputs import sync_to_db
+    from pitwall.pipeline import Pipeline
+
+    sync_to_db(repos.conn, [company], [role])
+    provider = StubProvider()
+    monkeypatch.setattr("pitwall.pipeline.build_chain", lambda *a, **k: [provider])
+    monkeypatch.setattr("pitwall.query_builder.build_chain", lambda *a, **k: [provider],
+                        raising=False)
+    pipe = Pipeline(settings, repos)
+    pipe.stub = provider
+    return pipe
