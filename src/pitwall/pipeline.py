@@ -69,6 +69,8 @@ class RunStats:
     llm_calls: int = 0
     llm_scored: int = 0
     llm_needs_review: int = 0
+    #: Deliberately not sent to the LLM this run — distinct from unfinished.
+    llm_triaged: int = 0
     llm_tokens_in: int = 0
     llm_tokens_out: int = 0
     cost_estimate: float = 0.0
@@ -110,6 +112,8 @@ class RunParams:
     limit: int | None = None
     #: Overrides both stage pools for one run; None = the configured values.
     concurrency: int | None = None
+    triage_min_heuristic: float | None = None
+    triage_top_n: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -644,6 +648,7 @@ class Pipeline:
         cap = self.settings.daily_llm_request_cap
 
         pending = self.repos.scores.awaiting_llm(prompt_version, limit=params.limit)
+        pending = self._triage(pending, params, stats)
         groups: dict[tuple[int | None, int | None], list[dict[str, Any]]] = {}
         for row in pending:
             groups.setdefault((row["company_id"], row["role_id"]), []).append(row)
@@ -860,6 +865,62 @@ class Pipeline:
         if not verdict.is_person_profile:
             final = min(final, 10.0)
         return round(max(0.0, min(100.0, final)), 2)
+
+    def _triage(
+        self, pending: list[dict[str, Any]], params: RunParams, stats: RunStats
+    ) -> list[dict[str, Any]]:
+        """Decide who is worth a verdict — §1.2.
+
+        Two independent gates, both off by default so the v1 behaviour is
+        unchanged: a floor on the heuristic score, and a hard cap per run taking
+        the highest heuristic first.
+
+        What is *not* done matters as much: the candidates below the bar keep
+        their heuristic score and are marked `skipped_triage`, a state distinct
+        from `pending_llm`. "We chose not to score this person" and "this run did
+        not get that far" look identical otherwise, and `awaiting_llm` still
+        returns them, so a later run with a lower bar picks them up.
+        """
+        floor = (
+            params.triage_min_heuristic
+            if params.triage_min_heuristic is not None
+            else self.settings.llm_triage_min_heuristic
+        )
+        top_n = (
+            params.triage_top_n
+            if params.triage_top_n is not None
+            else self.settings.llm_triage_top_n
+        )
+        if floor is None and top_n is None:
+            return pending
+
+        # `awaiting_llm` already sorts by heuristic_score DESC.
+        ranked = sorted(pending, key=lambda r: float(r.get("heuristic_score") or 0.0), reverse=True)
+        keep = ranked
+        reasons = []
+        if floor is not None:
+            keep = [r for r in keep if float(r.get("heuristic_score") or 0.0) >= floor]
+            reasons.append(f"heuristic >= {floor:g}")
+        if top_n is not None:
+            keep = keep[:top_n]
+            reasons.append(f"top {top_n}")
+
+        kept_ids = {r["id"] for r in keep}
+        skipped = [r["id"] for r in ranked if r["id"] not in kept_ids]
+        if skipped:
+            with self.repos.writing():
+                self.repos.scores.mark_triaged(skipped)
+        stats.llm_triaged = len(skipped)
+
+        note = (
+            f"triage kept {len(keep)} of {len(ranked)} candidates "
+            f"({', '.join(reasons)}); {len(skipped)} marked skipped_triage and still "
+            "eligible for a later run"
+        )
+        log.info(note)
+        stats.notes.append(note)
+        self.progress("llm", note, 0, len(ranked))
+        return keep
 
     def _open_scorer(self, stats: RunStats) -> LLMScorer | None:
         """The first provider in the remaining chain that is actually usable.

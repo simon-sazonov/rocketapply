@@ -43,7 +43,13 @@ CompanyMatch = Literal[
     "exact", "parent", "subsidiary", "same_name_different_org", "none", "unknown"
 ]
 RoleMatch = Literal["exact", "adjacent", "unrelated", "unknown"]
-Verdict = Literal["strong", "possible", "weak", "reject", "needs_review", "pending_llm"]
+#: `skipped_triage` is deliberately distinct from `pending_llm`: one means "we
+#: chose not to spend a verdict on this person", the other means "not done yet".
+#: Conflating them would make an unfinished run and a triaged one look identical.
+Verdict = Literal[
+    "strong", "possible", "weak", "reject", "needs_review", "pending_llm",
+    "skipped_triage",
+]
 CRMStatus = Literal[
     "new", "saved", "ignored", "contacted", "replied", "meeting", "closed"
 ]

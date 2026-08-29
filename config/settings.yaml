@@ -63,6 +63,14 @@ llm:
   # a batch of 8 costs roughly 2,500 — the token ceiling binds first, and a
   # 429 halves this for the rest of the run on its own.
   concurrency: 8
+  # Triage (§1.2). Empty = send everything that passed the heuristic gate.
+  # min_heuristic keeps the bottom of the list out of the LLM entirely;
+  # top_n is a hard budget per run, highest heuristic first. Candidates below
+  # the bar are marked `skipped_triage`, keep their heuristic score, and are
+  # picked up by a later run with a lower bar or a bigger budget.
+  triage:
+    min_heuristic:
+    top_n:
   temperature: 0
   max_tokens: 1500
   prompt_version: v1

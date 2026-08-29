@@ -136,13 +136,15 @@ def search(
     use_serper: bool = typer.Option(
         False, "--use-serper", help="spend into the SERPER_RESERVE_CREDITS floor"
     ),
+    concurrency: int | None = typer.Option(None, help="worker threads for this run"),
     verbose: bool = typer.Option(False, "-v", "--verbose"),
 ) -> None:
     """Stage 2 — execute pending queries against the provider chain."""
     settings = _bootstrap(verbose, use_serper=use_serper)
     pipe = Pipeline(settings, on_progress=_progress)
     params = RunParams(
-        limit=limit, max_results=max_results, no_cache=no_cache, cache_only=cache_only
+        limit=limit, max_results=max_results, no_cache=no_cache, cache_only=cache_only,
+        concurrency=concurrency,
     )
     stats = RunStats()
     # A CLI stage opens a `runs` row exactly like the Streamlit worker does, so
@@ -182,6 +184,13 @@ def score(
     prompt_version: str | None = typer.Option(None, help="prompt version to write"),
     threshold: float | None = typer.Option(None, help="override the heuristic threshold"),
     limit: int | None = typer.Option(None, help="max candidates to send to the LLM"),
+    triage_min: float | None = typer.Option(
+        None, "--triage-min", help="only send candidates at or above this heuristic score"
+    ),
+    triage_top: int | None = typer.Option(
+        None, "--triage-top", help="hard cap on LLM candidates this run, best first"
+    ),
+    concurrency: int | None = typer.Option(None, help="LLM worker threads for this run"),
     verbose: bool = typer.Option(False, "-v", "--verbose"),
 ) -> None:
     """Stages 4 and 5 — heuristic pre-score, then the LLM filter."""
@@ -193,6 +202,9 @@ def score(
         heuristic_threshold=threshold,
         use_llm=not heuristic_only,
         limit=limit,
+        triage_min_heuristic=triage_min,
+        triage_top_n=triage_top,
+        concurrency=concurrency,
     )
     stats = RunStats()
     with pipe.tracked(params, stats, "score"):
@@ -206,7 +218,7 @@ def score(
     if not heuristic_only:
         console.print(
             f"LLM: [green]{stats.llm_scored}[/] scored in {stats.llm_calls} calls "
-            f"({stats.llm_needs_review} need review) · "
+            f"({stats.llm_needs_review} need review, {stats.llm_triaged} skipped by triage) · "
             f"{stats.llm_tokens_in:,} in / {stats.llm_tokens_out:,} out tokens · "
             f"[bold]${stats.cost_estimate:.4f}[/]"
         )
@@ -228,6 +240,13 @@ def run(
     use_serper: bool = typer.Option(
         False, "--use-serper", help="spend into the SERPER_RESERVE_CREDITS floor"
     ),
+    concurrency: int | None = typer.Option(None, help="worker threads for this run"),
+    triage_min: float | None = typer.Option(
+        None, "--triage-min", help="only send candidates at or above this heuristic score"
+    ),
+    triage_top: int | None = typer.Option(
+        None, "--triage-top", help="hard cap on LLM candidates this run, best first"
+    ),
     verbose: bool = typer.Option(False, "-v", "--verbose"),
 ) -> None:
     """All stages, end to end, resumable."""
@@ -243,6 +262,9 @@ def run(
         use_llm=not no_llm,
         no_cache=no_cache,
         cache_only=cache_only,
+        concurrency=concurrency,
+        triage_min_heuristic=triage_min,
+        triage_top_n=triage_top,
     )
     stats = pipe.run(params)
     table = Table(title=f"run #{stats.run_id}")

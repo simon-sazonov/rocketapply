@@ -785,12 +785,26 @@ class ScoreRepo:
               LEFT JOIN roles r     ON r.id = s.role_id
              WHERE s.prompt_version = ?
                AND s.llm_score IS NULL
-               AND s.verdict IN ('pending_llm','needs_review')
+               -- `skipped_triage` is included on purpose: a candidate the last
+               -- run chose not to spend a verdict on is still a candidate. A
+               -- lower bar, or a bigger budget, picks it up next time (§1.2).
+               AND s.verdict IN ('pending_llm','needs_review','skipped_triage')
              ORDER BY s.heuristic_score DESC
         """
         if limit:
             sql += f" LIMIT {int(limit)}"
         return [dict(r) for r in self.conn.execute(sql, (prompt_version,))]
+
+    def mark_triaged(self, ids: Sequence[int]) -> int:
+        """Mark score rows as deliberately not sent to the LLM (§1.2)."""
+        if not ids:
+            return 0
+        self.conn.executemany(
+            "UPDATE scores SET verdict = 'skipped_triage' WHERE id = ?"
+            " AND verdict IN ('pending_llm','needs_review','skipped_triage')",
+            [(int(i),) for i in ids],
+        )
+        return len(ids)
 
     def delete_for_version(self, prompt_version: str) -> int:
         cur = self.conn.execute("DELETE FROM scores WHERE prompt_version = ?", (prompt_version,))

@@ -101,6 +101,8 @@ YAML_MAP: dict[str, str] = {
     "scoring.bands.weak": "band_weak",
     "llm.batch_size": "llm_batch_size",
     "llm.concurrency": "llm_concurrency",
+    "llm.triage.min_heuristic": "llm_triage_min_heuristic",
+    "llm.triage.top_n": "llm_triage_top_n",
     "llm.temperature": "llm_temperature",
     "llm.max_tokens": "llm_max_tokens",
     "llm.timeout_seconds": "llm_timeout_seconds",
@@ -256,6 +258,13 @@ class Settings(BaseSettings):
     #: 2,500 — so in practice the token ceiling binds first and a 429 will pull
     #: this down on its own (AdaptiveConcurrency).
     llm_concurrency: int = Field(default=8, ge=1, le=64)
+    #: Triage (§1.2). Unset = send every candidate that passed the heuristic
+    #: gate, which is the v1 behaviour. Set, and anything below the bar keeps its
+    #: heuristic score and is marked `skipped_triage` — deliberately not scored,
+    #: not merely unfinished — and stays eligible for a later run.
+    llm_triage_min_heuristic: float | None = Field(default=None, ge=0, le=100)
+    #: Optional hard cap on LLM calls per run, highest heuristic first.
+    llm_triage_top_n: int | None = Field(default=None, ge=1)
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=1500, ge=256)
     # Local CPU inference is minutes per batch, not seconds. Cloud providers are
