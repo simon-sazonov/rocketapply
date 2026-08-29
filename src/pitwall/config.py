@@ -85,6 +85,7 @@ YAML_MAP: dict[str, str] = {
     "search.searxng_timeout_seconds": "searxng_timeout_seconds",
     "search.serper_credits": "serper_credits",
     "search.serper_reserve_credits": "serper_reserve_credits",
+    "search.concurrency": "search_concurrency",
     "query_budget.max_queries_per_run": "max_queries_per_run",
     "query_budget.company_tier_weight": "company_tier_weight",
     "query_budget.role_priority_weight": "role_priority_weight",
@@ -99,6 +100,7 @@ YAML_MAP: dict[str, str] = {
     "scoring.bands.possible": "band_possible",
     "scoring.bands.weak": "band_weak",
     "llm.batch_size": "llm_batch_size",
+    "llm.concurrency": "llm_concurrency",
     "llm.temperature": "llm_temperature",
     "llm.max_tokens": "llm_max_tokens",
     "llm.timeout_seconds": "llm_timeout_seconds",
@@ -204,6 +206,11 @@ class Settings(BaseSettings):
     #: this floor the chain stops reaching for serper on its own, so the burst
     #: capacity survives a routine sweep. `--use-serper` sets it to 0 for one run.
     serper_reserve_credits: int = Field(default=500, ge=0)
+    #: Thread-pool size for the search stage. Workers do network and disk-cache
+    #: work only; every SQLite write happens on the thread that submitted them.
+    #: The shared token bucket still applies, so this widens the pipe without
+    #: raising the query rate past what the providers tolerate.
+    search_concurrency: int = Field(default=4, ge=1, le=64)
 
     # ── LLM ──
     llm_provider: LLMProviderName = "groq"
@@ -244,6 +251,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434/v1"
     ollama_model: str = "pitwall-qwen2.5"
     llm_batch_size: int = Field(default=8, ge=1, le=32)
+    #: Thread-pool size for the LLM stage. Groq's free tier allows 30 requests a
+    #: minute but only 8,000 tokens a minute, and a batch of 8 costs roughly
+    #: 2,500 — so in practice the token ceiling binds first and a 429 will pull
+    #: this down on its own (AdaptiveConcurrency).
+    llm_concurrency: int = Field(default=8, ge=1, le=64)
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=1500, ge=256)
     # Local CPU inference is minutes per batch, not seconds. Cloud providers are

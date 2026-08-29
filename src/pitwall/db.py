@@ -200,6 +200,28 @@ CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 
 _local = threading.local()
 
+#: Process-wide write lock — §1.1.
+#:
+#: WAL mode makes readers concurrent with a writer. It does **not** make writers
+#: concurrent with each other: SQLite still takes an exclusive lock per write
+#: transaction, and N threads each holding their own connection is the classic
+#: `database is locked` failure that only ever appears under load.
+#:
+#: The pipeline's first defence is structural — worker threads do network I/O
+#: and return their results, and the thread that submitted the work does every
+#: write. This lock is the second: the Streamlit UI thread edits CRM rows while
+#: a background run is writing, and those two really are different threads.
+#:
+#: Re-entrant, because a repository write can call another one.
+_write_lock = threading.RLock()
+
+
+@contextmanager
+def writing() -> Iterator[None]:
+    """Hold the process-wide write lock for a group of statements."""
+    with _write_lock:
+        yield
+
 
 # ───────────────────────────── connection ─────────────────────────────
 
@@ -234,15 +256,20 @@ def close_all() -> None:
 
 @contextmanager
 def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
-    """Explicit transaction (connections run in autocommit / isolation_level=None)."""
-    conn.execute("BEGIN")
-    try:
-        yield conn
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
-    else:
-        conn.execute("COMMIT")
+    """Explicit transaction (connections run in autocommit / isolation_level=None).
+
+    Holds the process-wide write lock, so two threads cannot interleave two
+    transactions on two connections and collide on SQLite's exclusive lock.
+    """
+    with _write_lock:
+        conn.execute("BEGIN")
+        try:
+            yield conn
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        else:
+            conn.execute("COMMIT")
 
 
 def init_schema(conn: sqlite3.Connection) -> int:
@@ -978,6 +1005,11 @@ class Repos:
         self.crm = CRMRepo(conn)
         self.runs = RunRepo(conn)
         self.quota = QuotaRepo(conn)
+
+    @staticmethod
+    def writing() -> Any:
+        """`with repos.writing(): …` around a group of writes (§1.1)."""
+        return writing()
 
 
 def open_repos(settings: Settings | None = None, *, path: Path | str | None = None) -> Repos:

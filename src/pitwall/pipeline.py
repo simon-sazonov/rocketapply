@@ -10,11 +10,15 @@ run dies at stage 5, stages 1–4 do not repeat.
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import logging
 import sqlite3
+import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -25,6 +29,7 @@ from .extract.linkedin import parse_profile
 from .inputs import load_and_sync, load_negative_keywords
 from .models import Company, LLMVerdict, Role, Score
 from .query_builder import build_all
+from .ratelimit import AdaptiveConcurrency
 from .scoring import heuristics
 from .scoring.llm import (
     LLMScorer,
@@ -35,6 +40,7 @@ from .scoring.llm import (
 )
 from .search import (
     ProviderError,
+    RateLimited,
     SerpCache,
     build_chain,
 )
@@ -73,6 +79,18 @@ class RunStats:
 
 
 @dataclass
+class _LLMJob:
+    """One batch, with everything read from SQLite before it leaves the thread."""
+
+    rows: list[dict[str, Any]]
+    payload: list[dict[str, Any]]
+    company: Company | None
+    role: Role | None
+    company_id: int | None
+    role_id: int | None
+
+
+@dataclass
 class RunParams:
     """Everything a run can be narrowed by. CLI flags and UI controls both
     land here — the top precedence layer of §3.3."""
@@ -90,6 +108,8 @@ class RunParams:
     rescore_all: bool = False
     prompt_version: str | None = None
     limit: int | None = None
+    #: Overrides both stage pools for one run; None = the configured values.
+    concurrency: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -200,36 +220,76 @@ class Pipeline:
 
         pending = self.repos.queries.pending(limit=limit, stale_before=stale_before)
         total = len(pending)
-        self.progress("search", f"{total} queries to run", 0, total)
-        disabled: set[str] = set()
+        workers = max(1, params.concurrency or self.settings.search_concurrency)
+        self.progress(
+            "search", f"{total} queries to run on {workers} worker(s)", 0, total
+        )
+        if not pending:
+            return stats
 
-        for i, q in enumerate(pending, start=1):
-            if self.cancelled():
-                stats.notes.append("cancelled during search")
-                break
-            hits, provider_name, from_cache = self._search_one(
-                q["query_text"], chain, max_results, params, disabled
+        disabled: set[str] = set()
+        disabled_lock = threading.Lock()
+        throttle = AdaptiveConcurrency(workers, name="search")
+
+        def fetch(row: dict[str, Any]) -> tuple[dict[str, Any], Any, str, bool]:
+            """Runs on a worker thread. Network and disk cache only — **never**
+            SQLite. Every database write happens on the submitting thread, which
+            is what makes `database is locked` structurally impossible here."""
+            with throttle.slot():
+                hits, provider_name, from_cache = self._search_one(
+                    row["query_text"], chain, max_results, params, disabled,
+                    disabled_lock=disabled_lock, throttle=throttle,
+                )
+            return row, hits, provider_name, from_cache
+
+        done = 0
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="pitwall-search") as pool:
+            futures = {pool.submit(fetch, q): q for q in pending}
+            for future in as_completed(futures):
+                if self.cancelled():
+                    stats.notes.append("cancelled during search")
+                    for pending_future in futures:
+                        pending_future.cancel()
+                    break
+                try:
+                    row, hits, provider_name, from_cache = future.result()
+                except CancelledError:  # pragma: no cover - cancellation race
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    row = futures[future]
+                    log.exception("search worker raised on query %s", row.get("id"))
+                    hits, provider_name, from_cache = None, f"worker: {exc}", False
+
+                done += 1
+                if hits is not None and not from_cache:
+                    self._record_search_quota(chain, provider_name)
+                with self.repos.writing():
+                    if hits is None:
+                        self.repos.queries.mark(row["id"], "failed", error=provider_name)
+                        stats.queries_failed += 1
+                    else:
+                        n = self.repos.results.insert_hits(row["id"], provider_name, hits)
+                        self.repos.queries.mark(
+                            row["id"], "done", provider=provider_name,
+                            results_count=len(hits), error=None,
+                        )
+                        stats.queries_executed += 1
+                        stats.results_fetched += n
+                        if from_cache:
+                            stats.queries_cached += 1
+                if done % 5 == 0 or done == total:
+                    self.progress(
+                        "search",
+                        f"{done}/{total} queries · {stats.results_fetched} rows "
+                        f"({stats.queries_cached} cached)",
+                        done,
+                        total,
+                    )
+        if throttle.reductions:
+            stats.notes.append(
+                f"search concurrency reduced {throttle.reductions}× to {throttle.limit} "
+                "after rate limiting"
             )
-            if hits is None:
-                self.repos.queries.mark(q["id"], "failed", error=provider_name)
-                stats.queries_failed += 1
-            else:
-                n = self.repos.results.insert_hits(q["id"], provider_name, hits)
-                self.repos.queries.mark(
-                    q["id"], "done", provider=provider_name, results_count=len(hits), error=None
-                )
-                stats.queries_executed += 1
-                stats.results_fetched += n
-                if from_cache:
-                    stats.queries_cached += 1
-            if i % 5 == 0 or i == total:
-                self.progress(
-                    "search",
-                    f"{i}/{total} queries · {stats.results_fetched} rows "
-                    f"({stats.queries_cached} cached)",
-                    i,
-                    total,
-                )
         return stats
 
     def _search_one(
@@ -239,8 +299,16 @@ class Pipeline:
         max_results: int,
         params: RunParams,
         disabled: set[str],
+        *,
+        disabled_lock: threading.Lock | None = None,
+        throttle: AdaptiveConcurrency | None = None,
     ) -> tuple[list[Any] | None, str, bool]:
-        """Cache -> provider chain. Returns (hits|None, provider_or_error, cached)."""
+        """Cache -> provider chain. Returns (hits|None, provider_or_error, cached).
+
+        Called from worker threads, so it touches the network and the disk cache
+        and nothing else. Quota accounting is returned to the caller rather than
+        written here — see `_record_search_quota`.
+        """
         last_error = "no provider available"
         for provider in chain:
             if provider.name in disabled:
@@ -257,8 +325,20 @@ class Pipeline:
                 )
             except SearchQuotaExhausted as exc:
                 log.warning("%s out of quota — disabled for this run", provider.name)
-                disabled.add(provider.name)
+                if disabled_lock is not None:
+                    with disabled_lock:
+                        disabled.add(provider.name)
+                else:
+                    disabled.add(provider.name)
                 last_error = f"{provider.name}: {exc}"
+                continue
+            except RateLimited as exc:
+                # The ceiling was wrong. Lower it for the rest of the run rather
+                # than walking every remaining query into the same wall (§1.1).
+                if throttle is not None:
+                    throttle.reduce(f"{provider.name} rate limited")
+                last_error = f"{provider.name}: {exc}"
+                log.warning("provider %s rate limited: %s", provider.name, exc)
                 continue
             except ProviderError as exc:
                 last_error = f"{provider.name}: {exc}"
@@ -270,16 +350,28 @@ class Pipeline:
                 continue
 
             self.cache.put(provider.name, query_text, max_results, hits)
-            self.repos.quota.consume(provider.name, 1)
-            if provider.name in {"serper", "serpapi"}:
-                self.repos.quota.spend_credits(provider.name, 1)
-                remaining = self.repos.quota.credits(provider.name)
-                if remaining is not None:
-                    provider.set_quota(remaining)  # type: ignore[attr-defined]
             return hits, provider.name, False
         if params.cache_only:
             return [], chain[0].name if chain else "cache", True
         return None, last_error, False
+
+    def _record_search_quota(self, chain: list[SearchProvider], name: str) -> None:
+        """Quota bookkeeping for one executed query — **submitting thread only**.
+
+        A sqlite3 connection belongs to the thread that opened it, and `Repos`
+        holds one. Calling this from a worker raises ProgrammingError, which the
+        consume loop would then record as a failed query rather than as the bug
+        it is. Keeping every write on one thread is the whole design.
+        """
+        with self.repos.writing():
+            self.repos.quota.consume(name, 1)
+            if name in {"serper", "serpapi"}:
+                self.repos.quota.spend_credits(name, 1)
+                remaining = self.repos.quota.credits(name)
+                if remaining is not None:
+                    for provider in chain:
+                        if provider.name == name:
+                            provider.set_quota(remaining)  # type: ignore[attr-defined]
 
     def _prime_credits(self, chain: list[SearchProvider]) -> None:
         for provider in chain:
@@ -561,16 +653,45 @@ class Pipeline:
         by_role = {r.id: r for r in roles if r.id}
 
         total = len(pending)
-        done = 0
-        self.progress("llm", f"{total} candidates in {len(groups)} company×role groups", 0, total)
+        workers = max(1, params.concurrency or self.settings.llm_concurrency)
 
+        # Everything the model needs, read from SQLite up front on this thread,
+        # so the workers below are pure network calls.
+        queue: deque[_LLMJob] = deque()
         for (company_id, role_id), rows in groups.items():
             company = by_company.get(company_id) if company_id is not None else None
             role = by_role.get(role_id) if role_id is not None else None
             for batch in batched(rows, self.settings.llm_batch_size):
+                queue.append(
+                    _LLMJob(
+                        rows=batch,
+                        payload=[self._llm_payload(r) for r in batch],
+                        company=company,
+                        role=role,
+                        company_id=company_id,
+                        role_id=role_id,
+                    )
+                )
+
+        done = 0
+        throttle = AdaptiveConcurrency(workers, name="llm")
+        self.progress(
+            "llm",
+            f"{total} candidates in {len(queue)} batches on {workers} worker(s) "
+            f"via {scorer.provider}",
+            0,
+            total,
+        )
+
+        # Waves rather than a continuous stream: degradation swaps the shared
+        # scorer, and doing that while other workers hold a reference to the old
+        # one is the kind of race that only shows up in production. A wave
+        # boundary is a point where nothing is in flight.
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="pitwall-llm") as pool:
+            while queue:
                 if self.cancelled():
                     stats.notes.append("cancelled during LLM scoring")
-                    return self._finish_llm(scorer, stats)
+                    break
                 used = self.repos.quota.used_today(f"llm:{scorer.provider}")
                 if used >= cap * 0.95:
                     # A per-provider ceiling, so this is a reason to move down
@@ -579,20 +700,42 @@ class Pipeline:
                         scorer, stats, LLMUnavailable(f"daily cap reached ({used}/{cap})")
                     )
                     if nxt is None:
-                        return self._finish_llm(scorer, stats)
+                        break
+                    scorer = nxt
+                    continue
+
+                wave = [queue.popleft() for _ in range(min(throttle.limit, len(queue)))]
+                active = scorer
+                call = functools.partial(self._llm_call, active, throttle)
+
+                requeue: list[_LLMJob] = []
+                failure: Exception | None = None
+                for job, outcome, err in pool.map(call, wave):
+                    if err is not None or (outcome is not None and outcome.provider_error):
+                        if isinstance(err, QuotaExhausted):
+                            throttle.reduce(f"{active.provider} quota")
+                        failure = err or LLMUnavailable(outcome.error or "the call failed")
+                        requeue.append(job)
+                        continue
+
+                    with self.repos.writing():
+                        self.repos.quota.consume(f"llm:{active.provider}", 1)
+                        stats.llm_calls += 1
+                        self._persist_verdicts(
+                            job.rows, outcome, job.company_id, job.role_id,
+                            prompt_version, stats,
+                        )
+                    done += len(job.rows)
+
+                if requeue:
+                    # Put the failed batches back at the FRONT, so nobody is
+                    # skipped, and move to the next provider before retrying.
+                    queue.extendleft(reversed(requeue))
+                    nxt = self._degrade(scorer, stats, failure or LLMUnavailable("unknown"))
+                    if nxt is None:
+                        break
                     scorer = nxt
 
-                payload = [self._llm_payload(r) for r in batch]
-                scorer, outcome = self._score_batch_with_degradation(
-                    scorer, payload, company, role, stats
-                )
-                if outcome is None:          # the whole chain is spent
-                    return self._finish_llm(scorer, stats)
-
-                self.repos.quota.consume(f"llm:{scorer.provider}", 1)
-                stats.llm_calls += 1
-                self._persist_verdicts(batch, outcome, company_id, role_id, prompt_version, stats)
-                done += len(batch)
                 self.progress(
                     "llm",
                     f"{done}/{total} scored · {stats.llm_calls} calls on {scorer.provider}",
@@ -600,39 +743,29 @@ class Pipeline:
                     total,
                 )
 
+        if throttle.reductions:
+            stats.notes.append(
+                f"LLM concurrency reduced {throttle.reductions}× to {throttle.limit} "
+                "after rate limiting"
+            )
         return self._finish_llm(scorer, stats)
 
-    def _score_batch_with_degradation(
-        self,
-        scorer: LLMScorer,
-        payload: list[dict[str, Any]],
-        company: Company | None,
-        role: Role | None,
-        stats: RunStats,
-    ) -> tuple[LLMScorer, Any | None]:
-        """One batch, retried down the provider chain.
+    @staticmethod
+    def _llm_call(
+        scorer: LLMScorer, throttle: AdaptiveConcurrency, job: _LLMJob
+    ) -> tuple[_LLMJob, Any, Exception | None]:
+        """Worker thread: one API call.
 
-        Degradation is per batch and both halves are logged: which provider gave
-        up and which one took over. Two failures count as "this provider is
-        done" — a quota refusal, and a call that came back with nothing but an
-        error, which is what an unreachable or 5xx-ing provider looks like from
-        here. A model that merely answered badly is *not* a provider failure and
-        must not cost a degradation: the repair ladder already handles it.
+        No SQLite and no shared mutable state beyond the scorer's own HTTP
+        client, which is thread-safe, and its `Usage` counters, which are
+        lock-guarded. Exceptions come back as values so one bad batch cannot
+        take the pool down with it.
         """
-        while True:
+        with throttle.slot():
             try:
-                outcome = scorer.score_batch(payload, company, role)
-            except QuotaExhausted as exc:
-                failure: Exception = exc
-            else:
-                if not outcome.provider_error:
-                    return scorer, outcome
-                failure = LLMUnavailable(outcome.error or "the call failed")
-
-            nxt = self._degrade(scorer, stats, failure)
-            if nxt is None:
-                return scorer, None
-            scorer = nxt
+                return job, scorer.score_batch(job.payload, job.company, job.role), None
+            except Exception as exc:  # noqa: BLE001
+                return job, None, exc
 
     def _llm_payload(self, score_row: dict[str, Any]) -> dict[str, Any]:
         """The raw evidence the model judges — title and snippet, not our parse."""

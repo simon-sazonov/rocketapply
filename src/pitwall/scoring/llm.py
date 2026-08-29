@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -103,11 +104,17 @@ class Usage:
     calls: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
+    #: One scorer is shared by the LLM stage's worker threads (§1.1), so the
+    #: three counters below are written concurrently. `+=` is a read and a
+    #: write, not one operation, and the interpreter is free to switch threads
+    #: between them.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, tin: int, tout: int) -> None:
-        self.calls += 1
-        self.tokens_in += tin
-        self.tokens_out += tout
+        with self._lock:
+            self.calls += 1
+            self.tokens_in += tin
+            self.tokens_out += tout
 
     def cost(self, prices: dict[str, float]) -> float:
         return (

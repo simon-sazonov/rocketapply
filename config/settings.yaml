@@ -25,6 +25,9 @@ search:
   # One-time credits that never refill: below this floor the chain stops
   # reaching for serper by itself. `--use-serper` overrides it for one run.
   serper_reserve_credits: 500
+  # Thread-pool size. The shared token bucket is what caps the query RATE;
+  # this caps how many are in flight at once. Workers never touch SQLite.
+  concurrency: 4
 
 query_budget:
   max_queries_per_run: 200
@@ -56,6 +59,10 @@ scoring:
 
 llm:
   batch_size: 8
+  # Groq's free tier is 30 requests/minute but only 8,000 tokens/minute, and
+  # a batch of 8 costs roughly 2,500 — the token ceiling binds first, and a
+  # 429 halves this for the rest of the run on its own.
+  concurrency: 8
   temperature: 0
   max_tokens: 1500
   prompt_version: v1
