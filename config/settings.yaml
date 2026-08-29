@@ -42,7 +42,18 @@ scoring:
   #     thr=12  precision 0.61  recall 0.94  F1 0.74   <- chosen
   #     thr=5   precision 0.59  recall 1.00  F1 0.74
   # Re-run `python scripts/eval_scoring.py sweep` after any rubric change.
-  # Raise this back towards 25 if you switch to an operator-capable provider.
+  #
+  # v2 STATUS (§1.3): the provider IS operator-capable now, so this should move
+  # up — but NOT from these numbers. Those 60 labels were collected on `ddgs`
+  # snippet shapes; SearXNG's `content` field is not DuckDuckGo's `body`, so the
+  # same person reads differently to the heuristic layer and the labels do not
+  # transfer. `sweep` refuses to recommend a value while the provenance
+  # disagrees. The sequence, in order:
+  #     python scripts/eval_scoring.py relabel        # sweep + draft a worksheet
+  #     <label the `relevant` column by hand>
+  #     python scripts/eval_scoring.py sweep --path tests/fixtures/eval_set_searxng.csv
+  # Then change the number here and record the before/after precision and recall
+  # next to it, exactly as above. A threshold with no numbers beside it is a guess.
   heuristic_threshold: 12
   weights:
     heuristic: 0.30
