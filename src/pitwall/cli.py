@@ -223,6 +223,56 @@ def validate() -> None:
     )
 
 
+README_BEGIN = "<!-- BEGIN generated: csv-columns -->"
+README_END = "<!-- END generated: csv-columns -->"
+
+
+@app.command()
+def columns(
+    check: bool = typer.Option(False, "--check", help="fail if the README is stale"),
+    write: bool = typer.Option(False, "--write", help="regenerate the README block"),
+) -> None:
+    """The CSV column contract, generated from the validation rules (§3.3).
+
+    The README's table is produced from the same `ColumnSpec` list the loader
+    validates against, so the two cannot drift. `--check` is the guard; it is
+    also a test.
+    """
+    from .config import project_root
+    from .inputs import column_docs
+
+    docs = column_docs()
+    readme = project_root() / "README.md"
+
+    if not (check or write):
+        console.print(docs)
+        return
+
+    text = readme.read_text(encoding="utf-8") if readme.exists() else ""
+    if README_BEGIN not in text or README_END not in text:
+        console.print(
+            f"[red]README.md has no generated block[/] — add these two markers "
+            f"around the column tables:\n  {README_BEGIN}\n  {README_END}"
+        )
+        raise typer.Exit(1)
+
+    head, rest = text.split(README_BEGIN, 1)
+    _, tail = rest.split(README_END, 1)
+    fresh = f"{head}{README_BEGIN}\n{docs}\n{README_END}{tail}"
+
+    if write:
+        readme.write_text(fresh, encoding="utf-8")
+        console.print("[green]README.md column tables regenerated[/]")
+        return
+    if fresh != text:
+        console.print(
+            "[red]README.md is out of date[/] — the column rules changed. "
+            "Run `pitwall columns --write`."
+        )
+        raise typer.Exit(1)
+    console.print("[green]README.md matches the validation rules[/]")
+
+
 @app.command("init-db")
 def init_db() -> None:
     """Create the SQLite schema and sync the input CSVs into it."""

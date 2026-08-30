@@ -208,3 +208,51 @@ def test_no_command_was_lost_in_the_move(command):
 
     names = {c.name or c.callback.__name__.replace("_", "-") for c in app.registered_commands}
     assert command in names
+
+
+# ────────── §3.3: the README column docs cannot drift from the rules ──────
+
+
+def test_the_readme_column_tables_match_the_validation_rules():
+    """The point of generating them: change a rule, and this fails until the
+    README is regenerated with `pitwall columns --write`."""
+    from pitwall.cli import README_BEGIN, README_END
+    from pitwall.inputs import column_docs
+
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert README_BEGIN in text and README_END in text
+    block = text.split(README_BEGIN, 1)[1].split(README_END, 1)[0]
+    assert block.strip() == column_docs().strip()
+
+
+def test_every_column_the_loader_accepts_is_documented():
+    from pitwall.inputs import COMPANY_COLUMNS, COMPANY_SPEC, ROLE_COLUMNS, ROLE_SPEC
+
+    assert tuple(c.name for c in COMPANY_SPEC) == COMPANY_COLUMNS
+    assert tuple(c.name for c in ROLE_SPEC) == ROLE_COLUMNS
+    for spec in (*COMPANY_SPEC, *ROLE_SPEC):
+        assert spec.rule, f"{spec.name} has no stated rule"
+        assert spec.why, f"{spec.name} has no stated reason"
+
+
+def test_the_docs_name_the_required_columns_as_required():
+    from pitwall.inputs import COMPANY_SPEC, ROLE_SPEC
+
+    required = {c.name for c in COMPANY_SPEC if c.required}
+    assert required == {"name"}
+    assert {c.name for c in ROLE_SPEC if c.required} == {"title", "family"}
+
+
+def test_the_docs_list_the_active_profiles_vocabulary(monkeypatch):
+    from pitwall.inputs import column_docs
+
+    assert "vehicle_dynamics" in column_docs()
+    monkeypatch.setenv("PITWALL_PROFILE", "generic")
+    from pitwall import profiles
+
+    profiles.reload()
+    try:
+        assert "vehicle_dynamics" not in column_docs()
+        assert "`software`" in column_docs()
+    finally:
+        profiles.reload()
