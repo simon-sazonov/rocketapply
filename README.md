@@ -1,16 +1,77 @@
 # 🏁 PitWall
 
-**A motorsport networking lead finder.** Give it a list of companies and a list of
-roles; it gives you back a scored, filterable, note-taking pipeline of real people
-you can reach out to.
+**A networking lead finder.** Give it a list of companies and a list of roles; it
+gives you back a scored, filterable, note-taking pipeline of real people you can
+reach out to — and, since v2, the live job openings at those companies with the
+people you already know there attached to each one.
 
 Job boards show you *openings*. They do not show you *people* — the engineers,
 analysts and heads of department who actually decide, who post about their work,
 and who answer a good message. PitWall finds those people, ranks them, and keeps
 track of who you already looked at.
 
-Built to the specification in [`PITWALL_PLAN.md`](PITWALL_PLAN.md). Pure Python:
-Streamlit, SQLite, free search APIs, open-weight LLMs. Runs locally, costs $0.
+Motorsport is the default profile and the one it was built for; `PITWALL_PROFILE`
+points it at any other field. Pure Python: Streamlit, SQLite, free search, free
+LLMs. Runs locally, costs $0.
+
+---
+
+## Quickstart
+
+```bash
+make venv                       # .venv + dependencies (Python 3.11+)
+.venv/bin/pitwall init          # config, .env, providers, validation
+make searxng                    # local search that supports operators (needs Docker)
+.venv/bin/pitwall validate      # check your two CSVs
+.venv/bin/pitwall run --max-queries 50
+.venv/bin/streamlit run app/Home.py
+```
+
+That is the whole thing. Everything below explains a piece of it.
+
+> **Always use `.venv/bin/python`.** On macOS the system `python3` is often
+> Anaconda's, whose `pydantic-settings` is too old to import this package. `pitwall
+> init` checks for that and says so by name.
+
+## What it costs: nothing
+
+Every provider below has a free tier that needs **no credit card** and does not
+convert to paid. If one changes, the chain degrades to the next rather than
+breaking.
+
+| | what it does | sign-up |
+|---|---|---|
+| **SearXNG** | self-hosted search, and the only provider that supports `site:` and quoted phrases | `make searxng` — no account |
+| **ddgs** | keyless fallback search, no operators | nothing to do |
+| **Serper** | 2,500 one-time credits, held in reserve for bursts | [serper.dev](https://serper.dev) |
+| **Groq** | the LLM scoring, ~1 s per batch | [console.groq.com](https://console.groq.com) |
+| **Z.ai / DeepSeek** | permanent free tiers, optional fallbacks | [z.ai](https://z.ai) · [deepseek.com](https://platform.deepseek.com) |
+| **Ollama** | local, offline last resort; minutes per batch on CPU | [ollama.com](https://ollama.com) |
+
+Google's Custom Search JSON API is **not** an option: it is closed to new
+customers and shuts down on 1 January 2027.
+
+## What it does not do
+
+This list is deliberate, not a roadmap. None of it is coming.
+
+- **No email or phone discovery.** No harvesting, no pattern inference, no SMTP
+  verification, not even a column for it. A LinkedIn profile URL is the contact
+  surface.
+- **No LinkedIn fetching.** No page requests, no login, no cookies, no headless
+  browser. Identity comes only from the title, URL and snippet a search engine
+  already publishes.
+- **No sending.** Drafting a message is fair game; sending one is not, and there
+  is no code that could.
+- **No scraping around a refusal.** `robots.txt` is enforced in code, and a site
+  that declines an honest User-Agent is left alone — `motorsportjobs.com` is
+  configured and disabled for exactly that reason.
+- **No multi-tenant hosting, no accounts.** One person, one machine, one SQLite
+  file.
+
+Retention is 180 days for people you never touched; anyone you saved, contacted
+or annotated is exempt. Delete & blocklist is permanent and prevents
+re-ingestion.
 
 ---
 
@@ -20,11 +81,12 @@ Streamlit, SQLite, free search APIs, open-weight LLMs. Runs locally, costs $0.
 companies.csv + roles.csv
         │
         ▼  1. query builder      company × role × template, prioritized, budget-capped
-        ▼  2. search             ddgs (free) → serper (paid) → searxng, cached 7 days
+        ▼  2. search             searxng → ddgs → serper, concurrent, cached 7 days
         ▼  3. extract & dedupe   SERP rows → distinct people, keyed on the LinkedIn slug
         ▼  4. heuristics         free, deterministic, explainable — kills most of the noise
         ▼  5. LLM filter         batched JSON verdicts with reasons and red flags
-        ▼  6. dashboard          filter · ⭐ save · ❌ ignore · 📝 note · 📩 contacted · 🔄 follow-up
+        ▼  6. job openings       live postings × the people you already have there
+        ▼  7. dashboard          filter · ⭐ save · ❌ ignore · 📝 note · 📩 contacted · 🔄 follow-up
 ```
 
 Every stage writes to SQLite and is independently resumable. If a run dies at
@@ -43,40 +105,52 @@ score is traceable back to the search-result snippet that produced it.
 Requires Python 3.11+.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env          # then edit if you have API keys
+make venv                     # or: python3.11 -m venv .venv && pip install -r requirements.txt
+.venv/bin/pitwall init        # writes config/*.csv and .env, checks your setup
 ```
 
-**No API key is needed for any of this.** DuckDuckGo search is keyless, and the
-LLM stage runs locally on Qwen through [Ollama](https://ollama.com). Cloud
-providers are optional upgrades, not requirements.
+`pitwall init` is safe to run twice — it finishes an interrupted setup rather
+than resetting one.
 
 ## First run
 
 ```bash
-# 1. Write config/companies.csv and config/roles.csv
-python scripts/seed_motorsport.py            # from motorsport_teams.csv / motorsport_positions.csv
-python scripts/seed_motorsport.py --source plan --force   # or the plan's §17 starter grid
+# 1. Your two CSVs. `pitwall init` writes commented samples; this fills them from
+#    the bundled motorsport research tables instead.
+.venv/bin/python scripts/seed.py                        # config/seed/motorsport_*.csv
+.venv/bin/python scripts/seed.py --source plan --force  # or the plan's §17 starter grid
 
 # 2. Create the database
-python scripts/run_pipeline.py init-db
+.venv/bin/pitwall init-db
 
-# 3. Set up the local model that does the AI scoring (~4.7 GB, once)
-python scripts/setup_ollama.py               # skip if you set a cloud key instead
+# 3. Search that supports operators. Without it, 8 of the 12 query templates
+#    never fire and coverage suffers badly.
+make searxng && make searxng-check
 
-# 4. See the plan without touching the network
-python scripts/run_pipeline.py build-queries --dry-run
+# 4. The LLM. Free, and ~1 s per batch instead of a minute.
+#    Put GROQ_API_KEY in .env, then:
+make groq-check
+#    …or stay local and offline:
+.venv/bin/python scripts/setup_ollama.py
 
-# 5. Run it (about 4 s per query on the free provider — 50 queries ≈ 3½ minutes)
-python scripts/run_pipeline.py run --max-queries 50 --max-results 15
+# 5. See the plan, and the cost, without touching the network
+.venv/bin/pitwall build-queries --dry-run
+.venv/bin/pitwall preview
 
-# 6. Look at your leads
-streamlit run app/Home.py
+# 6. Run it
+.venv/bin/pitwall run --max-queries 50 --max-results 15
+
+# 7. Live job openings, cross-referenced against the people you just found
+.venv/bin/python scripts/discover_ats.py    # once
+.venv/bin/pitwall jobs
+.venv/bin/pitwall openings
+
+# 8. Look at your leads
+.venv/bin/streamlit run app/Home.py
 ```
 
-Steps 1–2 take seconds. Step 3 is a one-time download. Skip step 3 and everything
-still works — you just get heuristic scores without the AI judgement layer.
+Skip step 4 entirely and everything still works — you get heuristic scores
+without the LLM judgement layer.
 
 ---
 
@@ -154,38 +228,56 @@ with its raw title and snippet. When a score looks wrong you can see exactly why
 
 ## Command reference
 
+`pitwall` is installed by `pip install -e .`; `python scripts/run_pipeline.py` is
+the same program for anyone who has not.
+
 ```bash
+# first run, and checking your inputs
+pitwall init                    # config, .env, providers, validation report
+pitwall validate                # what is wrong with your CSVs, and why
+pitwall columns                 # the CSV contract, generated from the rules
+
 # planning (no network)
-python scripts/run_pipeline.py build-queries --dry-run
-python scripts/run_pipeline.py preview
+pitwall build-queries --dry-run
+pitwall preview
 
 # stages, individually — each is resumable
-python scripts/run_pipeline.py search  --limit 50
-python scripts/run_pipeline.py extract --reprocess
-python scripts/run_pipeline.py score   --heuristic-only
+pitwall search  --limit 50 --concurrency 4
+pitwall extract --reprocess
+pitwall score   --heuristic-only
+pitwall score   --triage-min 25 --triage-top 200   # spend the LLM where it counts
 
 # a full run, narrowed
-python scripts/run_pipeline.py run --companies "AF Corse,PREMA Racing" \
-                                   --roles "Data Engineer,Race Strategy Engineer"
+pitwall run --companies "AF Corse,PREMA Racing" \
+            --roles "Data Engineer,Race Strategy Engineer"
 
 # re-score after a prompt change, without searching again
-python scripts/run_pipeline.py score --rescore-all --prompt-version v2
+pitwall score --rescore-all --prompt-version v2
 
 # iterate on the parser entirely offline
-python scripts/run_pipeline.py search --cache-only && \
-python scripts/run_pipeline.py extract --reprocess
+pitwall search --cache-only && pitwall extract --reprocess
+
+# live job openings, and who you know at those companies
+python scripts/discover_ats.py        # once; finds public ATS boards
+pitwall jobs --score-fit              # poll sources, score fit vs config/profile.md
+pitwall openings                      # the join, in the terminal
 
 # where things stand, and what to export
-python scripts/run_pipeline.py stats
-python scripts/run_pipeline.py export --format md --min-score 55
+pitwall stats
+pitwall coverage                      # how much of the company list is actually searched
+pitwall export --format md --min-score 55
 
 # housekeeping
+make searxng-check                    # is the search container healthy?
+make groq-check                       # which models can this key reach?
 python scripts/purge_stale.py --apply --vacuum
+python scripts/eval_scoring.py relabel # §1.3: sweep + a labelling worksheet
 python scripts/eval_scoring.py sweep
-python scripts/setup_ollama.py --check
+python scripts/sanitise_eval_set.py --check   # no real people in tracked fixtures
 ```
 
 ---
+
 
 ## Scoring, in two stages
 
@@ -333,14 +425,19 @@ These constraints are architectural, not optional. Read §1.3 of the plan.
    re-ingestion on every future run. That is both your "not interested" button
    and your GDPR erasure mechanism.
 5. **Never publish the database.** `data/` and `.env` are gitignored from commit #1.
-   Note that `tests/fixtures/` deliberately *is* tracked, and the eval set and
-   SERP captures inside it contain real people's names and public profile URLs —
-   which is what makes them useful for tuning. **Keep this repository private.**
-   If you ever need to push it somewhere public, delete `tests/fixtures/eval_set.csv`
-   and `tests/fixtures/serp_*.json` first, or regenerate them with
-   `python scripts/eval_scoring.py bootstrap` against synthetic rows.
-6. **Rate-limit politely.** One query every four seconds, exponential backoff on
-   429s, and a cache so the same query is never issued twice in a week.
+   `tests/fixtures/` *is* tracked, because the labelled eval set is what makes a
+   threshold change measurable — and as of v2 every identity in it is synthetic.
+   The eval set and both SERP captures were sanitised by
+   `scripts/sanitise_eval_set.py`; the real labelled set now lives in
+   `data/eval_set_real.csv`, which is git-ignored, and `eval_scoring.py` prefers
+   it when it is there. `python scripts/sanitise_eval_set.py --check` is the
+   guard, and so is `tests/test_eval_set_privacy.py`.
+6. **Rate-limit politely, and take no for an answer.** One query per second
+   through SearXNG, exponential backoff on 429s, a shared token bucket across
+   worker threads, and a seven-day cache so the same query is never issued
+   twice in a week. For job sources, `robots.txt` is parsed and applied in code
+   — and a site that refuses an honest User-Agent is left alone rather than
+   worked around.
 
 There is **no outreach-sending capability by design**, and there will not be one.
 Motorsport is a small industry; automated messaging burns your reputation in it.
@@ -363,14 +460,21 @@ and never touch your real database, CSVs or cache. The saved SERP fixtures in
 
 ```
 config/          companies.csv · roles.csv · settings.yaml · query_templates.yaml
-src/pitwall/     config · models · db · inputs · query_builder · ratelimit · pipeline · crm · export
+  profiles/      motorsport.yaml (the default) · generic.yaml
+  seed/          the motorsport research tables seed.py reads
+  job_sources.yaml · profile.md (your CV, for job-fit scoring)
+docker/searxng/  compose file + instance settings for the search container
+src/pitwall/     config · profiles · models · db · inputs · query_builder · ratelimit
+                 pipeline · crm · export · cli · setup_wizard
   search/        base · cache · ddg · serper · searxng
   extract/       linkedin (the SERP parser) · normalize · dedupe
-  scoring/       heuristics · llm · schema · prompts/
-app/             Home.py + pages/ (Setup · Run Search · Leads · Pipeline · Analytics)
-scripts/         run_pipeline · seed_motorsport · purge_stale · eval_scoring · setup_ollama
-tests/           unit + integration + the labelled eval set
-data/            pitwall.db · cache/ · exports/ · backups/     (gitignored)
+  scoring/       heuristics · llm · jobs · schema · prompts/
+  sources/jobs/  base · ats · aggregator · career_page
+app/             Home.py + pages/ (Setup · Run Search · Leads · Pipeline · Analytics · Openings)
+scripts/         run_pipeline · seed · purge_stale · eval_scoring · setup_ollama
+                 setup_groq · check_searxng · discover_ats · sanitise_eval_set
+tests/           unit + integration + the labelled eval set (synthetic identities)
+data/            pitwall.db · cache/ · exports/ · backups/ · eval_set_real.csv  (gitignored)
 ```
 
 ---
@@ -379,7 +483,9 @@ data/            pitwall.db · cache/ · exports/ · backups/     (gitignored)
 
 | symptom | likely cause | fix |
 |---|---|---|
-| Every query returns 0 results | DuckDuckGo rate-limited you | Wait 15 min, lower `ddgs_queries_per_second`, or add a Serper key |
+| Every query returns 0 results | the upstream engines are captcha-ing SearXNG, or DuckDuckGo rate-limited you | `make searxng-check` — it names the blocked engines. Lower `searxng_queries_per_second`, or wait an hour |
+| `site:` queries return nothing useful | SearXNG is not running, so `ddgs` is leading the chain and operator templates are dropped | `make searxng`; `pitwall build-queries --dry-run` shows which provider and how many templates |
+| The LLM stage fell back to Ollama | Groq's per-minute token ceiling, misread as exhaustion | Fixed in v2 — a per-minute limit is waited out, a per-day one degrades. Check the run notes |
 | A company returns nothing at all | wrong or missing alias | Check the Analytics coverage heatmap — empty rows are flagged for you |
 | Wrong-industry people scoring high | empty `negative_keywords` for that company | Fill the column, then `score --rescore-all` |
 | `current_company` comes out empty | unusual SERP title format | Add the string to `tests/test_linkedin_parser.py` and extend the regex |
