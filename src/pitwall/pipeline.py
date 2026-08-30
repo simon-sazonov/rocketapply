@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from .config import Settings, get_settings
 from .db import Repos, open_repos
@@ -146,6 +146,10 @@ class Pipeline:
         self._llm_remaining: list[str] = []
         #: Consecutive rate-limited waves; reset by any successful batch.
         self._llm_rate_limit_hits = 0
+        #: Which scorer class this stage builds. `_degrade` reads it, so a
+        #: mid-run handover during job scoring produces a JobRelevanceScorer
+        #: and not a plain LLMScorer without a `score_jobs` method.
+        self._llm_factory: type[LLMScorer] = LLMScorer
 
     # ── progress plumbing ──
 
@@ -648,6 +652,7 @@ class Pipeline:
         # degradation path (§0.4); keyless providers drop out silently.
         self._llm_remaining = self.settings.llm_chain()
         self._llm_rate_limit_hits = 0
+        self._llm_factory = LLMScorer
         scorer = self._open_scorer(stats)
         if scorer is None:
             tried = ", ".join(self.settings.llm_chain()) or "none"
@@ -756,10 +761,14 @@ class Pipeline:
                     # never silently skips anyone.
                     queue.extendleft(reversed(requeue))
 
+                # `scorer` is reassigned only when a replacement exists, so it
+                # is never None here — `_finish_llm` needs the last live one to
+                # bank its token usage.
                 if throttled and failure is None:
-                    scorer = self._wait_out_rate_limit(scorer, stats, throttle, throttled)
-                    if scorer is None:
+                    waited = self._wait_out_rate_limit(scorer, stats, throttle, throttled)
+                    if waited is None:
                         break
+                    scorer = waited
                     continue
 
                 if requeue:
@@ -949,9 +958,7 @@ class Pipeline:
         self.progress("llm", note, 0, len(ranked))
         return keep
 
-    def _open_scorer(
-        self, stats: RunStats, factory: type[LLMScorer] | None = None
-    ) -> LLMScorer | None:
+    def _open_scorer(self, stats: RunStats) -> LLMScorer | None:
         """The first provider in the remaining chain that is actually usable.
 
         Three ways to be unusable, and all three are silent skips rather than
@@ -969,7 +976,7 @@ class Pipeline:
         while self._llm_remaining:
             name = self._llm_remaining.pop(0)
             try:
-                scorer = (factory or LLMScorer)(self.settings, provider=name)
+                scorer = self._llm_factory(self.settings, provider=name)
                 if not scorer.is_available():
                     raise LLMUnavailable(f"{name} has no API key configured")
                 used = self.repos.quota.used_today(f"llm:{scorer.provider}")
@@ -1183,10 +1190,16 @@ class Pipeline:
 
         self._llm_remaining = self.settings.llm_chain()
         self._llm_rate_limit_hits = 0
-        scorer = self._open_scorer(stats, factory=JobRelevanceScorer)
-        if scorer is None:
+        # `_llm_factory` is what `_open_scorer` and `_degrade` both build from,
+        # so every scorer this stage sees — including one produced by a mid-run
+        # handover — has `score_jobs`. A cast rather than an isinstance check:
+        # the tests inject a factory that is a function, not a class.
+        self._llm_factory = JobRelevanceScorer
+        opened = self._open_scorer(stats)
+        if opened is None:
             stats.notes.append("no usable LLM provider for job scoring")
             return stats
+        scorer = cast("JobRelevanceScorer", opened)
 
         done = 0
         for batch in batched(pending, self.settings.llm_batch_size):
@@ -1198,7 +1211,7 @@ class Pipeline:
                 nxt = self._degrade(scorer, stats, LLMUnavailable(outcome.error or "failed"))
                 if nxt is None:
                     break
-                scorer = nxt
+                scorer = cast("JobRelevanceScorer", nxt)
                 outcome = scorer.score_jobs(profile, [job_payload(r) for r in batch])
 
             with self.repos.writing():

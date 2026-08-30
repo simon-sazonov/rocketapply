@@ -71,7 +71,7 @@ class JobSource(Protocol):
     name: str
     kind: str          # ats_json | aggregator | career_page
 
-    def fetch(self) -> list[JobPosting]: ...
+    def fetch(self, *, no_cache: bool = False) -> list[JobPosting]: ...
 
 
 # ────────────────────────────── robots.txt ───────────────────────────────

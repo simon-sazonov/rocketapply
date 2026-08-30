@@ -279,3 +279,72 @@ def test_the_two_prompt_versions_are_independent():
     # and they really are separate fields, not an alias for one another
     other = Settings(_env_file=None, job_prompt_version="v2")
     assert other.prompt_version == "v1" and other.job_prompt_version == "v2"
+
+
+def test_a_handover_mid_job_scoring_keeps_a_job_scorer(repos, settings, with_profile,
+                                                       company, role, monkeypatch):
+    """`_degrade` rebuilds from `_llm_factory`.
+
+    Before that, degradation inside the job stage produced a plain LLMScorer and
+    the next line called `.score_jobs` on it — an AttributeError that only the
+    type checker saw, because no test had made a provider fail here.
+    """
+    from pitwall.inputs import sync_to_db
+
+    sync_to_db(repos.conn, [company], [role])
+    settings.llm_provider = "zai"
+    settings.llm_provider_chain = ["zai", "deepseek"]
+    settings.zai_api_key = "sk-zai"
+    settings.deepseek_api_key = "sk-deep"
+    settings.llm_batch_size = 1
+
+    source_id = repos.job_sources.upsert("s", "ats_json")
+    for i in (1, 2):
+        repos.jobs.upsert(source_id, JobPosting(title=f"J{i}", url=f"https://x.test/{i}"))
+
+    clients = {
+        "zai": FakeClient([json.dumps(GOOD), RuntimeError("connection reset")]),
+        "deepseek": FakeClient([json.dumps(GOOD)]),
+    }
+
+    def factory(s, *, provider=None, **kw):
+        name = provider or s.llm_provider
+        return JobRelevanceScorer(s, provider=name, client=clients.get(name))
+
+    monkeypatch.setattr("pitwall.scoring.jobs.JobRelevanceScorer", factory)
+
+    pipe = Pipeline(settings, repos)
+    stats = pipe.score_jobs(RunParams(), RunStats())
+
+    assert stats.jobs_scored == 2, "the second batch survived the handover"
+    assert any("degraded to deepseek" in n for n in stats.notes)
+
+
+def test_a_spent_chain_during_scoring_still_banks_its_usage(repos, settings,
+                                                            company, role, monkeypatch):
+    """`_finish_llm` was handed None when the chain ran out mid-wave."""
+    from pitwall.inputs import sync_to_db
+    from pitwall.scoring.llm import LLMScorer
+
+    sync_to_db(repos.conn, [company], [role])
+    settings.llm_provider = "zai"
+    settings.llm_provider_chain = ["zai"]
+    settings.llm_fallback = "none"
+    settings.zai_api_key = "sk-zai"
+    settings.llm_rate_limit_retries = 0
+    settings.llm_rate_limit_max_wait = 0.01
+
+    limit = RuntimeError("429 tokens per minute. Please try again in 0.01s")
+    client = FakeClient([limit, limit, limit, limit])
+    monkeypatch.setattr(
+        "pitwall.pipeline.LLMScorer",
+        lambda s, **kw: LLMScorer(s, provider="zai", client=client),
+    )
+    from .test_scoring_pipeline import seed_pending
+
+    pipe = Pipeline(settings, repos)
+    seed_pending(pipe, repos, 1)
+    stats = pipe.score_llm(RunParams(use_llm=True))   # must not raise
+
+    assert stats.llm_scored == 0
+    assert len(repos.scores.awaiting_llm(settings.prompt_version)) == 1
