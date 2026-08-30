@@ -42,7 +42,14 @@ from pitwall.scoring.llm import LLMScorer, batched  # noqa: E402
 app = typer.Typer(add_completion=False, help=__doc__, no_args_is_help=False)
 console = Console()
 
-EVAL_CSV = ROOT / "tests" / "fixtures" / "eval_set.csv"
+#: The tracked fixture carries synthetic identities (§3.4) so the repository can
+#: be shared. The owner's real labelled set lives in `data/`, which is
+#: git-ignored, and is preferred when it is there — a threshold tuned against
+#: pseudonyms would still be tuned against the right *evidence*, but there is no
+#: reason to throw away the real thing on the machine that has it.
+PRIVATE_EVAL_CSV = ROOT / "data" / "eval_set_real.csv"
+SHARED_EVAL_CSV = ROOT / "tests" / "fixtures" / "eval_set.csv"
+EVAL_CSV = PRIVATE_EVAL_CSV if PRIVATE_EVAL_CSV.exists() else SHARED_EVAL_CSV
 EVAL_COLUMNS = [
     "candidate_id", "full_name", "serp_title", "serp_snippet", "profile_url",
     "target_company", "company_aliases", "company_negatives",
