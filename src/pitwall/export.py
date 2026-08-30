@@ -442,6 +442,13 @@ def openings_frame(
             "people_count": len(people),
             "uncontacted_count": sum(1 for p in people if p["status"] in ("new", "saved")),
             "same_family_count": sum(1 for p in people if p["proximity_rank"] == 2),
+            # Counted within the discipline, not across the company: the
+            # headline sentence says "N people in that department, M of whom
+            # you have not contacted", and M has to be a subset of N.
+            "uncontacted_same_family": sum(
+                1 for p in people
+                if p["proximity_rank"] == 2 and p["status"] in ("new", "saved")
+            ),
         })
 
     # Postings where you know someone come first — that is the whole ranking.

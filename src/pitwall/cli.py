@@ -607,10 +607,12 @@ def openings(
         if not row["people"]:
             console.print("  [dim]nobody in the database at this company yet[/]")
             continue
-        uncontacted = [p for p in row["people"] if p["status"] in ("new", "saved")]
+        total = len(row["people"])
         console.print(
-            f"  [green]{len(row['people'])} person/people you already have[/]"
-            + (f", {len(uncontacted)} not contacted" if uncontacted else "")
+            f"  [green]{total} {'person' if total == 1 else 'people'} you already have[/]"
+            f" · {row['same_family_count']} in this discipline"
+            + (f", {row['uncontacted_same_family']} of them not contacted"
+               if row["uncontacted_same_family"] else "")
         )
         for person in row["people"][:5]:
             console.print(

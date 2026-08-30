@@ -325,3 +325,29 @@ def test_a_null_title_never_renders_as_the_string_nan(repos, settings, seeded):
     people = openings_frame(repos.conn, settings)[0]["people"]
     assert all(p["title"] is None for p in people)
     assert all(isinstance(p["name"], str) and p["name"] != "nan" for p in people)
+
+
+def test_the_uncontacted_clause_counts_within_the_discipline(repos, settings, seeded):
+    """"16 people in that department, N of whom you have not contacted."
+
+    N has to be a subset of 16. It was the company-wide count, so the page read
+    "16 people in that department, 78 of whom…" — spotted by rendering the page
+    rather than by a test.
+    """
+    repos.crm.update(seeded["ids"][0], status="contacted")   # the data scientist
+    post(repos, seeded["company"]["id"], "Data Scientist", "https://apex.test/jobs/1")
+    row = openings_frame(repos.conn, settings)[0]
+
+    assert row["same_family_count"] == 1
+    assert row["uncontacted_same_family"] == 0, "the only one in-discipline is contacted"
+    assert row["uncontacted_count"] == 1, "but someone else at the company is not"
+    assert row["uncontacted_same_family"] <= row["same_family_count"]
+    assert row["uncontacted_same_family"] <= row["uncontacted_count"]
+
+
+def test_the_subset_invariant_holds_generally(repos, settings, seeded):
+    post(repos, seeded["company"]["id"], "Data Scientist", "https://apex.test/jobs/1")
+    post(repos, seeded["company"]["id"], "Race Strategy Engineer", "https://apex.test/jobs/2")
+    for row in openings_frame(repos.conn, settings):
+        assert row["uncontacted_same_family"] <= row["same_family_count"] <= row["people_count"]
+        assert row["uncontacted_same_family"] <= row["uncontacted_count"] <= row["people_count"]
