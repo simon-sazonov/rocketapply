@@ -297,12 +297,25 @@ def funnel_counts(conn: sqlite3.Connection, settings: Settings | None = None) ->
     }
 
 
-def role_family_for(title: str) -> str | None:
+def _text(value: Any) -> str | None:
+    """A pandas cell as a string, or None. NULL comes back as float('nan')."""
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def role_family_for(title: Any) -> str | None:
     """Guess a role family from a job title, using the heuristic layer's own
-    keyword table — so a posting and a person are classified the same way."""
+    keyword table — so a posting and a person are classified the same way.
+
+    Takes `Any` deliberately: this reads a pandas column, and pandas represents
+    a NULL title as `float('nan')`. 147 of the 384 people in the real database
+    have no title, so a `str` annotation here would be a lie that raised on the
+    first real row.
+    """
     from .scoring.heuristics import FAMILY_KEYWORDS
 
-    low = " " + (title or "").lower() + " "
+    if not isinstance(title, str):
+        return None
+    low = " " + title.lower() + " "
     best: tuple[int, str] | None = None
     for family, words in FAMILY_KEYWORDS.items():
         for word in words:
@@ -318,21 +331,27 @@ PROXIMITY_LABELS = {
 }
 
 
-def role_proximity(job_title: str, person_family: str | None, person_title: str | None) -> int:
+def role_proximity(job_title: Any, person_family: Any, person_title: Any) -> int:
     """How close is this person's work to this posting? 2 / 1 / 0.
 
     Deliberately coarse. The useful signal is "there is someone in that
     department", not a similarity score — the person is not applying for the
     job, they are the reason you have something to say about it.
+
+    The person's own title wins over `person_family` when there is one, and that
+    ordering matters: the stored family is the family of the role whose *query*
+    surfaced them, which says what we were looking for, not what they do. A
+    mechanic found by a "Data Scientist" search is not in the data department.
     """
     job_family = role_family_for(job_title)
-    if job_family and person_family and job_family == person_family:
-        return 2
-    if job_family and person_title and role_family_for(person_title) == job_family:
-        return 2
-    if job_family and person_family:
-        return 1
-    return 0
+    if not job_family:
+        return 0
+    if isinstance(person_title, str) and person_title.strip():
+        title_family = role_family_for(person_title)
+        return 2 if title_family == job_family else (1 if title_family else 0)
+    if not isinstance(person_family, str) or not person_family:
+        return 0
+    return 2 if person_family == job_family else 1
 
 
 def openings_frame(
@@ -388,12 +407,15 @@ def openings_frame(
                 )
                 people.append({
                     "candidate_id": int(row["candidate_id"]),
-                    "name": row.get("name") or "—",
-                    "title": row.get("title"),
+                    "name": _text(row.get("name")) or "—",
+                    # Normalised here rather than at each caller: pandas hands
+                    # back float('nan') for a NULL, and "nan" rendered as a job
+                    # title in the CLI before this.
+                    "title": _text(row.get("title")),
                     "score": float(row.get("score") or 0.0),
-                    "status": row.get("status") or "new",
-                    "verdict": row.get("verdict") or "unscored",
-                    "profile_url": row.get("profile_url") or "",
+                    "status": _text(row.get("status")) or "new",
+                    "verdict": _text(row.get("verdict")) or "unscored",
+                    "profile_url": _text(row.get("profile_url")) or "",
                     "proximity_rank": proximity,
                     "proximity": PROXIMITY_LABELS[proximity],
                 })
