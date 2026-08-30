@@ -342,20 +342,28 @@ def jobs(
         None, help="comma-separated: ats_json, aggregator, career_page"
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="force a refetch"),
+    score_fit: bool = typer.Option(
+        False, "--score-fit",
+        help="also score each posting against config/profile.md (§2.6, optional)",
+    ),
+    limit: int | None = typer.Option(None, help="max postings to score for fit"),
     verbose: bool = typer.Option(False, "-v", "--verbose"),
 ) -> None:
     """Stage 6 — refresh live job postings from every enabled source (§2)."""
     settings = _bootstrap(verbose)
     pipe = Pipeline(settings, on_progress=_progress)
-    params = RunParams(job_kinds=_csv_list(kinds), no_cache=no_cache)
+    params = RunParams(job_kinds=_csv_list(kinds), no_cache=no_cache, limit=limit)
     stats = RunStats()
     with pipe.tracked(params, stats, "jobs"):
         pipe.poll_jobs(params, stats)
+        if score_fit:
+            pipe.score_jobs(params, stats)
 
     console.print(
         f"[green]{stats.jobs_seen}[/] posting(s) seen · "
         f"[green]{stats.jobs_new}[/] new · {stats.jobs_closed} closed · "
         f"{stats.job_sources_failed} source(s) failed"
+        + (f" · {stats.jobs_scored} scored for fit" if score_fit else "")
     )
     counts = pipe.repos.jobs.counts_by_status()
     console.print("jobs: " + (", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "none"))

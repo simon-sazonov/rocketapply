@@ -105,6 +105,9 @@ llm:
   temperature: 0
   max_tokens: 1500
   prompt_version: v1
+  # Keyed separately (§2.6): changing the candidate rubric should not
+  # invalidate every job-fit score, and vice versa.
+  job_prompt_version: v1
   daily_request_cap: 900
   # A batch of 8 takes ~3.5 min on a local CPU-only 7B model. The cloud
   # providers never come close to this ceiling.

@@ -74,6 +74,7 @@ class RunStats:
     jobs_seen: int = 0
     jobs_new: int = 0
     jobs_closed: int = 0
+    jobs_scored: int = 0
     job_sources_failed: int = 0
     llm_tokens_in: int = 0
     llm_tokens_out: int = 0
@@ -948,7 +949,9 @@ class Pipeline:
         self.progress("llm", note, 0, len(ranked))
         return keep
 
-    def _open_scorer(self, stats: RunStats) -> LLMScorer | None:
+    def _open_scorer(
+        self, stats: RunStats, factory: type[LLMScorer] | None = None
+    ) -> LLMScorer | None:
         """The first provider in the remaining chain that is actually usable.
 
         Three ways to be unusable, and all three are silent skips rather than
@@ -966,7 +969,7 @@ class Pipeline:
         while self._llm_remaining:
             name = self._llm_remaining.pop(0)
             try:
-                scorer = LLMScorer(self.settings, provider=name)
+                scorer = (factory or LLMScorer)(self.settings, provider=name)
                 if not scorer.is_available():
                     raise LLMUnavailable(f"{name} has no API key configured")
                 used = self.repos.quota.used_today(f"llm:{scorer.provider}")
@@ -1148,6 +1151,70 @@ class Pipeline:
             total, total,
         )
         return stats
+
+    def score_jobs(self, params: RunParams | None = None, stats: RunStats | None = None) -> RunStats:
+        """Score open postings against `config/profile.md` — §2.6, optional.
+
+        Silently does nothing when there is no profile, which is the default
+        state: §2.6 says to ship §2.5 first and see whether this is needed at
+        all, because "companies where I know people" may be signal enough.
+        """
+        from .scoring.jobs import JobRelevanceScorer, job_payload, load_profile
+
+        params = params or RunParams()
+        stats = stats or RunStats()
+
+        profile = load_profile(self.settings)
+        if not profile:
+            note = (
+                "no target profile — write one in config/profile.md to score job fit "
+                "(optional; the Openings page works without it)"
+            )
+            self.progress("job-fit", note, 0, 0)
+            stats.notes.append(note)
+            return stats
+
+        version = params.prompt_version or self.settings.job_prompt_version
+        pending = self.repos.jobs.awaiting_relevance(version, limit=params.limit)
+        total = len(pending)
+        self.progress("job-fit", f"{total} posting(s) to score", 0, total)
+        if not pending:
+            return stats
+
+        self._llm_remaining = self.settings.llm_chain()
+        self._llm_rate_limit_hits = 0
+        scorer = self._open_scorer(stats, factory=JobRelevanceScorer)
+        if scorer is None:
+            stats.notes.append("no usable LLM provider for job scoring")
+            return stats
+
+        done = 0
+        for batch in batched(pending, self.settings.llm_batch_size):
+            if self.cancelled():
+                stats.notes.append("cancelled during job scoring")
+                break
+            outcome = scorer.score_jobs(profile, [job_payload(r) for r in batch])
+            if outcome.provider_error:
+                nxt = self._degrade(scorer, stats, LLMUnavailable(outcome.error or "failed"))
+                if nxt is None:
+                    break
+                scorer = nxt
+                outcome = scorer.score_jobs(profile, [job_payload(r) for r in batch])
+
+            with self.repos.writing():
+                self.repos.quota.consume(f"llm:{scorer.provider}", 1)
+                stats.llm_calls += 1
+                for verdict in outcome.verdicts:
+                    self.repos.jobs.set_relevance(
+                        verdict.job_id, verdict.score,
+                        [*verdict.reasons, *(f"⚠ {f}" for f in verdict.red_flags)],
+                        outcome.model, version,
+                    )
+                    stats.jobs_scored += 1
+            done += len(batch)
+            self.progress("job-fit", f"{done}/{total} scored", done, total)
+
+        return self._finish_llm(scorer, stats)
 
     @staticmethod
     def _match_company(posting: Any, by_name: dict[str, dict[str, Any]]) -> int | None:

@@ -392,6 +392,59 @@ class Score(BaseModel):
     scored_at: str | None = None
 
 
+class JobRelevance(BaseModel):
+    """How well one posting fits the owner's target profile — §2.6."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: int
+    score: float = Field(default=0.0, ge=0, le=100)
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    seniority_fit: Literal["below", "match", "above", "unknown"] = "unknown"
+    reasons: list[str] = Field(default_factory=list)
+    red_flags: list[str] = Field(default_factory=list)
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def _clamp_job_score(cls, v: Any) -> Any:
+        try:
+            return max(0.0, min(100.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _clamp_job_conf(cls, v: Any) -> Any:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return 0.0
+        if f > 1.0:
+            f = f / 100.0
+        return max(0.0, min(1.0, f))
+
+    @field_validator("seniority_fit", mode="before")
+    @classmethod
+    def _known_fit(cls, v: Any) -> Any:
+        if not isinstance(v, str):
+            return "unknown"
+        cleaned = v.strip().lower()
+        return cleaned if cleaned in {"below", "match", "above", "unknown"} else "unknown"
+
+    @field_validator("reasons", "red_flags", mode="before")
+    @classmethod
+    def _as_list(cls, v: Any) -> Any:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v]
+        return v
+
+
+class JobRelevanceBatch(BaseModel):
+    results: list[JobRelevance] = Field(default_factory=list)
+
+
 # ───────────────────────────────── CRM ──────────────────────────────────
 
 

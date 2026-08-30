@@ -112,6 +112,7 @@ YAML_MAP: dict[str, str] = {
     "llm.max_tokens": "llm_max_tokens",
     "llm.timeout_seconds": "llm_timeout_seconds",
     "llm.prompt_version": "prompt_version",
+    "llm.job_prompt_version": "job_prompt_version",
     "llm.model": "llm_model",
     "llm.reasoning_effort": "llm_reasoning_effort",
     "llm.provider_chain": "llm_provider_chain",
@@ -290,6 +291,9 @@ class Settings(BaseSettings):
     # unaffected by a generous ceiling — they simply return sooner.
     llm_timeout_seconds: float = Field(default=900.0, ge=10)
     prompt_version: str = "v1"
+    #: §2.6. Keyed separately from `prompt_version` so a change to the candidate
+    #: rubric does not invalidate every job score, and vice versa.
+    job_prompt_version: str = "v1"
     daily_llm_request_cap: int = Field(default=900, ge=1)
     llm_prices: Annotated[dict[str, dict[str, float]], NoDecode] = Field(
         default_factory=lambda: {

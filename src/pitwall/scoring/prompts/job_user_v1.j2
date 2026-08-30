@@ -1,0 +1,19 @@
+TARGET PROFILE
+--------------
+{{ profile }}
+
+JOB POSTINGS
+------------
+{% for j in jobs %}
+---
+job_id: {{ j.id }}
+title:    {{ j.title }}
+company:  {{ j.company or "unknown" }}
+location: {{ j.location or "unknown" }}
+type:     {{ j.employment_type or "unstated" }}
+posting:
+{{ j.description or "(no description available — judge from the title alone and say so in the reasons)" }}
+{% endfor %}
+
+Return JSON matching exactly this shape:
+{{ schema_hint }}
