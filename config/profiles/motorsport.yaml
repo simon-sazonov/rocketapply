@@ -1,0 +1,120 @@
+# The motorsport profile — §3.1 of PITWALL_V2_IMPLEMENTATION.md.
+#
+# THE DEFAULT, and the one the governing rule protects: "if generalisation makes
+# the owner's case worse, do not do it". Every value below is a transcription of
+# what was hardcoded in src/pitwall/models.py and src/pitwall/scoring/heuristics.py
+# before Phase 3, generated from that code rather than retyped — and a test
+# (`test_the_motorsport_profile_matches_the_built_in_defaults`) fails if the two
+# ever drift apart.
+#
+# So: editing this file changes behaviour. Leaving it alone reproduces v2.0.0
+# exactly. Copy it to start a profile for another industry; `generic.yaml` is a
+# smaller worked example.
+#
+# `role_families`   the vocabulary config/roles.csv may use in its `family` column
+# `seniorities`     the ladder roles.csv may use, and the LLM must answer with
+# `family_keywords` what a job title has to contain for the heuristic layer to
+#                   recognise that family — the highest-leverage list here
+
+name: motorsport
+description: 'The default profile: motorsport engineering teams and their technical roles.'
+organisation_noun: motorsport organisation
+default_role_family: data_science
+query_templates: query_templates.yaml
+negative_keywords: negative_keywords.yaml
+role_families:
+- data_science
+- data_engineering
+- strategy
+- performance
+- simulation
+- vehicle_dynamics
+- software
+- operations
+- leadership
+seniorities:
+- intern
+- graduate
+- junior
+- mid
+- senior
+- lead
+- head
+- executive
+- unknown
+family_keywords:
+  data_science:
+  - data scientist
+  - data science
+  - machine learning
+  - ml engineer
+  - applied scientist
+  - data analyst
+  - analytics
+  - statistician
+  - ai engineer
+  - research scientist
+  data_engineering:
+  - data engineer
+  - data platform
+  - analytics engineer
+  - data systems
+  - telemetry engineer
+  - data pipeline
+  - database
+  - data architect
+  strategy:
+  - strategy
+  - strategist
+  - race strategy
+  - operations research
+  - optimisation
+  - optimization
+  - decision science
+  performance:
+  - performance engineer
+  - performance analyst
+  - vehicle performance
+  - race engineer
+  - trackside
+  - aerodynamic
+  - aero
+  - cfd
+  simulation:
+  - simulation
+  - simulator
+  - modelling
+  - modeling
+  - driver in loop
+  - driver-in-the-loop
+  - lap sim
+  - dil
+  vehicle_dynamics:
+  - vehicle dynamics
+  - tyre model
+  - tire model
+  - suspension
+  - handling
+  - vehicle model
+  software:
+  - software engineer
+  - software developer
+  - developer
+  - programmer
+  - tools engineer
+  - systems engineer
+  - control systems
+  - backend
+  - full stack
+  - embedded
+  operations:
+  - race operations
+  - team manager
+  - logistics
+  - operations engineer
+  leadership:
+  - head of
+  - chief
+  - director
+  - principal
+  - lead

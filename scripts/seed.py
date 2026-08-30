@@ -34,9 +34,21 @@ from rich.table import Table  # noqa: E402
 
 from pitwall.config import config_dir  # noqa: E402
 from pitwall.inputs import load_companies, load_roles  # noqa: E402
+from pitwall.profiles import active as active_profile  # noqa: E402
 
 app = typer.Typer(add_completion=False, help=__doc__)
 console = Console()
+
+
+def _announce_profile() -> None:
+    """Which vocabulary the roles being written have to satisfy (§3.1)."""
+    profile = active_profile()
+    console.print(
+        f"profile [cyan]{profile.name}[/] "
+        f"({len(profile.role_families)} role families, "
+        f"{len(profile.seniorities)} seniority levels)"
+        + ("" if profile.path else "  [dim](built-in defaults)[/]")
+    )
 
 TEAMS_CSV = ROOT / "motorsport_teams.csv"
 POSITIONS_CSV = ROOT / "motorsport_positions.csv"
@@ -376,6 +388,7 @@ def main(
     ),
 ) -> None:
     """Write config/companies.csv and config/roles.csv."""
+    _announce_profile()
     if source == "auto":
         source = "local" if TEAMS_CSV.exists() and POSITIONS_CSV.exists() else "plan"
 

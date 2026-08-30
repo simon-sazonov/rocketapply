@@ -146,19 +146,30 @@ class Role(BaseModel):
     @field_validator("family")
     @classmethod
     def _known_family(cls, v: str) -> str:
+        """Checked against the ACTIVE profile, not the built-in tuple (§3.1).
+
+        For `motorsport` — the default — the two are the same list, so this is
+        the v1 behaviour verbatim. Another profile brings its own vocabulary.
+        """
+        from .profiles import active
+
         v = v.strip().lower().replace(" ", "_").replace("-", "_")
-        if v not in ROLE_FAMILIES:
-            raise ValueError(f"family {v!r} not in {ROLE_FAMILIES}")
+        allowed = active().role_families or ROLE_FAMILIES
+        if v not in allowed:
+            raise ValueError(f"family {v!r} not in {tuple(allowed)}")
         return v
 
     @field_validator("seniority")
     @classmethod
     def _known_seniority(cls, v: list[str]) -> list[str]:
+        from .profiles import active
+
+        allowed = active().seniorities or SENIORITIES
         out = []
         for s in v:
             s2 = s.strip().lower()
-            if s2 and s2 not in SENIORITIES:
-                raise ValueError(f"seniority {s!r} not in {SENIORITIES}")
+            if s2 and s2 not in allowed:
+                raise ValueError(f"seniority {s!r} not in {tuple(allowed)}")
             if s2:
                 out.append(s2)
         return out

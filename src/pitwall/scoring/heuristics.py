@@ -80,6 +80,10 @@ W_CORROBORATION_TEMPLATE = 0.0
 W_CORROBORATION_MAX = 12.0
 
 #: Words that identify a role family inside a job title.
+#:
+#: The built-in motorsport list, and the fallback for every profile lookup.
+#: `config/profiles/motorsport.yaml` is a transcription of it — a test fails if
+#: the two drift — so the default path is unchanged by §3.1.
 FAMILY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "data_science": (
         "data scientist", "data science", "machine learning", "ml engineer",
@@ -129,6 +133,14 @@ DEFAULT_STUDENT = (
     "aspiring", "seeking opportunities", "looking for opportunities",
     "open to work",
 )
+
+
+def family_keywords(family: str) -> tuple[str, ...]:
+    """The active profile's keywords for a family, or the built-in ones (§3.1)."""
+    from ..profiles import active
+
+    words = active().keywords_for(family)
+    return words or FAMILY_KEYWORDS.get(family, ())
 
 
 def _first_phrase_hit(haystack: str, phrases: tuple[str, ...] | list[str]) -> str | None:
@@ -265,7 +277,7 @@ def score_candidate(
                 score += W_ROLE_ALIAS_TITLE
                 reasons.append(f"+{W_ROLE_ALIAS_TITLE:.0f} role alias '{alias}' in the title")
             else:
-                fam = _first_phrase_hit(title_text, FAMILY_KEYWORDS.get(role.family, ()))
+                fam = _first_phrase_hit(title_text, family_keywords(role.family))
                 if fam:
                     score += W_FAMILY_TITLE
                     reasons.append(
@@ -273,7 +285,7 @@ def score_candidate(
                     )
                 else:
                     snip = _first_phrase_hit(
-                        snippet_text, [role.title, *role.aliases, *FAMILY_KEYWORDS.get(role.family, ())]
+                        snippet_text, [role.title, *role.aliases, *family_keywords(role.family)]
                     )
                     if snip:
                         score += W_ROLE_SNIPPET

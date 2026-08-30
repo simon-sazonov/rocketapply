@@ -311,13 +311,14 @@ def role_family_for(title: Any) -> str | None:
     have no title, so a `str` annotation here would be a lie that raised on the
     first real row.
     """
+    from .profiles import active
     from .scoring.heuristics import FAMILY_KEYWORDS
 
     if not isinstance(title, str):
         return None
     low = " " + title.lower() + " "
     best: tuple[int, str] | None = None
-    for family, words in FAMILY_KEYWORDS.items():
+    for family, words in (active().family_keywords or FAMILY_KEYWORDS).items():
         for word in words:
             if word in low and (best is None or len(word) > best[0]):
                 best = (len(word), family)
