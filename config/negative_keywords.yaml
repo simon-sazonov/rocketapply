@@ -24,7 +24,7 @@ past_tense_markers:
   - "until 20"
   - alum
   - alumni
-  - past:
+  - "past"
   - retired
 
 recruiter_markers:
