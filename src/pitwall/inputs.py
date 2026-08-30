@@ -88,14 +88,25 @@ def _as_int(value: Any, default: int) -> int | None:
 
 
 def _read_rows(path: Path) -> tuple[list[dict[str, str]], list[str]]:
-    """Read a CSV, tolerating a UTF-8 BOM and stray whitespace in headers."""
+    """Read a CSV, tolerating a UTF-8 BOM, stray header whitespace, and `#` comments.
+
+    Comments matter: `pitwall init` writes these files with the column
+    documentation above the header, which is the only place a first-time user
+    will reliably read it (§3.2, §3.3). Without this the commented block becomes
+    the header row and every required column reads as missing — which is exactly
+    what the clean-clone acceptance run reported.
+
+    A line is a comment only if its first non-whitespace character is `#`, so a
+    `#` inside a quoted value is untouched.
+    """
     with path.open(newline="", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh)
-        fields = [(f or "").strip() for f in (reader.fieldnames or [])]
-        rows = [
-            {(k or "").strip(): (v if v is not None else "") for k, v in row.items()}
-            for row in reader
-        ]
+        lines = [line for line in fh if not line.lstrip().startswith("#")]
+    reader = csv.DictReader(lines)
+    fields = [(f or "").strip() for f in (reader.fieldnames or [])]
+    rows = [
+        {(k or "").strip(): (v if v is not None else "") for k, v in row.items()}
+        for row in reader
+    ]
     return rows, fields
 
 

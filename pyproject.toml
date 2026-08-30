@@ -40,6 +40,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "pytest-cov>=5.0", "ruff>=0.7", "mypy>=1.13"]
 
+# `pitwall init` and friends. The same Typer app is also reachable without
+# installing, via `python scripts/run_pipeline.py`.
+[project.scripts]
+pitwall = "pitwall.cli:app"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
