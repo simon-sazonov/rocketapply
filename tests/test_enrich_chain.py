@@ -324,6 +324,24 @@ def test_persist_is_skippable_for_a_dry_run(world, repos, settings, mx_ok):
     assert repos.contacts.best(cid) is not None
 
 
+def test_a_dry_run_over_a_selection_stores_nothing_either(world, repos, settings, mx_ok):
+    """`enrich_many` persisted regardless of what the caller asked for, so
+    `pitwall enrich --dry-run` wrote the very rows it promised not to."""
+    cid, searcher = world
+    out = E.enrich_many(
+        [cid], repos, settings, searcher=searcher, steps=_chain(mx_ok), persist=False
+    )
+    assert out[0].best() is not None
+    assert repos.contacts.for_candidate(cid) == []
+    # The audit trail and the company's domain ARE written: they record what
+    # the run did, not what it found, and suppressing them would make the log
+    # lie about a run that really happened.
+    assert repos.enrichment.for_candidate(cid) != []
+    assert repos.domains.preferred(int(
+        repos.conn.execute("SELECT id FROM companies").fetchone()["id"]
+    )) is not None
+
+
 def test_context_keeps_the_best_evidenced_finding_per_address(settings, repos):
     from pitwall.enrich.base import EmailCandidate
 

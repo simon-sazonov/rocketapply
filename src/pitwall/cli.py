@@ -636,7 +636,9 @@ def enrich(
         help="allow the paid Hunter escalation. Without it nothing can spend.",
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="run the free engine but write nothing"
+        False, "--dry-run",
+        help="find addresses but store none. The company's domain and the audit "
+        "log are still written — those record what the run did, not what it found",
     ),
     force: bool = typer.Option(
         False, "--force", help="re-harvest the company even if it was done recently"
@@ -683,14 +685,12 @@ def enrich(
     with pipe.tracked(params, stats, "enrich") as run_id:
         contexts = enrichment.enrich_many(
             ids, repos, settings, steps=steps, run_id=run_id,
+            persist=not dry_run,
             on_progress=lambda i, n, cid: pipe.progress(
                 "enrich", f"person {i} of {n}", i, n
             ),
         )
-        for ctx in contexts:
-            if not dry_run:
-                enrichment.persist_findings(ctx)
-            results.append(enrichment.summary(ctx))
+        results.extend(enrichment.summary(ctx) for ctx in contexts)
 
     if not results:
         console.print("[yellow]nothing to do — no such candidate[/]")

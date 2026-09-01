@@ -33,6 +33,38 @@ def test_there_are_source_files_to_check():
     assert len(source_files()) > 20
 
 
+# ───────────────────── §8: the suite makes no requests ───────────────────
+
+
+def test_the_network_guard_actually_fires():
+    """The autouse guard in conftest is the enforcement behind "no test makes a
+    real network call". A guard that has quietly stopped working looks exactly
+    like a suite that never needed it."""
+    import socket
+
+    from tests.conftest import NetworkUsedInTest
+
+    sock = socket.socket()
+    try:
+        with pytest.raises(NetworkUsedInTest):
+            sock.connect(("api.hunter.io", 443))
+    finally:
+        sock.close()
+
+
+def test_an_unstubbed_hunter_call_cannot_reach_the_internet():
+    """The adapters take injectable transports so this holds; if one stopped,
+    the test that forgot to stub it would fail here rather than spend a credit
+    on somebody's real account."""
+    from pitwall.config import Settings
+    from pitwall.enrich.hunter import HunterClient, HunterError
+    from tests.conftest import NetworkUsedInTest
+
+    client = HunterClient(Settings(hunter_api_key="x" * 20, _env_file=None))
+    with pytest.raises((HunterError, NetworkUsedInTest)):
+        client.account()
+
+
 # ───────────────────────────── no SMTP, ever ─────────────────────────────
 
 #: §3.1. Any one of the four reasons there is disqualifying; together they make

@@ -13,6 +13,47 @@ sys.path.insert(0, str(ROOT / "src"))
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+# ───────────────────────── the suite makes no requests ───────────────────
+#
+# §8 of PITWALL_V3_EMAIL_ENRICHMENT.md: "No test makes a real network call —
+# not Hunter, not GitHub, not SearXNG, not DNS."
+#
+# Enforced at the socket, not by convention. Every adapter in this project
+# takes an injectable transport, searcher, fetcher or resolver precisely so
+# that this can hold, and a test that forgets to use one should fail loudly
+# here rather than quietly reaching the internet on somebody's laptop — or, on
+# a machine where SearXNG happens to be running, quietly passing because of it.
+#
+# Loopback is left open: `AppTest` and SQLite do not use it, but Streamlit's
+# runtime may, and blocking it would be forbidding something that is not a
+# network call in any meaningful sense.
+
+
+class NetworkUsedInTest(RuntimeError):
+    """A test tried to open a socket. Inject a stub instead."""
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    import socket
+
+    real_connect = socket.socket.connect
+
+    def guard(self, address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) and address else address
+        if isinstance(host, str) and (
+            host in ("127.0.0.1", "::1", "localhost") or host.startswith("127.")
+        ):
+            return real_connect(self, address, *args, **kwargs)
+        raise NetworkUsedInTest(
+            f"a test tried to connect to {host!r}. The suite makes no network "
+            "call (§8) — inject a stub searcher, transport, fetcher or MX "
+            "resolver instead."
+        )
+
+    monkeypatch.setattr(socket.socket, "connect", guard)
+
+
 @pytest.fixture()
 def project(tmp_path, monkeypatch):
     """A throwaway project root with its own `config/`.

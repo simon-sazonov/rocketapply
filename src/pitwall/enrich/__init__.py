@@ -255,6 +255,7 @@ def enrich_many(
     steps: Sequence[EnrichmentStep] | None = None,
     run_id: int | None = None,
     on_progress: Any | None = None,
+    persist: bool = True,
 ) -> list[EnrichmentContext]:
     """Enrich a hand-picked selection — never the whole table.
 
@@ -283,7 +284,7 @@ def enrich_many(
             out.append(
                 enrich_candidate(
                     candidate_id, repos, settings,
-                    searcher=shared, steps=steps, run_id=run_id,
+                    searcher=shared, steps=steps, run_id=run_id, persist=persist,
                 )
             )
         except EnrichmentError as exc:

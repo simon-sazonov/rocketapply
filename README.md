@@ -55,9 +55,16 @@ customers and shuts down on 1 January 2027.
 
 This list is deliberate, not a roadmap. None of it is coming.
 
-- **No email or phone discovery.** No harvesting, no pattern inference, no SMTP
-  verification, not even a column for it. A LinkedIn profile URL is the contact
-  surface.
+- **No phone numbers, ever.** Hunter returns them; PitWall does not request,
+  store or display one. There is no column for it and no code path to it.
+- **No SMTP verification.** No `RCPT TO`, no port-25 connections, no code that
+  could. This is an engineering finding as much as a policy one — residential
+  ISPs block port 25, Microsoft 365 answers `250` for addresses that do not
+  exist, and catch-all domains accept everything. Even done perfectly it yields
+  a graded guess. See `src/pitwall/enrich/checks.py`, which sets out all four
+  reasons at the top.
+- **No crawling for addresses.** Reading a page the search index already
+  pointed at is in scope; walking a domain harvesting `mailto:` links is not.
 - **No LinkedIn fetching.** No page requests, no login, no cookies, no headless
   browser. Identity comes only from the title, URL and snippet a search engine
   already publishes.
@@ -70,8 +77,66 @@ This list is deliberate, not a roadmap. None of it is coming.
   file.
 
 Retention is 180 days for people you never touched; anyone you saved, contacted
-or annotated is exempt. Delete & blocklist is permanent and prevents
-re-ingestion.
+or annotated is exempt. Delete & blocklist is permanent, prevents re-ingestion,
+and **hard-deletes any email address held for that person**. Addresses have a
+second, stricter clock of their own: past the window they go even when the
+person stays, unless you actually acted on them.
+
+---
+
+## Finding an email address
+
+Added in v3, and off the critical path: nothing below runs during a search, and
+nothing runs over the whole table. You tick people on the **👤 People** page and
+press one button.
+
+**PitWall's own free logic runs first, and usually finishes the job.** There is
+no contact database to buy here — a local SearXNG index is a serviceable
+substitute at 25 people a month:
+
+```
+1. domain        the company's mail domain, from your CSV, its careers page,
+                 search results already stored, or one search — never a credit
+2. harvest       any addresses already published at that domain
+3. pattern       the format those addresses imply — first.last, flast, …
+4. corroborate   search for the exact address. Found published anywhere public?
+                 That is stronger evidence than an SMTP probe would be.
+```
+
+Every finding carries a status **and the evidence behind it**, always together:
+
+| | earned by |
+|---|---|
+| 🟢 **Confirmed** | the exact address is published somewhere public, or Hunter says it is deliverable |
+| 🟡 **Likely** | the company's format, agreed on by ≥2 real addresses, and the domain accepts mail |
+| ⚪ **Guess** | one example, or the format most companies use. A hypothesis |
+| ⚫ **Nothing found** | free search came up empty. Hunter may know, for a credit |
+
+`pattern first.last (n=3)` means three known addresses at that company agree.
+**n=1 and n=5 never render the same**, and there is no confidence percentage
+anywhere — a number invites you to trust a hypothesis.
+
+The expensive part is learning a company's format, and that answer is reusable:
+resolve Alpine once and every later Alpine candidate is free. If the domain is
+wrong — a car dealership rather than the race team, which really happens —
+correct it in the person's panel and it outranks every automatic source for good.
+
+**Hunter.io is optional, manual, and one credit at a time.** Free plan: 50
+credits a month, no card. It is never called by a search, never in bulk, and
+never without you clicking on one specific person. Live credits sit in the
+sidebar; at zero the buttons disable with the reset date rather than failing on
+click. A paid domain lookup feeds its results back into the free engine, so it
+permanently improves it.
+
+Addresses are **excluded from every export unless you tick the box**, and the
+evidence string travels with them when you do.
+
+```bash
+pitwall enrich -c 41 -c 88          # free engine only; cannot spend
+pitwall enrich -c 41 --github       # also read public commit emails
+pitwall enrich -c 41 --hunter       # allow the paid escalation
+pitwall export --include-contacts   # opt in, deliberately
+```
 
 ---
 
@@ -262,10 +327,17 @@ python scripts/discover_ats.py        # once; finds public ATS boards
 pitwall jobs --score-fit              # poll sources, score fit vs config/profile.md
 pitwall openings                      # the join, in the terminal
 
+# finding an email address — never automatic, never over the whole table
+pitwall enrich -c 41 -c 88            # free engine only: it cannot spend
+pitwall enrich -c 41 --github         # also read public commit emails
+pitwall enrich -c 41 --hunter         # allow the paid escalation, 1 credit
+pitwall enrich -c 41 --dry-run        # run it, write nothing
+
 # where things stand, and what to export
 pitwall stats
 pitwall coverage                      # how much of the company list is actually searched
 pitwall export --format md --min-score 55
+pitwall export --include-contacts     # addresses are excluded unless you ask
 
 # housekeeping
 make searxng-check                    # is the search container healthy?
@@ -375,6 +447,22 @@ cleanly. **It never loses work.**
 Without any LLM at all the pipeline still runs — heuristics only, which is
 already useful.
 
+### Contact enrichment providers
+
+| provider | free tier | needed? | notes |
+|---|---|---|---|
+| PitWall's own engine | unlimited | — | domain, harvest, pattern, corroboration. No key of any kind. Needs SearXNG for the operator queries |
+| `hunter` | 50 credits/month, no card | optional | `HUNTER_API_KEY`. Manual, per-person, one credit at a time |
+| `github` | 60 req/hour, 5,000 with a token | optional | `GITHUB_TOKEN`, no scopes needed. Public commit emails |
+| DNS (MX) | unlimited | optional | `dnspython`. Port 53 is never blocked, which is why this works where SMTP would not |
+
+Everything except the first is optional and everything degrades: no Hunter key
+means no paid button, no `dnspython` means the MX check reports "unknown", and
+no SearXNG means the harvest and corroboration queries say so rather than
+returning noise. Hunter's costs, verified against its own documentation on
+1 September 2026: Email Finder 1 credit (charged only when it finds something),
+Domain Search 1 credit per 10 addresses, Email Verifier 0.5, Account free.
+
 #### Local Qwen setup
 
 ```bash
@@ -416,15 +504,26 @@ These constraints are architectural, not optional. Read §1.3 of the plan.
    fetches `linkedin.com/in/...` pages, never logs in, never uses a session
    cookie, never drives a headless browser.
 2. **Minimize.** Only what a networking decision needs: name, public headline,
-   employer, profile URL, location, and your own notes. No emails, no phone
-   numbers, no photos.
-3. **Retention.** `python scripts/purge_stale.py --apply` deletes candidates that
+   employer, profile URL, location, your own notes, and — since v3, and only
+   when you ask for it person by person — a work email address. No phone
+   numbers, no photos, no address you did not press a button to find.
+3. **Public sources only, for addresses too.** An address here was either found
+   already published on a public page, worked out from the format of addresses
+   that were, or returned by Hunter under your own account. Nothing is probed,
+   and no domain is crawled.
+4. **Retention.** `python scripts/purge_stale.py --apply` deletes candidates that
    have been ignored or untouched for 180 days. People you saved, contacted or
-   wrote a note about are never purged.
-4. **Right to object.** **🚫 Delete & blocklist** removes a person and prevents
-   re-ingestion on every future run. That is both your "not interested" button
-   and your GDPR erasure mechanism.
-5. **Never publish the database.** `data/` and `.env` are gitignored from commit #1.
+   wrote a note about are never purged. Email addresses have a second, stricter
+   clock: past the window they go even when the person stays, unless you acted
+   on that person.
+5. **Right to object.** **🚫 Delete & blocklist** removes a person, hard-deletes
+   every address held for them, and prevents re-ingestion on every future run.
+   That is both your "not interested" button and your GDPR erasure mechanism.
+   Enrichment refuses to run on a blocklisted person at all.
+6. **Nothing leaves by accident.** Exports exclude every address unless you pass
+   `--include-contacts` or tick the box, and when they do go out the evidence
+   goes with them, so a guess cannot be read as a fact in a spreadsheet.
+7. **Never publish the database.** `data/` and `.env` are gitignored from commit #1.
    `tests/fixtures/` *is* tracked, because the labelled eval set is what makes a
    threshold change measurable — and as of v2 every identity in it is synthetic.
    The eval set and both SERP captures were sanitised by
@@ -432,12 +531,12 @@ These constraints are architectural, not optional. Read §1.3 of the plan.
    `data/eval_set_real.csv`, which is git-ignored, and `eval_scoring.py` prefers
    it when it is there. `python scripts/sanitise_eval_set.py --check` is the
    guard, and so is `tests/test_eval_set_privacy.py`.
-6. **Rate-limit politely, and take no for an answer.** One query per second
+8. **Rate-limit politely, and take no for an answer.** One query per second
    through SearXNG, exponential backoff on 429s, a shared token bucket across
    worker threads, and a seven-day cache so the same query is never issued
-   twice in a week. For job sources, `robots.txt` is parsed and applied in code
-   — and a site that refuses an honest User-Agent is left alone rather than
-   worked around.
+   twice in a week. For job sources and the one page an address harvest may
+   read, `robots.txt` is parsed and applied in code — and a site that refuses
+   an honest User-Agent is left alone rather than worked around.
 
 There is **no outreach-sending capability by design**, and there will not be one.
 Motorsport is a small industry; automated messaging burns your reputation in it.
@@ -447,7 +546,7 @@ Motorsport is a small industry; automated messaging burns your reputation in it.
 ## Development
 
 ```bash
-pytest                                    # 260 tests, no network required
+pytest                                    # 1,169 tests, no network required
 pytest --cov=pitwall --cov-report=term    # ~90% coverage
 ruff check . && mypy                      # lint and types
 ```
@@ -455,6 +554,14 @@ ruff check . && mypy                      # lint and types
 Tests are hermetic: they use a throwaway project root with their own `config/`
 and never touch your real database, CSVs or cache. The saved SERP fixtures in
 `tests/fixtures/` are real captures — they cost quota once and serve forever.
+
+"No network" is **enforced, not assumed**: an autouse fixture in
+`tests/conftest.py` blocks every non-loopback socket, so a test that forgets to
+inject a stub fails loudly instead of quietly reaching Hunter, GitHub, DNS or
+somebody's running SearXNG. `tests/test_enrich_policy.py` goes further and
+asserts the standing prohibitions against the whole tree: no SMTP import, no
+`RCPT TO` / `MAIL FROM` / port 25 in any line of code, no phone column in the
+schema, no crawling primitives in `enrich/`.
 
 ### Layout
 
@@ -470,6 +577,8 @@ src/pitwall/     config · profiles · models · db · inputs · query_builder �
   extract/       linkedin (the SERP parser) · normalize · dedupe
   scoring/       heuristics · llm · jobs · schema · prompts/
   sources/jobs/  base · ats · aggregator · career_page
+  enrich/        base · domains · harvest · patterns · corroborate · checks
+                 hunter · github · cache   (finding an email address)
 app/             Home.py + pages/ (Setup · Run Search · Leads · Pipeline · Analytics · Openings)
 scripts/         run_pipeline · seed · purge_stale · eval_scoring · setup_ollama
                  setup_groq · check_searxng · discover_ats · sanitise_eval_set
