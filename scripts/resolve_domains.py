@@ -101,7 +101,11 @@ QUERIES = (
 #: So `--engines` is a *candidate pool*, `probe_engines()` picks the ones
 #: actually working right now, and an engine that fails the probe is skipped
 #: rather than silently polluting the results.
-DEFAULT_ENGINES = "google,qwant,brave,duckduckgo,startpage,mojeek"
+#: `google cse` is listed separately from `google` on purpose: SearXNG treats
+#: them as different engines with **separate rate limits**, and it was the only
+#: thing still answering after a run had CAPTCHA'd everything else. Worth
+#: knowing when the pool looks empty.
+DEFAULT_ENGINES = "google,google cse,qwant,brave,duckduckgo,startpage,mojeek"
 
 #: Sent to each candidate engine before the run. Two properties are checked:
 #: the engine answers at all, and it **honours a quoted phrase**. The second is

@@ -12,7 +12,7 @@ SXNG_URL := http://localhost:8888
 .DEFAULT_GOAL := help
 .PHONY: help venv test lint typecheck searxng searxng-env searxng-check \
         searxng-stop searxng-logs searxng-pull groq-check app cli \
-        coverage sweep relabel
+        coverage sweep relabel domains domains-apply domains-show
 
 help:  ## show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -89,6 +89,17 @@ sweep:  ## full sweep across every company (searching only, no LLM)
 
 relabel:  ## §1.3: small sweep on the current provider + a labelling worksheet
 	$(PY) scripts/eval_scoring.py relabel
+
+# ───────────────────────── contact enrichment ──────────────────────────
+
+domains:  ## propose a mail domain per company (writes nothing — review first)
+	$(PY) scripts/resolve_domains.py --plain
+
+domains-apply:  ## …and write them into config/companies.csv
+	$(PY) scripts/resolve_domains.py --apply
+
+domains-show:  ## which companies already have a domain
+	$(PY) scripts/resolve_domains.py --show
 
 # ──────────────────────────────── app ──────────────────────────────────
 

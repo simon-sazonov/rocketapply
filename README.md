@@ -121,6 +121,21 @@ resolve Alpine once and every later Alpine candidate is free. If the domain is
 wrong — a car dealership rather than the race team, which really happens —
 correct it in the person's panel and it outranks every automatic source for good.
 
+**Fill the domains in once and that problem mostly disappears.**
+`companies.domain` is checked before any guessing:
+
+```bash
+make domains          # propose one per company, with the evidence. Writes nothing
+make domains-apply    # …once you have read the table
+make domains-show     # which are filled in
+```
+
+It probes which search engines are currently answering *and* honouring quoted
+phrases before it starts — they suspend each other's CAPTCHAs by the hour, and
+one that silently ignores quotes returns the open web. When none passes, it
+refuses to run rather than guess. Anything it gets wrong is one edit in
+`config/companies.csv`.
+
 **Hunter.io is optional, manual, and one credit at a time.** Free plan: 50
 credits a month, no card. It is never called by a search, never in bulk, and
 never without you clicking on one specific person. Live credits sit in the
@@ -582,6 +597,7 @@ src/pitwall/     config · profiles · models · db · inputs · query_builder �
 app/             Home.py + pages/ (Setup · Run Search · Leads · Pipeline · Analytics · Openings)
 scripts/         run_pipeline · seed · purge_stale · eval_scoring · setup_ollama
                  setup_groq · check_searxng · discover_ats · sanitise_eval_set
+                 resolve_domains (fills companies.domain from search)
 tests/           unit + integration + the labelled eval set (synthetic identities)
 data/            pitwall.db · cache/ · exports/ · backups/ · eval_set_real.csv  (gitignored)
 ```
@@ -601,6 +617,9 @@ data/            pitwall.db · cache/ · exports/ · backups/ · eval_set_real.c
 | Lots of `needs_review` verdicts | model returning bad JSON | Shorten `llm.batch_size` to 4 (then re-run `setup_ollama.py`), or try a cloud provider |
 | `LLM unavailable: ... has no num_ctx set` | the model would silently truncate the prompt | `python scripts/setup_ollama.py` — this is the guard working, not a bug |
 | LLM calls time out | `llm.timeout_seconds` too low for local inference | Raise it in `config/settings.yaml`; local batches take minutes, not seconds |
+| An email lookup says "guess (n=0)" with no samples | SearXNG is not running, so the harvest and corroboration queries were refused rather than run unquoted | `make searxng`; the notes on the result say which step stopped and why |
+| Every email lookup resolves the wrong company | `companies.domain` is empty, so the domain is being guessed from stored search results — which include news sites and retail arms | `make domains`, read the table, `make domains-apply`. Or set it per company in the person's panel |
+| `make domains` says no engine is usable | you have run enough queries to CAPTCHA every upstream engine | Wait — `SearxEngineTooManyRequests` clears in 15 min and a CAPTCHA in an hour (`docker/searxng/settings.yml`). Lower `--qps` next time |
 | Recall looks poor | threshold too high for your provider | `python scripts/eval_scoring.py sweep` |
 | Stale data after an edit in the app | cache not cleared | Every write calls `invalidate()` then `st.rerun()` — file a bug if you see it |
 
