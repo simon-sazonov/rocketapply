@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import csv
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,13 +42,30 @@ from pitwall.scoring.llm import LLMScorer, batched  # noqa: E402
 app = typer.Typer(add_completion=False, help=__doc__, no_args_is_help=False)
 console = Console()
 
-EVAL_CSV = ROOT / "tests" / "fixtures" / "eval_set.csv"
+#: The tracked fixture carries synthetic identities (§3.4) so the repository can
+#: be shared. The owner's real labelled set lives in `data/`, which is
+#: git-ignored, and is preferred when it is there — a threshold tuned against
+#: pseudonyms would still be tuned against the right *evidence*, but there is no
+#: reason to throw away the real thing on the machine that has it.
+PRIVATE_EVAL_CSV = ROOT / "data" / "eval_set_real.csv"
+SHARED_EVAL_CSV = ROOT / "tests" / "fixtures" / "eval_set.csv"
+EVAL_CSV = PRIVATE_EVAL_CSV if PRIVATE_EVAL_CSV.exists() else SHARED_EVAL_CSV
 EVAL_COLUMNS = [
     "candidate_id", "full_name", "serp_title", "serp_snippet", "profile_url",
     "target_company", "company_aliases", "company_negatives",
     "target_role", "role_aliases", "role_family", "role_seniority", "role_keywords",
-    "location", "evidence_count", "relevant",
+    "location", "evidence_count", "template_count",
+    # Provenance (§1.3). SearXNG returns a different snippet shape from `ddgs`,
+    # so a label collected on one does not transfer to the other and a threshold
+    # swept against the wrong provider is a number about a world that no longer
+    # exists. Recorded per row so `sweep` can refuse to recommend from stale labels.
+    "serp_provider",
+    "relevant",
 ]
+
+#: A labelled row with no `serp_provider` predates the column, so it is `ddgs`
+#: by construction: that is the only provider v1 ever used.
+LEGACY_PROVIDER = "ddgs"
 
 
 @dataclass
@@ -102,6 +120,20 @@ def _load_eval(path: Path) -> list[dict[str, str]]:
     return labelled
 
 
+def _provenance(rows: list[dict[str, str]]) -> Counter[str]:
+    return Counter((r.get("serp_provider") or LEGACY_PROVIDER).strip() for r in rows)
+
+
+def _active_provider(settings) -> str:
+    """The provider the next real run would use — chain[0]."""
+    from pitwall.search import build_chain
+
+    try:
+        return build_chain(settings)[0].name
+    except Exception:  # noqa: BLE001 - a preview must not fail on a dead provider
+        return settings.search_providers[0] if settings.search_providers else "?"
+
+
 def _truth(row: dict[str, str]) -> bool:
     return str(row.get("relevant", "")).strip().lower() in {"yes", "y", "1", "true"}
 
@@ -132,6 +164,7 @@ def _candidate(row: dict[str, str]) -> dict[str, object]:
         "headline": row.get("serp_snippet", ""),
         "location": row.get("location") or None,
         "evidence_count": int(row.get("evidence_count") or 0),
+        "template_count": int(row.get("template_count") or 0),
         "current_company": "",
     }
 
@@ -140,16 +173,31 @@ def _candidate(row: dict[str, str]) -> dict[str, object]:
 def bootstrap(
     n: int = typer.Option(60, help="how many candidates to draft"),
     out: Path = typer.Option(EVAL_CSV, help="where to write the template"),
+    provider: str | None = typer.Option(
+        None,
+        help="only candidates whose evidence came from this SERP provider "
+        "(e.g. searxng) — see §1.3, labels do not transfer between providers",
+    ),
 ) -> None:
-    """Draft an eval set from the database, spanning the full score range."""
+    """Draft a labelling worksheet from the database, spanning the score range.
+
+    Pass `--provider searxng` after a fresh sweep to build the re-labelling
+    worksheet §1.3 requires. The existing 60 rows were labelled on `ddgs` snippet
+    shapes and cannot be reused: SearXNG's `content` field is not DuckDuckGo's
+    `body`, so the same person reads differently to the heuristic layer.
+    """
     settings = get_settings()
     repos = open_repos(settings)
+    where = "WHERE sr.provider = ?" if provider else ""
+    args = (provider,) if provider else ()
     rows = [
         dict(r)
         for r in repos.conn.execute(
-            """
+            f"""
             SELECT c.id AS candidate_id, c.full_name, c.profile_url, c.location,
-                   c.evidence_count, sr.title AS serp_title, sr.snippet AS serp_snippet,
+                   c.evidence_count, c.template_count,
+                   sr.title AS serp_title, sr.snippet AS serp_snippet,
+                   sr.provider AS serp_provider,
                    co.name AS target_company, co.aliases AS company_aliases,
                    co.negative_keywords AS company_negatives,
                    ro.title AS target_role, ro.aliases AS role_aliases,
@@ -161,13 +209,16 @@ def bootstrap(
               LEFT JOIN roles ro     ON ro.id = s.role_id
               LEFT JOIN candidate_sources cs ON cs.candidate_id = c.id
               LEFT JOIN search_results sr    ON sr.id = cs.search_result_id
+             {where}
              GROUP BY c.id
              ORDER BY s.heuristic_score DESC
-            """
+            """,
+            args,
         )
     ]
     if not rows:
-        console.print("[red]no scored candidates yet[/] — run the pipeline first")
+        hint = f" from provider {provider!r}" if provider else ""
+        console.print(f"[red]no scored candidates yet{hint}[/] — run the pipeline first")
         raise typer.Exit(1)
 
     # spread the sample across the score range rather than taking the top N
@@ -187,10 +238,14 @@ def bootstrap(
                 payload[json_col] = "|".join(loads(row.get(json_col)))
             payload["relevant"] = ""
             writer.writerow(payload)
+    provenance = Counter(r.get("serp_provider") or "?" for r in sample)
     console.print(
         f"[green]wrote {len(sample)} rows[/] to {out}\n"
+        f"provenance: {', '.join(f'{k}={v}' for k, v in provenance.most_common())}\n"
         "Now fill in the [bold]relevant[/] column with yes/no — "
-        "'would I actually message this person?' — and re-run this script."
+        "'would I actually message this person?' — and re-run this script.\n"
+        "[dim]Label from the snippet as shown, not from the profile: the heuristic "
+        "layer only ever sees what is in these two columns.[/]"
     )
 
 
@@ -300,6 +355,121 @@ def evaluate(
         console.print(f"[green]Heuristic recall {heur_only.recall:.2f} ≥ 0.90 — the gate is safe.[/]")
 
 
+def _warn_if_stale(rows: list[dict[str, str]], settings) -> tuple[str, str] | None:
+    """§1.3's guard rail: labels from one provider do not transfer to another.
+
+    Returns `(labelled_on, active_now)` when they disagree, else None. `sweep`
+    uses it to refuse to recommend a threshold rather than to refuse to compute
+    one — seeing the numbers is useful, adopting them silently is the mistake.
+    """
+    counts = _provenance(rows)
+    if not counts:
+        return None
+    labelled_on = counts.most_common(1)[0][0]
+    active = _active_provider(settings)
+    if len(counts) > 1:
+        console.print(
+            f"[yellow]mixed provenance in the eval set: "
+            f"{', '.join(f'{k}={v}' for k, v in counts.most_common())}[/]"
+        )
+    if labelled_on != active:
+        console.print(
+            f"[yellow]These labels were collected on `{labelled_on}`; the active "
+            f"provider is `{active}`.[/]"
+        )
+        return labelled_on, active
+    return None
+
+
+@app.command()
+def relabel(
+    companies: str = typer.Option(
+        None, help="comma-separated; default = the 8 highest-tier active companies"
+    ),
+    max_queries: int = typer.Option(60, help="query budget for the sweep"),
+    n: int = typer.Option(60, help="rows to draft for labelling"),
+    out: Path = typer.Option(None, help="worksheet path; default is per-provider"),
+    skip_sweep: bool = typer.Option(False, "--skip-sweep", help="worksheet only"),
+) -> None:
+    """The §1.3 sequence, as one command: sweep, then draft the worksheet.
+
+    `tests/fixtures/eval_set.csv` was hand-labelled on `ddgs` snippet shapes.
+    SearXNG returns a different `content` field, so those labels do not transfer
+    and any threshold swept against them is a number about the old world. This
+    runs a small sweep on the *current* provider and drafts a worksheet from the
+    rows it produced — step 3, the hand labelling, is yours.
+
+    It makes real search requests and adds real rows to the database.
+    """
+    settings = get_settings()
+    provider = _active_provider(settings)
+    out = out or (ROOT / "tests" / "fixtures" / f"eval_set_{provider}.csv")
+
+    if not skip_sweep:
+        from pitwall.pipeline import Pipeline, RunParams, RunStats
+
+        pipe = Pipeline(settings)
+        picked = [c.strip() for c in companies.split(",")] if companies else None
+        if picked is None:
+            picked = [c["name"] for c in pipe.repos.companies.all()][:8]
+        console.print(
+            f"sweeping [cyan]{len(picked)}[/] companies on [cyan]{provider}[/] "
+            f"with a {max_queries}-query budget:\n  " + ", ".join(picked)
+        )
+        params = RunParams(
+            companies=picked, max_queries=max_queries, use_llm=False,
+        )
+        stats = RunStats()
+        with pipe.tracked(params, stats, "relabel"):
+            pipe.build_queries(params)
+            pipe.search(params, stats)
+            pipe.extract(params, stats)
+            pipe.score_heuristics(params, stats)
+        console.print(
+            f"[green]{stats.queries_executed}[/] queries -> "
+            f"[green]{stats.results_fetched}[/] SERP rows -> "
+            f"[green]{stats.candidates_new}[/] new people "
+            f"({stats.heuristic_scored} scored)"
+        )
+        for note in stats.notes:
+            console.print(f"[yellow]note:[/] {note}")
+
+    bootstrap(n=n, out=out, provider=provider)
+    console.print(
+        f"\n[bold]Next:[/] label the `relevant` column in {out}, then\n"
+        f"  python scripts/eval_scoring.py sweep --path {out}\n"
+        "and record the before/after precision and recall next to the value you adopt."
+    )
+
+
+@app.command()
+def provenance(
+    path: Path = typer.Option(EVAL_CSV, help="the labelled eval set"),
+) -> None:
+    """Which provider's SERP shapes was this eval set labelled against? (§1.3)"""
+    settings = get_settings()
+    rows = list(csv.DictReader(path.open(encoding="utf-8-sig")))
+    counts = _provenance(rows)
+    labelled = sum(
+        1 for r in rows
+        if str(r.get("relevant", "")).strip().lower() in {"yes", "no", "y", "n", "1", "0"}
+    )
+    table = Table(title=f"{path.name}: {len(rows)} rows, {labelled} labelled")
+    table.add_column("SERP provider")
+    table.add_column("rows", justify="right")
+    for name, n in counts.most_common():
+        table.add_row(name, str(n))
+    console.print(table)
+    active = _active_provider(settings)
+    console.print(f"active provider for the next run: [cyan]{active}[/]")
+    if counts and counts.most_common(1)[0][0] != active:
+        console.print(
+            "[yellow]These do not match.[/] SearXNG's `content` field is not "
+            "DuckDuckGo's `body`: the same person reads differently to the heuristic "
+            "layer, so the labels do not transfer and the threshold has to be re-swept."
+        )
+
+
 @app.command()
 def sweep(
     path: Path = typer.Option(EVAL_CSV, help="the labelled eval set"),
@@ -312,6 +482,7 @@ def sweep(
     """
     settings = get_settings()
     rows = _load_eval(path)
+    stale = _warn_if_stale(rows, settings)
     scored = {
         int(r.get("candidate_id") or 0): score_candidate(
             _candidate(r), _company(r), _role(r),
@@ -352,11 +523,122 @@ def sweep(
     # the same quality for fewer LLM calls.
     best_f1 = max(f1 for _, f1 in safe_rows)
     best = max(thr for thr, f1 in safe_rows if f1 >= best_f1 - 0.01)
+    if stale:
+        console.print(
+            f"[red]Not recommending a threshold.[/] These labels were collected on "
+            f"`{stale[0]}` but the active provider is `{stale[1]}`, and the two return "
+            "different snippet shapes — the numbers above describe a world that is no "
+            "longer the one you search in.\n"
+            "  1. sweep 5-10 companies on the new provider\n"
+            "  2. [bold]python scripts/eval_scoring.py bootstrap "
+            f"--provider {stale[1]} --out tests/fixtures/eval_set_{stale[1]}.csv[/]\n"
+            "  3. hand-label it, then re-run this against that file\n"
+            f"[dim](for reference only, it would have said {best:g}.)[/]"
+        )
+        return
     console.print(
         f"[green]Recommended: heuristic_threshold = {best:g}[/] "
         f"(F1 {dict(safe_rows)[best]:.2f}, recall ≥ 0.90, and the highest safe cut-off "
         f"so the fewest candidates reach the LLM). "
-        f"Currently configured: {settings.heuristic_threshold:g}."
+        f"Currently configured: {settings.heuristic_threshold:g}.\n"
+        f"[dim]Record the before/after precision and recall in config/settings.yaml "
+        f"alongside the value — a threshold with no numbers next to it is a guess.[/]"
+    )
+
+
+@app.command()
+def corroboration(
+    path: Path = typer.Option(EVAL_CSV, help="the labelled eval set"),
+    per_query: str = typer.Option("0,1,2,3,4", help="comma-separated bonuses per extra query"),
+    per_template: str = typer.Option("0,2,4,6", help="comma-separated bonuses per extra template"),
+    threshold: float | None = typer.Option(None, help="heuristic threshold to hold fixed"),
+) -> None:
+    """Measure the §1.4 corroboration bonus instead of guessing it.
+
+    285 of 384 people in the real database were surfaced by exactly one query,
+    so agreement across queries — and especially across *templates*, which look
+    at different corners of the web — is a strong unused signal. What it is
+    worth in points is an empirical question, and this is how it gets answered.
+
+    Read the table the same way as `sweep`: the recall floor is 0.90, and among
+    the settings that clear it, more precision for the same recall is the win.
+    """
+    settings = get_settings()
+    rows = _load_eval(path)
+    stale = _warn_if_stale(rows, settings)
+    thr = threshold if threshold is not None else settings.heuristic_threshold
+
+    corroborated = sum(
+        1 for r in rows
+        if int(r.get("evidence_count") or 0) > 1 or int(r.get("template_count") or 0) > 1
+    )
+    if not corroborated:
+        console.print(
+            "[red]No row in this eval set has more than one source.[/] The bonus "
+            "cannot be measured against it — draft a worksheet from a sweep wide "
+            "enough that the same person is found twice."
+        )
+        raise typer.Exit(1)
+    console.print(
+        f"{corroborated} of {len(rows)} labelled rows have more than one source "
+        f"(threshold held at {thr:g})"
+    )
+
+    table = Table(title="corroboration bonus sweep")
+    for column in ("per query", "per template", "precision", "recall", "F1", "kept"):
+        table.add_column(column, justify="right")
+
+    best: tuple[float, float, float] | None = None   # (f1, precision, ...)
+    rowset = []
+    for q_raw in per_query.split(","):
+        for t_raw in per_template.split(","):
+            wq, wt = float(q_raw), float(t_raw)
+            m = Metrics()
+            kept = 0
+            for row in rows:
+                result = score_candidate(
+                    _candidate(row), _company(row), _role(row),
+                    serp_title=row.get("serp_title", ""),
+                    serp_snippet=row.get("serp_snippet", ""),
+                    weights={"query": wq, "template": wt,
+                             "max": settings.corroboration_max},
+                )
+                predicted = passes(result, thr)
+                kept += int(predicted)
+                m.add(predicted, _truth(row))
+            safe = m.recall >= 0.90
+            style = "[green]" if safe else "[red]"
+            table.add_row(
+                f"{wq:g}", f"{wt:g}", f"{m.precision:.2f}",
+                f"{style}{m.recall:.2f}", f"{m.f1:.2f}", str(kept),
+            )
+            rowset.append((wq, wt, m.precision, m.recall, m.f1))
+    console.print(table)
+
+    safe_rows = [r for r in rowset if r[3] >= 0.90]
+    if not safe_rows:
+        console.print("[red]nothing in this grid clears the 0.90 recall floor[/]")
+        return
+    baseline = next((r for r in rowset if r[0] == 0 and r[1] == 0), None)
+    best = max(safe_rows, key=lambda r: (r[4], r[2]))
+    if baseline and best[4] <= baseline[4] + 0.005:
+        console.print(
+            "[yellow]No corroboration weight beats the zero baseline on this set.[/] "
+            "Leave scoring.corroboration at 0 — that is a result, not a failure."
+        )
+        return
+    if stale:
+        console.print(
+            f"[red]Not recommending a weight.[/] These labels were collected on "
+            f"`{stale[0]}` and the active provider is `{stale[1]}` — see §1.3."
+        )
+        return
+    console.print(
+        f"[green]Best: per_query = {best[0]:g}, per_template = {best[1]:g}[/] "
+        f"(precision {best[2]:.2f}, recall {best[3]:.2f}, F1 {best[4]:.2f}"
+        + (f" vs F1 {baseline[4]:.2f} at zero)" if baseline else ")")
+        + "\nSet it in config/settings.yaml under scoring.corroboration and record "
+        "these numbers next to it."
     )
 
 

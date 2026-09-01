@@ -2,7 +2,12 @@
 streamlit>=1.40
 pandas>=2.2
 pydantic>=2.9
-pydantic-settings>=2.5
+# 2.7.0 is the first release that ships `NoDecode`, which src/pitwall/config.py
+# imports at line 24. Verified against the wheels on PyPI, not from memory:
+# 2.6.1 has no NoDecode, 2.7.0 does. Below this floor `import pitwall` fails
+# with a bare ImportError that names the symbol and not the cause — which is
+# exactly what the system Anaconda interpreter on this machine does.
+pydantic-settings>=2.7
 python-dotenv>=1.0
 
 # ─── Search ───────────────────────────────────────────────────────────

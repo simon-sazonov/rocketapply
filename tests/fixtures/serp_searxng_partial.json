@@ -1,0 +1,73 @@
+{
+  "query": "site:linkedin.com/in \"PREMA\" \"Performance Engineer\"",
+  "number_of_results": 0,
+  "results": [
+    {
+      "url": "https://www.linkedin.com/in/elena-marchetti-race/",
+      "title": "Elena Marchetti - Race Engineer - PREMA Racing | LinkedIn",
+      "content": "Race Engineer at PREMA Racing · Experience: PREMA Racing · Education: Politecnico di Milano · Location: Vicenza · 500+ connections on LinkedIn.",
+      "publishedDate": null,
+      "thumbnail": null,
+      "engine": "google",
+      "template": "default.html",
+      "parsed_url": [
+        "https",
+        "www.linkedin.com",
+        "/in/elena-marchetti-race/",
+        "",
+        "",
+        ""
+      ],
+      "img_src": "",
+      "priority": "",
+      "engines": [
+        "google",
+        "bing"
+      ],
+      "positions": [
+        1,
+        1
+      ],
+      "score": 6.0,
+      "category": "general"
+    },
+    {
+      "url": "https://www.linkedin.com/in/tomas-lindqvist-motorsport/",
+      "title": "Tomas Lindqvist - Performance Engineer at PREMA Powerteam - LinkedIn",
+      "content": "Performance Engineer at PREMA Powerteam. Formula 2 and Formula 3 programmes. Location: Padova, Veneto, Italy.",
+      "publishedDate": null,
+      "thumbnail": null,
+      "engine": "google",
+      "template": "default.html",
+      "parsed_url": [
+        "https",
+        "www.linkedin.com",
+        "/in/tomas-lindqvist-motorsport/",
+        "",
+        "",
+        ""
+      ],
+      "img_src": "",
+      "priority": "",
+      "engines": [
+        "google"
+      ],
+      "positions": [
+        2
+      ],
+      "score": 3.5,
+      "category": "general"
+    }
+  ],
+  "answers": [],
+  "corrections": [],
+  "infoboxes": [],
+  "suggestions": [],
+  "unresponsive_engines": [
+    [
+      "google",
+      "CAPTCHA",
+      true
+    ]
+  ]
+}

@@ -14,9 +14,11 @@ model misbehaved:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,14 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 #: base_url / model / key env per provider (§2.3).
 PROVIDERS: dict[str, dict[str, Any]] = {
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        # Not a constant on purpose — Groq deprecates model IDs on short notice.
+        # `Settings.groq_model` / `LLM_MODEL` is the real source, and
+        # `scripts/setup_groq.py` verifies it against GET /openai/v1/models.
+        "model": "openai/gpt-oss-20b",
+        "key_env": "GROQ_API_KEY",
+    },
     "zai": {
         "base_url": "https://api.z.ai/api/paas/v4",
         "model": "glm-4.7-flash",
@@ -58,14 +68,69 @@ PROVIDERS: dict[str, dict[str, Any]] = {
 #: Headroom over the estimated prompt + max_tokens, for tokenizer variance.
 CONTEXT_MARGIN = 512
 
-_QUOTA_MARKERS = (
-    "429", "quota", "rate limit", "rate_limit", "too many requests",
-    "insufficient", "exceeded", "billing",
+#: A refusal you cannot wait out: out of credits, out of daily allowance, or a
+#: billing problem. The only remedy is a different provider.
+#: Unambiguous "this will not clear inside one run": a per-DAY ceiling, an empty
+#: balance, a dead key.
+_TERMINAL_MARKERS = (
+    "per day", "per-day", "requests per day", "(rpd)", "daily limit",
+    "insufficient", "out of credit", "no credits", "credit balance",
+    "payment required", "quota exceeded", "out of quota", "exhausted", "expired",
+)
+
+#: Unambiguous "wait a moment": a per-MINUTE ceiling.
+#:
+#: Checked BEFORE the terminal markers, and that ordering is not cosmetic. Groq
+#: ends every rate-limit message with an upgrade link —
+#: `https://console.groq.com/settings/billing` — so a naive substring match on
+#: "billing" reads a ten-second pause as a dead account. It did exactly that on
+#: the first real run, twice.
+_TRANSIENT_MARKERS = (
+    "per minute", "per-minute", "(tpm)", "(rpm)", "tokens per minute",
+    "requests per minute", "rate_limit_exceeded", "try again in",
+)
+
+#: Weaker signals, only consulted once neither of the above matched.
+_RATE_LIMIT_MARKERS = (
+    "429", "rate limit", "rate_limit", "too many requests",
 )
 
 
+#: Models whose provider will enforce a JSON Schema at the token level. Strict
+#: mode is what removes the `needs_review` failure class almost entirely: the
+#: model is constrained while decoding and *cannot* emit a non-conforming reply,
+#: so the repair ladder below never has to run.
+#:
+#: Verified against console.groq.com/docs/structured-outputs on 29 Aug 2026.
+#: A model missing from this list still gets `{"type": "json_object"}`, which
+#: every OpenAI-compatible provider supports.
+STRICT_JSON_MODELS: frozenset[str] = frozenset(
+    {"openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"}
+)
+
+#: Models that emit a reasoning trace, and therefore accept `reasoning_effort`.
+#: The trace is billed as output and counts against Groq's free 8K tokens/minute,
+#: so for a classification task it is pure cost.
+REASONING_MODELS: tuple[str, ...] = ("openai/gpt-oss-", "qwen/qwen3")
+
+
 class QuotaExhausted(RuntimeError):
-    """The LLM provider refused on quota grounds — degrade or stop cleanly."""
+    """The provider refused for good — degrade to the next one in the chain."""
+
+
+class LLMRateLimited(RuntimeError):
+    """The provider refused *for now*.
+
+    Emphatically not the same thing as :class:`QuotaExhausted`. Groq's free tier
+    allows 8,000 tokens a minute, so a real sweep trips this every few batches
+    and it clears in seconds. Degrading over it would abandon the fastest
+    provider in the chain for a local CPU model a thousand times slower — which
+    is exactly what happened the first time this was run against the real 301.
+    """
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class LLMUnavailable(RuntimeError):
@@ -77,11 +142,17 @@ class Usage:
     calls: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
+    #: One scorer is shared by the LLM stage's worker threads (§1.1), so the
+    #: three counters below are written concurrently. `+=` is a read and a
+    #: write, not one operation, and the interpreter is free to switch threads
+    #: between them.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, tin: int, tout: int) -> None:
-        self.calls += 1
-        self.tokens_in += tin
-        self.tokens_out += tout
+        with self._lock:
+            self.calls += 1
+            self.tokens_in += tin
+            self.tokens_out += tout
 
     def cost(self, prices: dict[str, float]) -> float:
         return (
@@ -100,6 +171,11 @@ class BatchOutcome:
     provider: str = ""
     raw: str = ""
     error: str | None = None
+    #: True only when the *call* failed — unreachable host, 5xx, auth refusal.
+    #: A model that answered badly is not a provider failure: the repair ladder
+    #: already handles that, and degrading over it would burn the chain on a
+    #: problem the next provider is just as likely to have.
+    provider_error: bool = False
 
 
 # ─────────────────────────────── prompts ────────────────────────────────
@@ -332,6 +408,30 @@ class LLMScorer:
 
     # ── the call ──
 
+    # ── per-model capabilities ──
+
+    def supports_strict_json(self) -> bool:
+        """Can this model be constrained to the schema while decoding?"""
+        return self.model in STRICT_JSON_MODELS
+
+    def is_reasoning_model(self) -> bool:
+        return any(self.model.startswith(prefix) for prefix in REASONING_MODELS)
+
+    def call_kwargs(self) -> dict[str, Any]:
+        """The provider-specific half of the Chat Completions call.
+
+        Everything here is additive and gated on the *model*, so a provider that
+        has never heard of these parameters never sees them — which is what
+        keeps zai, deepseek and ollama byte-identical to v1.
+        """
+        extra: dict[str, Any] = {}
+        if self.is_reasoning_model():
+            extra["reasoning_effort"] = self.settings.llm_reasoning_effort
+            # Groq rejects reasoning_format=raw when JSON mode is on (400), and
+            # `hidden` keeps the trace out of the content we have to parse.
+            extra["extra_body"] = {"reasoning_format": "hidden"}
+        return extra
+
     def _complete(self, messages: list[dict[str, str]]) -> str:
         resp = self.client.chat.completions.create(
             model=self.model,
@@ -339,7 +439,8 @@ class LLMScorer:
             temperature=self.settings.llm_temperature,
             top_p=1,
             max_tokens=self.settings.llm_max_tokens,
-            response_format=response_format(strict=False),
+            response_format=response_format(strict=self.supports_strict_json()),
+            **self.call_kwargs(),
         )
         usage = getattr(resp, "usage", None)
         self.usage.add(
@@ -374,11 +475,15 @@ class LLMScorer:
         try:
             text = self._complete(messages)
         except Exception as exc:  # noqa: BLE001 - provider SDKs raise many shapes
-            if _is_quota_error(exc):
+            kind = classify_error(exc)
+            if kind == "rate_limit":
+                raise LLMRateLimited(str(exc), retry_after_seconds(exc)) from exc
+            if kind == "quota":
                 raise QuotaExhausted(str(exc)) from exc
             log.error("LLM call failed: %s", exc)
             return BatchOutcome(
-                needs_review=ids, model=self.model, provider=self.provider, error=str(exc)[:300]
+                needs_review=ids, model=self.model, provider=self.provider,
+                error=str(exc)[:300], provider_error=True,
             )
 
         parsed = parse_batch(text)
@@ -396,10 +501,14 @@ class LLMScorer:
             try:
                 text = self._complete(messages)
             except Exception as exc:  # noqa: BLE001
-                if _is_quota_error(exc):
+                kind = classify_error(exc)
+                if kind == "rate_limit":
+                    raise LLMRateLimited(str(exc), retry_after_seconds(exc)) from exc
+                if kind == "quota":
                     raise QuotaExhausted(str(exc)) from exc
                 return BatchOutcome(
-                    needs_review=ids, model=self.model, provider=self.provider, error=str(exc)[:300]
+                    needs_review=ids, model=self.model, provider=self.provider,
+                    error=str(exc)[:300], provider_error=True,
                 )
             parsed = parse_batch(text)
 
@@ -437,14 +546,54 @@ class LLMScorer:
         return self.usage.cost(prices)
 
 
-def _is_quota_error(exc: Exception) -> bool:
+def classify_error(exc: Exception) -> str:
+    """`"quota"` | `"rate_limit"` | `"error"`.
+
+    The distinction is the whole point: one means "use a different provider",
+    the other means "wait a moment and ask the same one again".
+    """
     text = f"{type(exc).__name__} {exc}".lower()
     status = getattr(exc, "status_code", None) or getattr(
         getattr(exc, "response", None), "status_code", None
     )
-    if status in (429, 402):
-        return True
-    return any(m in text for m in _QUOTA_MARKERS)
+    # Specific beats generic, in both directions: "requests per day" is terminal
+    # even alongside "try again in", and "tokens per minute" is transient even
+    # alongside a billing URL.
+    if any(m in text for m in _TERMINAL_MARKERS):
+        return "quota"
+    if any(m in text for m in _TRANSIENT_MARKERS):
+        return "rate_limit"
+    if status == 402:
+        return "quota"
+    if status == 429 or any(m in text for m in _RATE_LIMIT_MARKERS):
+        return "rate_limit"
+    return "error"
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    """For callers that only care that the provider said no."""
+    return classify_error(exc) in {"quota", "rate_limit"}
+
+
+#: Groq spells the wait out in prose: "Please try again in 9.622s", or
+#: "...in 1m3.2s". The SDK surfaces a `retry-after` header when there is one.
+_RETRY_AFTER_RE = re.compile(r"try again in\s+(?:(\d+)m)?([\d.]+)s", re.I)
+
+
+def retry_after_seconds(exc: Exception, default: float = 5.0) -> float:
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    if headers is not None:
+        for key in ("retry-after", "Retry-After", "x-ratelimit-reset-tokens"):
+            raw = None
+            with contextlib.suppress(Exception):
+                raw = headers.get(key)
+            if raw:
+                with contextlib.suppress(TypeError, ValueError):
+                    return max(0.0, float(str(raw).rstrip("s")))
+    match = _RETRY_AFTER_RE.search(str(exc))
+    if match:
+        return float(match.group(1) or 0) * 60 + float(match.group(2))
+    return default
 
 
 def batched(items: list[Any], size: int) -> list[list[Any]]:
@@ -468,6 +617,42 @@ def parse_num_ctx(parameters: str) -> int | None:
             except ValueError:
                 return None
     return None
+
+
+def list_models(
+    settings: Settings, provider: str = "groq", *, timeout: float = 15.0
+) -> list[str]:
+    """`GET {base_url}/models` — what this key can actually reach today.
+
+    Groq deprecates model IDs on short notice, so nothing in PitWall hardcodes
+    one: `scripts/setup_groq.py` calls this at setup time and checks the
+    configured `LLM_MODEL` against the answer. Every OpenAI-compatible provider
+    serves this endpoint, so it works for zai and deepseek too.
+    """
+    import httpx
+
+    cfg = settings.llm_config(provider)
+    key = cfg.get("api_key") or ""
+    if not key and provider != "ollama":
+        raise LLMUnavailable(
+            f"no API key for {provider!r} — set "
+            f"{PROVIDERS.get(provider, {}).get('key_env', 'the API key')} in .env"
+        )
+    url = f"{str(cfg['base_url']).rstrip('/')}/models"
+    try:
+        resp = httpx.get(url, headers={"Authorization": f"Bearer {key}"}, timeout=timeout)
+    except httpx.HTTPError as exc:
+        raise LLMUnavailable(f"cannot reach {url}: {exc}") from exc
+    if resp.status_code in (401, 403):
+        raise LLMUnavailable(
+            f"{provider} rejected the API key ({resp.status_code}). Check "
+            f"{PROVIDERS.get(provider, {}).get('key_env', 'the key')} in .env."
+        )
+    if resp.status_code >= 400:
+        raise LLMUnavailable(f"{url} returned {resp.status_code}: {resp.text[:200]}")
+    data = resp.json()
+    rows = data.get("data") if isinstance(data, dict) else data
+    return sorted(str(r.get("id")) for r in (rows or []) if isinstance(r, dict) and r.get("id"))
 
 
 def ollama_reachable(base_url: str, timeout: float = 2.0) -> bool:

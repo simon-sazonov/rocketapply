@@ -1,0 +1,64 @@
+# Job sources — §2.1/§2.3 of PITWALL_V2_IMPLEMENTATION.md.
+#
+# ATS boards for companies in companies.csv do NOT belong here: they come from
+# the `ats_kind` / `ats_token` columns, filled once by
+#     .venv/bin/python scripts/discover_ats.py
+# and overridable in the CSV. This file is for aggregators, career pages, and
+# any ATS board that is not attached to one of your companies.
+#
+# Every entry is fetched through the robots-gated, rate-limited client in
+# sources/jobs/base.py. `enabled: false` keeps an entry documented without
+# polling it — put the reason next to it.
+
+sources:
+
+  # ── aggregators ──────────────────────────────────────────────────────
+  - name: motorsportjobs
+    kind: aggregator
+    sitemap_url: https://www.motorsportjobs.com/sitemap.xml
+    url_contains: /job/
+    max_details: 40
+    enabled: false
+    # Checked on 30 Aug 2026, and everything about it is right except the last
+    # thing: robots.txt is a stock Drupal file that ALLOWS /job/ pages, the
+    # sitemap carries 2,736 job URLs with lastmod, and every posting page has
+    # schema.org JobPosting JSON-LD.
+    #
+    # But the edge answers 403 to every honest client — `PitWall/2.0`,
+    # `python-httpx/0.28`, anything that says what it is — while letting
+    # `curl/8.0` and browsers through. Reading it therefore means pretending to
+    # be a browser, and §2.1 says to drop the adapter rather than work around
+    # it. So it stays off.
+    #
+    # If that changes, or you have permission, set enabled: true — the adapter
+    # itself is generic and tested.
+    reason: >-
+      the site returns 403 to any self-identifying User-Agent; reading it would
+      require impersonating a browser (§2.1)
+
+  # A worked example of the same adapter against a source that does allow it.
+  # `remoteok` publishes a sitemap and JobPosting JSON-LD; it is not motorsport,
+  # so it is off by default too — turn it on if you want the generalised profile.
+  - name: remoteok
+    kind: aggregator
+    sitemap_url: https://remoteok.com/sitemap.xml
+    url_contains: /remote-jobs/
+    max_details: 20
+    enabled: false
+    reason: not motorsport; enabled only as a worked example of the adapter
+
+  # ── career pages ─────────────────────────────────────────────────────
+  # Highest coverage, lowest yield, and the one that fetches arbitrary HTML —
+  # so `career_page` is not in jobs.sources_enabled by default. Populate
+  # companies.csv's careers_url column and turn the kind on when you want it.
+  # - name: "careers:Alpine"
+  #   kind: career_page
+  #   url: https://www.alpinecars.com/en/careers/
+  #   enabled: true
+
+  # ── ATS boards not attached to a company row ─────────────────────────
+  # - name: "greenhouse:someteam"
+  #   kind: ats_json
+  #   ats: greenhouse
+  #   token: someteam
+  #   company: Some Team

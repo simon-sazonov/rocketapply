@@ -2,14 +2,32 @@
 # Precedence: CLI flags > .env > this file > code defaults.
 
 search:
-  providers: [ddgs, serper]
+  # Ordered fallback. searxng first for operator support; it drops out of the
+  # chain automatically when the container is not running (`make searxng`).
+  providers: [searxng, ddgs, serper]
   max_results_per_query: 20
   cache_ttl_days: 7
   region: uk-en
   ddgs_queries_per_second: 0.25
   serper_queries_per_second: 5
-  searxng_queries_per_second: 2
+  # 1 q/s, not unbounded. "Unlimited" describes the container, not the Google
+  # and Bing sessions it proxies — sweep those and they answer captchas.
+  searxng_queries_per_second: 1
+  searxng_timeout_seconds: 30
+  # `;`-separated engine groups, one per query, round-robin, so no single
+  # upstream engine absorbs the whole sweep. These names must be ENABLED on the
+  # instance: docker/searxng/settings.yml turns google and bing back on, since
+  # upstream SearXNG ships both disabled. Leave empty to use whatever the
+  # instance itself considers its default general engines.
+  # (quoted: each list item is one comma-separated GROUP, not one engine)
+  searxng_engines: ["google,duckduckgo", "bing,startpage", "brave,mojeek,qwant"]
   serper_credits: 2500          # tracked down to 0, then the provider disables itself
+  # One-time credits that never refill: below this floor the chain stops
+  # reaching for serper by itself. `--use-serper` overrides it for one run.
+  serper_reserve_credits: 500
+  # Thread-pool size. The shared token bucket is what caps the query RATE;
+  # this caps how many are in flight at once. Workers never touch SQLite.
+  concurrency: 4
 
 query_budget:
   max_queries_per_run: 200
@@ -24,7 +42,18 @@ scoring:
   #     thr=12  precision 0.61  recall 0.94  F1 0.74   <- chosen
   #     thr=5   precision 0.59  recall 1.00  F1 0.74
   # Re-run `python scripts/eval_scoring.py sweep` after any rubric change.
-  # Raise this back towards 25 if you switch to an operator-capable provider.
+  #
+  # v2 STATUS (§1.3): the provider IS operator-capable now, so this should move
+  # up — but NOT from these numbers. Those 60 labels were collected on `ddgs`
+  # snippet shapes; SearXNG's `content` field is not DuckDuckGo's `body`, so the
+  # same person reads differently to the heuristic layer and the labels do not
+  # transfer. `sweep` refuses to recommend a value while the provenance
+  # disagrees. The sequence, in order:
+  #     python scripts/eval_scoring.py relabel        # sweep + draft a worksheet
+  #     <label the `relevant` column by hand>
+  #     python scripts/eval_scoring.py sweep --path tests/fixtures/eval_set_searxng.csv
+  # Then change the number here and record the before/after precision and recall
+  # next to it, exactly as above. A threshold with no numbers beside it is a guess.
   heuristic_threshold: 12
   weights:
     heuristic: 0.30
@@ -34,6 +63,18 @@ scoring:
     same_name_different_org: 0.10
     role_unrelated: 0.40
     low_confidence: 0.80
+  # §1.4 corroboration, per EXTRA source beyond the first, capped.
+  # 285 of 384 people in the real database were found by exactly one query, so
+  # multi-source agreement is a strong and currently unused signal. Both are 0
+  # on purpose: the right weight is whatever the re-labelled eval set says, and
+  # §1.3's provenance guard applies here too. Measure with
+  #     python scripts/eval_scoring.py corroboration --path <labelled worksheet>
+  # then set them and record the before/after numbers.
+  corroboration:
+    per_query: 0
+    per_template: 0
+    max: 12
+
   bands:
     strong: 75
     possible: 55
@@ -41,15 +82,47 @@ scoring:
 
 llm:
   batch_size: 8
+  # Groq's free tier is 30 requests/minute but only 8,000 tokens/minute, and
+  # a batch of 8 costs roughly 2,500 — the token ceiling binds first, and a
+  # 429 halves this for the rest of the run on its own.
+  concurrency: 8
+  # Triage (§1.2). Empty = send everything that passed the heuristic gate.
+  # min_heuristic keeps the bottom of the list out of the LLM entirely;
+  # top_n is a hard budget per run, highest heuristic first. Candidates below
+  # the bar are marked `skipped_triage`, keep their heuristic score, and are
+  # picked up by a later run with a lower bar or a bigger budget.
+  triage:
+    min_heuristic:
+    top_n:
+  # A per-MINUTE ceiling is a pause, not a provider failure. Groq's free tier
+  # allows 8,000 tokens/minute and a full sweep trips it every few batches;
+  # the first real run degraded to a local CPU model over a limit that would
+  # have cleared in ten seconds. Wait it out, at halved concurrency, this many
+  # times in a row before concluding the provider cannot serve the run.
+  rate_limit:
+    retries: 6
+    max_wait_seconds: 90
   temperature: 0
   max_tokens: 1500
   prompt_version: v1
+  # Keyed separately (§2.6): changing the candidate rubric should not
+  # invalidate every job-fit score, and vice versa.
+  job_prompt_version: v1
   daily_request_cap: 900
   # A batch of 8 takes ~3.5 min on a local CPU-only 7B model. The cloud
   # providers never come close to this ceiling.
   timeout_seconds: 900
+  # Empty = use each provider's own default model. Groq's catalogue changes
+  # often, so the model is configuration, not a constant. `make groq-check`
+  # lists what your key can reach today and verifies this value exists.
+  model: ""
+  # gpt-oss and Qwen3 on Groq are reasoning models. Reasoning tokens are billed
+  # against the same free-tier budget as the answer, and this is a
+  # rubric-following classification task, not a puzzle.
+  reasoning_effort: low
   # $ per 1M tokens, used for the cost estimate on the Run page
   prices:
+    groq:     { input: 0.0,   output: 0.0 }
     zai:      { input: 0.0,   output: 0.0 }
     deepseek: { input: 0.14,  output: 0.28 }
     ollama:   { input: 0.0,   output: 0.0 }
@@ -60,3 +133,18 @@ crm:
 
 retention:
   purge_ignored_after_days: 180
+
+# ── job openings (Phase 2) ──────────────────────────────────────────────
+jobs:
+  # ats_json    structured, keyless, legitimate — but thin motorsport coverage
+  # aggregator  a sitemap + schema.org JobPosting reader, robots-gated
+  # career_page opt-in: highest coverage, lowest yield, fetches arbitrary HTML
+  sources_enabled: [ats_json, aggregator]
+  # Says honestly what this is. If a site refuses it, that is the site's answer;
+  # the adapter records the refusal and yields nothing. Impersonating a browser
+  # to get past it would be working around it — see §2.1 and docs/JOB_SOURCES.md.
+  user_agent: "PitWall/2.0 (personal job-alerting; +robots-compliant)"
+  crawl_delay: 1.0          # floor; a site's own Crawl-delay wins if larger
+  timeout_seconds: 20
+  max_detail_fetches: 40    # per source per poll, so a big sitemap cannot run away
+  close_after_days: 7       # unseen for this long -> status `closed`, never deleted

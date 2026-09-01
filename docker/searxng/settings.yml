@@ -1,0 +1,89 @@
+# SearXNG instance settings for PitWall — §0.1 of PITWALL_V2_IMPLEMENTATION.md.
+#
+# `use_default_settings: true` inherits the upstream engine list and only the
+# keys below are overridden, so an image upgrade keeps working. Every key here
+# was checked against searx/settings_defaults.py on 29 Aug 2026 — SearXNG's
+# schema is validated on start-up and an unknown key is a hard failure, so do
+# not add settings from an old blog post without checking them first.
+#
+# THE THREE THAT ACTUALLY MATTER, and what breaks without them:
+#
+#   search.formats: [html, json]  JSON output is DISABLED by default. Without
+#                                 `json` in this list, /search?format=json
+#                                 answers 403 with an HTML body.
+#   server.secret_key             SearXNG exits(1) on the literal placeholder
+#                                 below (searx/webapp.py: "server.secret_key is
+#                                 not changed"). The real value comes from
+#                                 SEARXNG_SECRET in ./.env, which `make searxng`
+#                                 generates.
+#   server.limiter: false         The bot limiter would throttle PitWall's own
+#                                 client and answer with empty result sets that
+#                                 look exactly like "nobody matches this query".
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "PitWall"
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  # `json` is the whole point — see the note above.
+  formats:
+    - html
+    - json
+  # Upstream suspends an engine for a FULL DAY after one captcha (86400s) and a
+  # week after a recaptcha. That is sized for a public instance serving
+  # strangers; on a personal 1 q/s sweep it means a single blip costs a day of
+  # coverage from your best engine. An hour is long enough to stop hammering a
+  # blocked engine and short enough that the next session gets it back.
+  suspended_times:
+    SearxEngineCaptcha: 3600
+    SearxEngineAccessDenied: 3600
+    SearxEngineTooManyRequests: 900
+    cf_SearxEngineCaptcha: 3600
+    cf_SearxEngineAccessDenied: 3600
+    recaptcha_SearxEngineCaptcha: 3600
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  # Overridden by SEARXNG_SECRET from ./.env (searx/settings_defaults.py:218).
+  secret_key: "ultrasecretkey"
+  # Off deliberately: this instance is bound to a local port and its only client
+  # is PitWall's own rate-limited adapter.
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+
+outgoing:
+  # Upstream engines, not this container, are what rate-limits. Keep the
+  # timeouts short so a captcha-ing engine fails fast and lands in
+  # `unresponsive_engines`, where the adapter can see it, rather than hanging
+  # the whole query.
+  request_timeout: 8.0
+  max_request_timeout: 12.0
+  pool_connections: 32
+  pool_maxsize: 16
+  enable_http2: true
+
+# Engine overrides. `use_default_settings: true` merges these onto the upstream
+# list by name, so only the keys below change.
+#
+# Upstream SearXNG ships google and bing DISABLED; the general engines that are
+# on by default are duckduckgo, startpage, brave, dogpile and the wikis. For
+# `site:linkedin.com/in "…"` queries google and bing are the two that matter, so
+# turn them back on and let the adapter's rotation (`SEARXNG_ENGINES` /
+# search.searxng_engines) spread the sweep across them.
+engines:
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: qwant
+    disabled: false

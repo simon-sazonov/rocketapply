@@ -43,7 +43,13 @@ CompanyMatch = Literal[
     "exact", "parent", "subsidiary", "same_name_different_org", "none", "unknown"
 ]
 RoleMatch = Literal["exact", "adjacent", "unrelated", "unknown"]
-Verdict = Literal["strong", "possible", "weak", "reject", "needs_review", "pending_llm"]
+#: `skipped_triage` is deliberately distinct from `pending_llm`: one means "we
+#: chose not to spend a verdict on this person", the other means "not done yet".
+#: Conflating them would make an unfinished run and a triaged one look identical.
+Verdict = Literal[
+    "strong", "possible", "weak", "reject", "needs_review", "pending_llm",
+    "skipped_triage",
+]
 CRMStatus = Literal[
     "new", "saved", "ignored", "contacted", "replied", "meeting", "closed"
 ]
@@ -140,19 +146,30 @@ class Role(BaseModel):
     @field_validator("family")
     @classmethod
     def _known_family(cls, v: str) -> str:
+        """Checked against the ACTIVE profile, not the built-in tuple (§3.1).
+
+        For `motorsport` — the default — the two are the same list, so this is
+        the v1 behaviour verbatim. Another profile brings its own vocabulary.
+        """
+        from .profiles import active
+
         v = v.strip().lower().replace(" ", "_").replace("-", "_")
-        if v not in ROLE_FAMILIES:
-            raise ValueError(f"family {v!r} not in {ROLE_FAMILIES}")
+        allowed = active().role_families or ROLE_FAMILIES
+        if v not in allowed:
+            raise ValueError(f"family {v!r} not in {tuple(allowed)}")
         return v
 
     @field_validator("seniority")
     @classmethod
     def _known_seniority(cls, v: list[str]) -> list[str]:
+        from .profiles import active
+
+        allowed = active().seniorities or SENIORITIES
         out = []
         for s in v:
             s2 = s.strip().lower()
-            if s2 and s2 not in SENIORITIES:
-                raise ValueError(f"seniority {s!r} not in {SENIORITIES}")
+            if s2 and s2 not in allowed:
+                raise ValueError(f"seniority {s!r} not in {tuple(allowed)}")
             if s2:
                 out.append(s2)
         return out
@@ -379,8 +396,64 @@ class Score(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     red_flags: list[str] = Field(default_factory=list)
     model: str | None = None
+    #: Which LLM answered. Degradation is per batch, so one run can legitimately
+    #: mix providers — this is what makes such a run auditable afterwards.
+    provider: str | None = None
     prompt_version: str = "v1"
     scored_at: str | None = None
+
+
+class JobRelevance(BaseModel):
+    """How well one posting fits the owner's target profile — §2.6."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: int
+    score: float = Field(default=0.0, ge=0, le=100)
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    seniority_fit: Literal["below", "match", "above", "unknown"] = "unknown"
+    reasons: list[str] = Field(default_factory=list)
+    red_flags: list[str] = Field(default_factory=list)
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def _clamp_job_score(cls, v: Any) -> Any:
+        try:
+            return max(0.0, min(100.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _clamp_job_conf(cls, v: Any) -> Any:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return 0.0
+        if f > 1.0:
+            f = f / 100.0
+        return max(0.0, min(1.0, f))
+
+    @field_validator("seniority_fit", mode="before")
+    @classmethod
+    def _known_fit(cls, v: Any) -> Any:
+        if not isinstance(v, str):
+            return "unknown"
+        cleaned = v.strip().lower()
+        return cleaned if cleaned in {"below", "match", "above", "unknown"} else "unknown"
+
+    @field_validator("reasons", "red_flags", mode="before")
+    @classmethod
+    def _as_list(cls, v: Any) -> Any:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v]
+        return v
+
+
+class JobRelevanceBatch(BaseModel):
+    results: list[JobRelevance] = Field(default_factory=list)
 
 
 # ───────────────────────────────── CRM ──────────────────────────────────

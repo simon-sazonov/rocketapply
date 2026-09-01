@@ -20,69 +20,9 @@ from pitwall.crm import CRM
 from pitwall.export import filter_frame, funnel_counts, leads_frame
 from pitwall.inputs import sync_to_db
 from pitwall.models import Company, Role
-from pitwall.pipeline import Pipeline, RunParams
-from pitwall.search.base import SearchHit
+from pitwall.pipeline import Pipeline, RunParams, RunStats
 
-HITS = [
-    SearchHit(0, "https://uk.linkedin.com/in/jane-doe",
-              "Jane Doe - Data Scientist - McLaren Racing | LinkedIn",
-              "Data Scientist at McLaren Racing · Woking, England, United Kingdom", {}),
-    SearchHit(1, "https://www.linkedin.com/in/david-brooks",
-              "David Brooks - Data Analyst - McLaren Health Care | LinkedIn",
-              "Macomb, Michigan, United States", {}),
-    SearchHit(2, "https://www.linkedin.com/in/luca-rossi",
-              "Luca Rossi - Strategy Consultant | LinkedIn",
-              "Ex-McLaren Racing data scientist, now at Bain", {}),
-    SearchHit(3, "https://www.linkedin.com/posts/someone_activity-1",
-              "A post about F1 data", "not a person", {}),
-    SearchHit(4, "https://uk.linkedin.com/in/Jane-Doe/",   # same person, mirror host
-              "Jane Doe - Senior Data Scientist - McLaren Racing | LinkedIn",
-              "Senior Data Scientist at McLaren Racing, working on tyre degradation and "
-              "Monte Carlo race simulation · Woking, England, United Kingdom", {}),
-]
-
-
-class StubProvider:
-    """A deterministic stand-in for a real search provider."""
-
-    name = "ddgs"
-
-    def __init__(self, hits=None):
-        self.hits = HITS if hits is None else hits
-        self.calls = 0
-
-    def supports_operators(self) -> bool:
-        return False
-
-    def remaining_quota(self):
-        return None
-
-    def search(self, query, *, max_results=20, region="wt-wt"):
-        """First query returns the short Jane headline, later queries the long one.
-
-        Two URLs that canonicalize identically inside ONE result page are the
-        same row and collapse there (UNIQUE(query_id, canonical_url)); the
-        longest-wins merge only has anything to do across different queries.
-        """
-        self.calls += 1
-        page = list(self.hits)
-        if self.calls > 1 and len(page) >= 5:
-            page = [page[4], *page[1:4]]
-        else:
-            page = page[:4]
-        return page[:max_results]
-
-
-@pytest.fixture()
-def pipeline(settings, repos, monkeypatch, company, role):
-    sync_to_db(repos.conn, [company], [role])
-    provider = StubProvider()
-    monkeypatch.setattr("pitwall.pipeline.build_chain", lambda *a, **k: [provider])
-    monkeypatch.setattr("pitwall.query_builder.build_chain", lambda *a, **k: [provider],
-                        raising=False)
-    pipe = Pipeline(settings, repos)
-    pipe.stub = provider
-    return pipe
+from .conftest import StubProvider  # noqa: TID252
 
 
 def _params(**kw):
@@ -339,3 +279,77 @@ def test_cancelling_from_another_thread_stops_the_run(settings, repos, monkeypat
 
     pipe._run_id = run_id
     assert pipe.cancelled() is True
+
+
+# ─────────────────── CLI stages write run rows (§0.5) ────────────────────
+
+
+def test_a_stage_run_opens_and_closes_its_own_run_row(pipeline, repos):
+    """The `runs` table was empty after a whole real session because the CLI
+    stages never went through the code path that records one."""
+    stats = RunStats()
+    params = _params()
+    pipeline.build_queries(params)
+    with pipeline.tracked(params, stats, "search"):
+        pipeline.search(params, stats)
+
+    rows = repos.runs.latest(1)
+    assert len(rows) == 1
+    assert rows[0]["command"] == "search"
+    assert rows[0]["status"] == "done"
+    assert rows[0]["finished_at"], "a closed run has a finish time"
+    assert stats.run_id == rows[0]["id"]
+    assert rows[0]["queries_executed"] == stats.queries_executed > 0
+
+
+def test_progress_is_streamed_into_the_run_row(pipeline, repos):
+    stats = RunStats()
+    with pipeline.tracked(_params(), stats, "extract") as run_id:
+        pipeline.progress("extract", "half way", 5, 10)
+        prog = repos.runs.get_progress(run_id)
+        assert prog["stage"] == "extract" and prog["current"] == 5
+
+
+def test_a_failing_stage_still_leaves_a_terminal_run_row(pipeline, repos):
+    """Not a row stuck at `running` — the failure has to be visible in history."""
+    stats = RunStats()
+    with pytest.raises(RuntimeError, match="boom"), pipeline.tracked(_params(), stats, "score"):
+        raise RuntimeError("boom")
+
+    row = repos.runs.latest(1)[0]
+    assert row["status"] == "failed"
+    assert "boom" in (row["error"] or "")
+    assert row["finished_at"]
+
+
+def test_the_stage_counters_land_on_the_run_row(pipeline, repos):
+    stats = RunStats()
+    with pipeline.tracked(_params(), stats, "search"):
+        stats.queries_executed = 7
+        stats.results_fetched = 42
+        stats.candidates_new = 3
+    row = repos.runs.latest(1)[0]
+    assert (row["queries_executed"], row["results_fetched"], row["candidates_new"]) == (7, 42, 3)
+
+
+def test_the_full_run_is_still_labelled_run(pipeline, repos):
+    pipeline.run(_params())
+    assert repos.runs.latest(1)[0]["command"] == "run"
+
+
+def test_a_run_left_open_by_a_killed_process_is_closed_by_the_next_one(pipeline, repos):
+    """SIGTERM does not raise in Python, so `finally` never runs and the row
+    would stay `running` for ever."""
+    orphan = repos.runs.start({}, "score")
+    assert repos.runs.get(orphan)["status"] == "running"
+
+    stats = RunStats()
+    with pipeline.tracked(_params(), stats, "search"):
+        pass
+
+    closed = repos.runs.get(orphan)
+    assert closed["status"] == "interrupted"
+    assert closed["finished_at"]
+    assert "without closing" in (closed["error"] or "")
+    # and the live run is untouched
+    assert repos.runs.get(stats.run_id)["status"] == "done"

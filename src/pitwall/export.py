@@ -9,7 +9,7 @@ page, Analytics and the exporter all see exactly the same rows.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -294,6 +294,233 @@ def funnel_counts(conn: sqlite3.Connection, settings: Settings | None = None) ->
             "SELECT COUNT(DISTINCT candidate_id) FROM scores WHERE final_score >= ?",
             settings.band_strong,
         ),
+    }
+
+
+def _text(value: Any) -> str | None:
+    """A pandas cell as a string, or None. NULL comes back as float('nan')."""
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def role_family_for(title: Any) -> str | None:
+    """Guess a role family from a job title, using the heuristic layer's own
+    keyword table — so a posting and a person are classified the same way.
+
+    Takes `Any` deliberately: this reads a pandas column, and pandas represents
+    a NULL title as `float('nan')`. 147 of the 384 people in the real database
+    have no title, so a `str` annotation here would be a lie that raised on the
+    first real row.
+    """
+    from .profiles import active
+    from .scoring.heuristics import FAMILY_KEYWORDS
+
+    if not isinstance(title, str):
+        return None
+    low = " " + title.lower() + " "
+    best: tuple[int, str] | None = None
+    for family, words in (active().family_keywords or FAMILY_KEYWORDS).items():
+        for word in words:
+            if word in low and (best is None or len(word) > best[0]):
+                best = (len(word), family)
+    return best[1] if best else None
+
+
+PROXIMITY_LABELS = {
+    2: "same role family",
+    1: "adjacent family",
+    0: "different discipline",
+}
+
+
+def role_proximity(job_title: Any, person_family: Any, person_title: Any) -> int:
+    """How close is this person's work to this posting? 2 / 1 / 0.
+
+    Deliberately coarse. The useful signal is "there is someone in that
+    department", not a similarity score — the person is not applying for the
+    job, they are the reason you have something to say about it.
+
+    The person's own title wins over `person_family` when there is one, and that
+    ordering matters: the stored family is the family of the role whose *query*
+    surfaced them, which says what we were looking for, not what they do. A
+    mechanic found by a "Data Scientist" search is not in the data department.
+    """
+    job_family = role_family_for(job_title)
+    if not job_family:
+        return 0
+    if isinstance(person_title, str) and person_title.strip():
+        title_family = role_family_for(person_title)
+        return 2 if title_family == job_family else (1 if title_family else 0)
+    if not isinstance(person_family, str) or not person_family:
+        return 0
+    return 2 if person_family == job_family else 1
+
+
+def openings_frame(
+    conn: sqlite3.Connection,
+    settings: Settings | None = None,
+    *,
+    company: str | None = None,
+    min_score: float = 0.0,
+    prompt_version: str | None = None,
+) -> list[dict[str, Any]]:
+    """**The point of Phase 2** — §2.5: each open posting, and the people you
+    already have at that company, ranked, with their CRM status.
+
+    The sentence this exists to produce is: "Alpine posted a Performance
+    Engineer role 3 days ago — you already have 4 people in that department,
+    none contacted."
+    """
+    settings = settings or get_settings()
+    version = prompt_version or settings.prompt_version
+
+    jobs = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT j.*, c.name AS company_name, s.name AS source_name
+              FROM jobs j
+              LEFT JOIN companies c   ON c.id = j.company_id
+              LEFT JOIN job_sources s ON s.id = j.source_id
+             WHERE j.status = 'open'
+             ORDER BY COALESCE(j.posted_at, j.first_seen_at) DESC
+            """
+        )
+    ]
+    if company:
+        jobs = [j for j in jobs if (j["company_name"] or "").casefold() == company.casefold()]
+    if not jobs:
+        return []
+
+    leads = leads_frame(conn, settings, prompt_version=version)
+    now = datetime.now(UTC)
+
+    out: list[dict[str, Any]] = []
+    for job in jobs:
+        people: list[dict[str, Any]] = []
+        if not leads.empty and job.get("company_id"):
+            same = leads[leads["target_company"] == job["company_name"]]
+            same = same[same["score"].fillna(0.0) >= min_score]
+            if settings.hide_ignored_by_default:
+                same = same[same["status"] != "ignored"]
+            for _, row in same.iterrows():
+                proximity = role_proximity(
+                    job["title"], row.get("role_family"), row.get("title")
+                )
+                people.append({
+                    "candidate_id": int(row["candidate_id"]),
+                    "name": _text(row.get("name")) or "—",
+                    # Normalised here rather than at each caller: pandas hands
+                    # back float('nan') for a NULL, and "nan" rendered as a job
+                    # title in the CLI before this.
+                    "title": _text(row.get("title")),
+                    "score": float(row.get("score") or 0.0),
+                    "status": _text(row.get("status")) or "new",
+                    "verdict": _text(row.get("verdict")) or "unscored",
+                    "profile_url": _text(row.get("profile_url")) or "",
+                    "proximity_rank": proximity,
+                    "proximity": PROXIMITY_LABELS[proximity],
+                })
+            # Closest discipline first, then best-scored — that is the order you
+            # would actually write to them in.
+            people.sort(key=lambda p: (-p["proximity_rank"], -p["score"]))
+
+        posted = job.get("posted_at") or job.get("first_seen_at")
+        age_days = None
+        if posted:
+            try:
+                stamp = datetime.fromisoformat(str(posted))
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=UTC)
+                age_days = max(0, (now - stamp).days)
+            except ValueError:
+                age_days = None
+
+        out.append({
+            **job,
+            "age_days": age_days,
+            "people": people,
+            "people_count": len(people),
+            "uncontacted_count": sum(1 for p in people if p["status"] in ("new", "saved")),
+            "same_family_count": sum(1 for p in people if p["proximity_rank"] == 2),
+            # Counted within the discipline, not across the company: the
+            # headline sentence says "N people in that department, M of whom
+            # you have not contacted", and M has to be a subset of N.
+            "uncontacted_same_family": sum(
+                1 for p in people
+                if p["proximity_rank"] == 2 and p["status"] in ("new", "saved")
+            ),
+        })
+
+    # Postings where you know someone come first — that is the whole ranking.
+    out.sort(key=lambda j: (-j["same_family_count"], -j["people_count"], j["age_days"] or 999))
+    return out
+
+
+def sweep_report(conn: sqlite3.Connection, settings: Settings | None = None) -> dict[str, Any]:
+    """What a sweep actually achieved — §1.5's "record the result".
+
+    Coverage before precision: v1 had searched 7 of 49 companies, so the next
+    volume of leads was in the 42 that had never been looked at, not in a better
+    threshold. `extraction` is the other half of the story — operator queries
+    return cleaner titles, so those gaps should close as coverage grows.
+    """
+    settings = settings or get_settings()
+    q = lambda sql, *a: int(conn.execute(sql, a).fetchone()[0])  # noqa: E731
+
+    companies = q("SELECT COUNT(*) FROM companies WHERE active = 1")
+    searched = q(
+        """
+        SELECT COUNT(DISTINCT q.company_id) FROM queries q
+         WHERE q.status = 'done' AND q.company_id IS NOT NULL
+        """
+    )
+    with_rows = q(
+        """
+        SELECT COUNT(DISTINCT q.company_id) FROM queries q
+          JOIN search_results sr ON sr.query_id = q.id
+         WHERE q.company_id IS NOT NULL
+        """
+    )
+    with_people = q(
+        """
+        SELECT COUNT(DISTINCT q.company_id)
+          FROM candidate_sources cs
+          JOIN search_results sr ON sr.id = cs.search_result_id
+          JOIN queries q         ON q.id = sr.query_id
+         WHERE q.company_id IS NOT NULL
+        """
+    )
+    candidates = q("SELECT COUNT(*) FROM candidates")
+    return {
+        "companies_active": companies,
+        "companies_searched": searched,
+        "companies_with_serp_rows": with_rows,
+        "companies_with_people": with_people,
+        "templates_fired": [
+            r["template_id"]
+            for r in conn.execute(
+                "SELECT DISTINCT template_id FROM queries WHERE status = 'done'"
+                " ORDER BY template_id"
+            )
+        ],
+        "queries_done": q("SELECT COUNT(*) FROM queries WHERE status = 'done'"),
+        "queries_failed": q("SELECT COUNT(*) FROM queries WHERE status = 'failed'"),
+        "serp_rows": q("SELECT COUNT(*) FROM search_results"),
+        "candidates": candidates,
+        # The extraction gaps of §1.5: these should shrink as operator templates
+        # replace the soft ones, because a `site:` result has a cleaner title.
+        "extraction": {
+            "no_company": q("SELECT COUNT(*) FROM candidates WHERE current_company IS NULL OR current_company = ''"),
+            "no_title": q("SELECT COUNT(*) FROM candidates WHERE current_title IS NULL OR current_title = ''"),
+            "no_location": q("SELECT COUNT(*) FROM candidates WHERE location IS NULL OR location = ''"),
+            "single_source": q("SELECT COUNT(*) FROM candidates WHERE evidence_count <= 1"),
+        },
+        "verdicts": {
+            r["verdict"] or "unscored": r["n"]
+            for r in conn.execute(
+                "SELECT verdict, COUNT(*) n FROM scores GROUP BY verdict ORDER BY n DESC"
+            )
+        },
     }
 
 

@@ -4,7 +4,7 @@
 Two sources:
 
 * ``--source local`` (default when the files exist) converts the
-  ``motorsport_teams.csv`` / ``motorsport_positions.csv`` research tables in the
+  ``config/seed/motorsport_teams.csv`` / ``motorsport_positions.csv`` research tables in the
   repository root into the two input files PitWall reads. This is the richer
   data: 49 teams × 17 positions, with the per-team×position priority matrix
   folded into the company tier and role priority.
@@ -34,12 +34,36 @@ from rich.table import Table  # noqa: E402
 
 from pitwall.config import config_dir  # noqa: E402
 from pitwall.inputs import load_companies, load_roles  # noqa: E402
+from pitwall.profiles import active as active_profile  # noqa: E402
 
 app = typer.Typer(add_completion=False, help=__doc__)
 console = Console()
 
-TEAMS_CSV = ROOT / "motorsport_teams.csv"
-POSITIONS_CSV = ROOT / "motorsport_positions.csv"
+
+def _announce_profile() -> None:
+    """Which vocabulary the roles being written have to satisfy (§3.1)."""
+    profile = active_profile()
+    console.print(
+        f"profile [cyan]{profile.name}[/] "
+        f"({len(profile.role_families)} role families, "
+        f"{len(profile.seniorities)} seniority levels)"
+        + ("" if profile.path else "  [dim](built-in defaults)[/]")
+    )
+
+def _seed_table(name: str) -> Path:
+    """The research tables. `config/seed/` first, then the old repo root (§3.4).
+
+    They used to sit at the root carrying eleven `YOUR_status` /
+    `YOUR_contact_name` columns — a spreadsheet CRM from before PitWall had one,
+    empty in all 882 rows, and a second system for the same job. The columns are
+    gone and the files are seed input now, which is all they ever were.
+    """
+    modern = ROOT / "config" / "seed" / name
+    return modern if modern.exists() else ROOT / name
+
+
+TEAMS_CSV = _seed_table("motorsport_teams.csv")
+POSITIONS_CSV = _seed_table("motorsport_positions.csv")
 
 # ────────────────────── local-source mapping tables ──────────────────────
 
@@ -368,7 +392,7 @@ def _write(rows: list[dict[str, str]], header: list[str], path: Path) -> None:
 @app.command()
 def main(
     source: str = typer.Option(
-        "auto", help="auto | local (motorsport_*.csv in the repo root) | plan (§17 starter data)"
+        "auto", help="auto | local (config/seed/motorsport_*.csv) | plan (§17 starter data)"
     ),
     force: bool = typer.Option(False, "--force", help="overwrite existing config CSVs"),
     merge: bool = typer.Option(
@@ -376,6 +400,7 @@ def main(
     ),
 ) -> None:
     """Write config/companies.csv and config/roles.csv."""
+    _announce_profile()
     if source == "auto":
         source = "local" if TEAMS_CSV.exists() and POSITIONS_CSV.exists() else "plan"
 

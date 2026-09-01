@@ -84,6 +84,15 @@ class SerpCache:
         self.writes += 1
         return path
 
+    def drop(self, provider: str, query: str, max_results: int) -> bool:
+        """Evict one entry. Used when a cached answer turns out to be junk."""
+        path = self.path_for(cache_key(provider, query, max_results))
+        try:
+            path.unlink()
+        except OSError:
+            return False
+        return True
+
     def stats(self) -> dict[str, int]:
         return {"hits": self.hits, "misses": self.misses, "writes": self.writes}
 

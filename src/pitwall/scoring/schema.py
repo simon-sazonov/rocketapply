@@ -98,16 +98,114 @@ SCHEMA_HINT = """{
 }"""
 
 
+#: JSON-Schema keywords that constrained decoding does not accept. They are
+#: assertions about a value, not about its shape, and a token-level constraint
+#: engine cannot express them. Dropping them is safe here because `LLMVerdict`
+#: clamps `score`/`confidence` and truncates `reasons` on the way in anyway.
+_STRICT_UNSUPPORTED = frozenset(
+    {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+     "minItems", "maxItems", "minLength", "maxLength", "pattern", "format",
+     "default", "multipleOf"}
+)
+
+
+def strict_variant(schema: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite a schema for strict/constrained decoding.
+
+    Two rules, both from the providers that implement it (OpenAI, and Groq for
+    `openai/gpt-oss-*`): every property must appear in `required`, and every
+    object must set `additionalProperties: false`. Optional fields stay optional
+    by being nullable, which they already are.
+    """
+    out: dict[str, Any] = {
+        k: v for k, v in schema.items() if k not in _STRICT_UNSUPPORTED
+    }
+    props = out.get("properties")
+    if isinstance(props, dict):
+        out["properties"] = {k: strict_variant(v) for k, v in props.items()}
+        out["required"] = list(props)
+        out["additionalProperties"] = False
+    items = out.get("items")
+    if isinstance(items, dict):
+        out["items"] = strict_variant(items)
+    return out
+
+
+#: The all-required, constraint-free form of BATCH_SCHEMA.
+STRICT_BATCH_SCHEMA: dict[str, Any] = strict_variant(BATCH_SCHEMA)
+
+
 def response_format(strict: bool = False) -> dict[str, Any]:
     """`response_format` for the Chat Completions call.
 
     Plain `json_object` by default — it is what every OpenAI-compatible free
-    tier supports. `strict=True` upgrades to a full json_schema for providers
-    that accept it.
+    tier supports. `strict=True` upgrades to a full json_schema with constrained
+    decoding, which is what removes the `needs_review` failure class: the model
+    is constrained at the token level and cannot emit a non-conforming reply.
+    Only some models support it; see `pitwall.scoring.llm.STRICT_JSON_MODELS`.
     """
     if not strict:
         return {"type": "json_object"}
     return {
         "type": "json_schema",
-        "json_schema": {"name": "pitwall_batch", "strict": True, "schema": BATCH_SCHEMA},
+        "json_schema": {
+            "name": "pitwall_batch",
+            "strict": True,
+            "schema": STRICT_BATCH_SCHEMA,
+        },
+    }
+
+
+# ─────────────────── job relevance against a CV (§2.6) ───────────────────
+
+JOB_RESULT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["job_id", "score", "confidence", "reasons"],
+    "additionalProperties": False,
+    "properties": {
+        "job_id": {"type": "integer"},
+        "score": {"type": "number", "minimum": 0, "maximum": 100},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "seniority_fit": {
+            "type": "string",
+            "enum": ["below", "match", "above", "unknown"],
+        },
+        "reasons": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+        "red_flags": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+JOB_BATCH_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["results"],
+    "additionalProperties": False,
+    "properties": {"results": {"type": "array", "items": JOB_RESULT_SCHEMA}},
+}
+
+STRICT_JOB_BATCH_SCHEMA: dict[str, Any] = strict_variant(JOB_BATCH_SCHEMA)
+
+JOB_SCHEMA_HINT = """{
+  "results": [
+    {
+      "job_id": <int, echo the value given>,
+      "score": <0-100, how well this posting fits the profile>,
+      "confidence": <0.0-1.0>,
+      "seniority_fit": "below|match|above|unknown",
+      "reasons": [<1-3 short strings quoting the posting or the profile>],
+      "red_flags": [<strings, may be empty>]
+    }
+  ]
+}"""
+
+
+def job_response_format(strict: bool = False) -> dict[str, Any]:
+    if not strict:
+        return {"type": "json_object"}
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "pitwall_job_relevance",
+            "strict": True,
+            "schema": STRICT_JOB_BATCH_SCHEMA,
+        },
     }

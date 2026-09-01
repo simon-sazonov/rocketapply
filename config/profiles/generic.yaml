@@ -1,0 +1,85 @@
+# A minimal worked example — §3.1 of PITWALL_V2_IMPLEMENTATION.md.
+#
+# Not a second product: a demonstration of the schema, so a friend cloning this
+# can see what a profile for their own field would look like. Select it with
+#
+#     PITWALL_PROFILE=generic
+#
+# Everything the motorsport profile carries, it carries too — the difference is
+# only which words mean which discipline. Start by copying motorsport.yaml, keep
+# the two file references, and replace the vocabulary.
+
+name: generic
+description: >-
+  A neutral software / data profile, as a worked example of the schema.
+  Copy motorsport.yaml if you want a fuller starting point.
+
+# How the LLM prompt refers to the industry when no company is named.
+organisation_noun: organisation
+# The family a role falls back to when nothing else matches.
+default_role_family: software
+
+# Both are read from config/, and both are shared with the motorsport profile:
+# the query grammar and the past-tense / recruiter / student markers are about
+# how search engines and LinkedIn headlines work, not about any one industry.
+query_templates: query_templates.yaml
+negative_keywords: negative_keywords.yaml
+
+# The vocabulary config/roles.csv may use in its `family` column.
+role_families:
+  - software
+  - data_science
+  - data_engineering
+  - operations
+  - leadership
+
+# The ladder roles.csv may use, and the one the LLM must answer with.
+seniorities:
+  - intern
+  - graduate
+  - junior
+  - mid
+  - senior
+  - lead
+  - head
+  - executive
+  - unknown
+
+# What a job title has to contain for the heuristic layer to recognise a family.
+# The highest-leverage list in the file: too narrow and you miss people, too
+# broad and every title matches every family. Lower case, and phrases are fine.
+family_keywords:
+  software:
+    - software engineer
+    - backend
+    - frontend
+    - full stack
+    - platform engineer
+    - developer
+    - sre
+    - devops
+  data_science:
+    - data scientist
+    - data science
+    - machine learning
+    - ml engineer
+    - applied scientist
+    - research scientist
+    - analytics
+  data_engineering:
+    - data engineer
+    - analytics engineer
+    - data platform
+    - data pipeline
+    - database
+  operations:
+    - operations
+    - programme manager
+    - project manager
+    - delivery
+  leadership:
+    - head of
+    - director
+    - vp
+    - chief
+    - lead

@@ -1,0 +1,53 @@
+# SearXNG, the primary PitWall search provider — §0.1 of PITWALL_V2_IMPLEMENTATION.md.
+#
+#   make searxng          start it (generates .env with a secret on first run)
+#   make searxng-check    prove the JSON API and operator queries work
+#   make searxng-stop     stop it
+#
+# Why this exists: `ddgs` reports no operator support, so the query builder drops
+# every `site:`/quoted-phrase template — 8 of the 12 in config/query_templates.yaml.
+# A local SearXNG proxies Google/Bing/DuckDuckGo/Brave, passes operators straight
+# through, and needs no API key.
+
+name: pitwall-searxng
+
+services:
+  searxng:
+    container_name: pitwall-searxng
+    image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      # host 8888 -> container 8080. SEARXNG_BASE_URL in .env must match the host side.
+      - "${SEARXNG_HOST_PORT:-8888}:8080"
+    env_file:
+      # `make searxng` writes it. Optional here so `docker compose config` still
+      # works without it — but SearXNG exits(1) on the placeholder secret_key,
+      # so starting by hand without it fails loudly rather than silently.
+      - path: ./.env
+        required: false
+    environment:
+      # These three are read by searx/settings_defaults.py and override settings.yml.
+      SEARXNG_PORT: 8080
+      SEARXNG_BIND_ADDRESS: "0.0.0.0"
+      # The container entrypoint chowns its config to searxng:searxng. On a
+      # bind-mounted file that is at best pointless and at worst a hard failure,
+      # so turn it off — the mount already carries the right content.
+      FORCE_OWNERSHIP: "false"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml
+      - searxng-cache:/var/cache/searxng/
+    healthcheck:
+      # /healthz is the instance's own readiness probe.
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"
+
+volumes:
+  searxng-cache:
