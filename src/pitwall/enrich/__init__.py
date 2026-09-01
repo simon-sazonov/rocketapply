@@ -67,6 +67,7 @@ from .domains import (
     resolve_domain,
     set_manual_domain,
 )
+from .github import GitHubStep
 from .harvest import HarvestStep, harvest_domain, known_people_at
 from .patterns import (
     FORMATS,
@@ -90,6 +91,7 @@ def free_chain(
     resolver: Any | None = None,
     fetcher: Any | None = None,
     force_harvest: bool = False,
+    with_github: bool = False,
 ) -> list[EnrichmentStep]:
     """The steps that cost nothing, in the order §2 puts them in.
 
@@ -97,13 +99,21 @@ def free_chain(
     not arbitrary. Each step is the input to the next: without a domain there
     is nothing to harvest, without a corpus there is no pattern, and without a
     candidate address there is nothing to look for a publication of.
+
+    GitHub is opt-in and last, per §10. For a software or simulation engineer
+    it is the best source there is; for an aerodynamicist with no public code
+    it contributes nothing, and it should not spend GitHub's 60-per-hour
+    unauthenticated budget on people it can never help.
     """
-    return [
+    steps: list[EnrichmentStep] = [
         DomainStep(),
         HarvestStep(fetcher=fetcher, force=force_harvest),
         PatternStep(resolver=resolver),
         CorroborateStep(),
     ]
+    if with_github:
+        steps.append(GitHubStep())
+    return steps
 
 
 def is_free(steps: Sequence[EnrichmentStep]) -> bool:
@@ -340,6 +350,7 @@ __all__ = [
     "DomainStep",
     "EmailCandidate",
     "EnrichmentCache",
+    "GitHubStep",
     "HarvestStep",
     "cache_key",
     "corroborate",

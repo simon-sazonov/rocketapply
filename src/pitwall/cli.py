@@ -641,6 +641,11 @@ def enrich(
     force: bool = typer.Option(
         False, "--force", help="re-harvest the company even if it was done recently"
     ),
+    github: bool = typer.Option(
+        False, "--github",
+        help="also read public commit emails (§2.4). Free; best for software "
+        "and simulation people, useless for anyone with no public code.",
+    ),
     verbose: bool = typer.Option(False, "-v", "--verbose"),
 ) -> None:
     """Find email addresses for named people — §7.3 of the v3 brief.
@@ -658,7 +663,7 @@ def enrich(
     repos = open_repos(settings)
     ids = list(dict.fromkeys(candidate_id))
 
-    steps = enrichment.free_chain(force_harvest=force)
+    steps = enrichment.free_chain(force_harvest=force, with_github=github)
     if use_hunter:
         try:
             from .enrich.hunter import HunterFinderStep, hunter_available
