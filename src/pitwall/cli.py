@@ -10,6 +10,7 @@ anyone who has not run `pip install -e .`.
     pitwall score --rescore-all --prompt-version v2
     pitwall jobs --score-fit           # live openings, and how they fit you
     pitwall openings                   # who to write to, and why now
+    pitwall enrich -c 41 -c 88         # find addresses, free engine only
     pitwall search --cache-only && pitwall extract --reprocess
 """
 
@@ -27,6 +28,7 @@ from .config import get_settings
 from .db import init_schema, open_repos
 from .export import (
     CONTACT_EXPORT_WARNING,
+    evidence_text,
     export_view,
     filter_frame,
     funnel_counts,
@@ -621,6 +623,104 @@ def openings(
                 f"[dim](score {person['score']:.0f} · {person['status']} · "
                 f"{person['proximity']})[/]"
             )
+
+
+@app.command()
+def enrich(
+    candidate_id: list[int] = typer.Option(
+        ..., "--candidate-id", "-c",
+        help="who to look up. Repeat the flag for several people.",
+    ),
+    use_hunter: bool = typer.Option(
+        False, "--hunter",
+        help="allow the paid Hunter escalation. Without it nothing can spend.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="run the free engine but write nothing"
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="re-harvest the company even if it was done recently"
+    ),
+    verbose: bool = typer.Option(False, "-v", "--verbose"),
+) -> None:
+    """Find email addresses for named people — §7.3 of the v3 brief.
+
+    **Without `--hunter` this cannot spend anything**, and that is structural
+    rather than a promise: the chain is built from steps whose `spends_credits`
+    is False, so there is nothing in it that could bill you.
+
+    Never operates on the whole table. Enrichment is a manual tool on a manual
+    selection, and the selection is these `--candidate-id` flags.
+    """
+    from . import enrich as enrichment
+
+    settings = _bootstrap(verbose)
+    repos = open_repos(settings)
+    ids = list(dict.fromkeys(candidate_id))
+
+    steps = enrichment.free_chain(force_harvest=force)
+    if use_hunter:
+        try:
+            from .enrich.hunter import HunterFinderStep, hunter_available
+        except ImportError:  # pragma: no cover - only before step 7 of §10
+            console.print("[yellow]the Hunter adapter is not available[/]")
+        else:
+            ok, why = hunter_available(settings, repos)
+            if not ok:
+                console.print(f"[yellow]Hunter is unavailable:[/] {why}")
+            else:
+                steps = [*steps, HunterFinderStep()]
+
+    pipe = Pipeline(settings, repos, on_progress=_progress)
+    params = RunParams(limit=len(ids))
+    stats = RunStats()
+    results: list[dict] = []
+    with pipe.tracked(params, stats, "enrich") as run_id:
+        contexts = enrichment.enrich_many(
+            ids, repos, settings, steps=steps, run_id=run_id,
+            on_progress=lambda i, n, cid: pipe.progress(
+                "enrich", f"person {i} of {n}", i, n
+            ),
+        )
+        for ctx in contexts:
+            if not dry_run:
+                enrichment.persist_findings(ctx)
+            results.append(enrichment.summary(ctx))
+
+    if not results:
+        console.print("[yellow]nothing to do — no such candidate[/]")
+        raise typer.Exit(1)
+
+    table = Table(title="contact enrichment")
+    table.add_column("person")
+    table.add_column("status")
+    table.add_column("address")
+    table.add_column("evidence")
+    for row in results:
+        colour = {
+            "verified": "green", "probable": "yellow",
+            "guess": "dim", "not_found": "red",
+        }[row["status"]]
+        table.add_row(
+            row["name"] or "—",
+            f"[{colour}]{row['status']}[/]",
+            row["email"] or "—",
+            # The evidence travels with the label, always — §4.
+            evidence_text(row["evidence"]) or "—",
+        )
+    console.print(table)
+
+    spent = sum(r["credits_spent"] for r in results)
+    found = sum(1 for r in results if r["status"] != "not_found")
+    console.print(
+        f"{found} of {len(results)} resolved · "
+        + (f"[yellow]{spent:g} Hunter credit(s) spent[/]" if spent
+           else "[green]nothing spent[/]")
+        + (" · [dim]dry run: nothing written[/]" if dry_run else "")
+    )
+    for row in results:
+        for note in row["notes"]:
+            console.print(f"[yellow]note ({row['name']}):[/] {note}")
 
 
 @app.command()

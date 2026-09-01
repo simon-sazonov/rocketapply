@@ -209,10 +209,14 @@ class StubSearcher:
         for needle in self.fail_on:
             if needle in query:
                 raise RuntimeError(f"stub searcher refusing {needle!r}")
-        for needle, hits in self.pages.items():
-            if needle in query:
-                return list(hits)[:max_results]
-        return []
+        # Longest needle wins. A harvest key like "@alpine.com" is a substring
+        # of the corroboration query `"jane.doe@alpine.com"`, so first-match
+        # order would answer the corroboration search with the team page.
+        matches = [(n, h) for n, h in self.pages.items() if n in query]
+        if not matches:
+            return []
+        matches.sort(key=lambda pair: -len(pair[0]))
+        return list(matches[0][1])[:max_results]
 
 
 @pytest.fixture()
