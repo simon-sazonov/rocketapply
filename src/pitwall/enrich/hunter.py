@@ -376,9 +376,16 @@ def credit_state(
 
     try:
         account = (client or HunterClient(settings)).account()
-    except EnrichmentError as exc:
-        # A failed poll is a display problem, never a page-breaking one.
-        out["error"] = str(exc)
+    except Exception as exc:  # noqa: BLE001 - see below
+        # A failed poll is a display problem, never a page-breaking one, and
+        # this is deliberately broader than `EnrichmentError`. The adapter
+        # converts every *expected* failure into one of those, but this call
+        # sits on the first render of the Leads page: anything it lets through
+        # — a DNS resolver raising something exotic, a proxy returning bytes
+        # httpx cannot parse — takes down the whole page over a number in the
+        # sidebar. Losing the credit read-out is the correct failure here.
+        out["error"] = redact(exc, settings.hunter_api_key)[:200]
+        log.info("hunter account poll failed: %s", out["error"])
         return out
 
     with repos.writing():

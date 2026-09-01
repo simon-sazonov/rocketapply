@@ -307,11 +307,19 @@ class SerpSearcher:
         *,
         cache: Any | None = None,
         max_results: int = 10,
+        use_cache: bool = True,
     ) -> None:
         from ..search import build_chain
         from ..search.cache import SerpCache
 
         self.settings = settings or get_settings()
+        #: A cached answer is normally exactly what is wanted — the same domain
+        #: is harvested for every candidate at a company. It is wrong for a
+        #: *deliberate re-resolution*: SearXNG rotates engine groups per query,
+        #: so a cached answer can be the one time the rotation landed on a
+        #: captcha'd group, and re-running to get a better answer would keep
+        #: returning the bad one.
+        self.use_cache = use_cache
         if providers is None:
             try:
                 providers = build_chain(self.settings)
@@ -331,7 +339,7 @@ class SerpSearcher:
         """First provider that answers wins. A cached answer costs nothing."""
         n = max_results or self.max_results
         for provider in self.providers:
-            cached = self.cache.get(provider.name, query, n)
+            cached = self.cache.get(provider.name, query, n) if self.use_cache else None
             if cached is not None:
                 return cached
             try:

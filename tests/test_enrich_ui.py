@@ -146,6 +146,12 @@ def app_root(project, monkeypatch, tmp_path):
 
     monkeypatch.setenv("DB_PATH", str(tmp_path / "ui.db"))
     monkeypatch.setenv("CACHE_DIR", str(tmp_path / "cache"))
+    # The page polls Hunter on load (§5.1), and `page_setup` reads the real
+    # `.env` rather than the test Settings. Without this the suite would make a
+    # live call against the owner's own account the moment they configured a
+    # key — which the network guard caught, and which is why it exists.
+    monkeypatch.setenv("HUNTER_API_KEY", "")
+    monkeypatch.setenv("GITHUB_TOKEN", "")
     st.cache_resource.clear()
     st.cache_data.clear()
     close_all()
