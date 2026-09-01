@@ -26,6 +26,7 @@ from rich.table import Table
 from .config import get_settings
 from .db import init_schema, open_repos
 from .export import (
+    CONTACT_EXPORT_WARNING,
     export_view,
     filter_frame,
     funnel_counts,
@@ -681,8 +682,17 @@ def export(
     status: str | None = typer.Option(None, help="comma-separated CRM statuses"),
     hide_ignored: bool = typer.Option(True, help="drop ignored people"),
     out: Path | None = typer.Option(None, help="explicit output path"),
+    include_contacts: bool = typer.Option(
+        False, "--include-contacts",
+        help="also write email addresses. Off by default — see §6.1 of the v3 brief",
+    ),
 ) -> None:
-    """Export the current filtered view (§8)."""
+    """Export the current filtered view (§8).
+
+    Email addresses are **excluded unless you ask for them**. `--include-contacts`
+    is the deliberate switch, and it prints what you are agreeing to before it
+    writes the file.
+    """
     settings = _bootstrap()
     repos = open_repos(settings)
     df = leads_frame(repos.conn, settings)
@@ -692,7 +702,11 @@ def export(
     if df.empty:
         console.print("[yellow]nothing matches those filters[/]")
         raise typer.Exit(1)
-    path = export_view(df, fmt, out, settings)
+    if include_contacts:
+        with_email = int(df["contact_email"].notna().sum()) if "contact_email" in df else 0
+        console.print(f"[yellow]⚠️  {CONTACT_EXPORT_WARNING}[/]")
+        console.print(f"[yellow]   {with_email} of {len(df)} rows carry an address.[/]")
+    path = export_view(df, fmt, out, settings, include_contacts=include_contacts)
     console.print(f"[green]exported {len(df)} rows[/] -> {path}")
 
 

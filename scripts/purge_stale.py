@@ -8,6 +8,14 @@ retention are architectural, not optional: this script is what makes the
 
 Blocklisted slugs are never resurrected — deleting an ignored person does not
 remove them from the blocklist.
+
+§6.1 of PITWALL_V3_EMAIL_ENRICHMENT.md extends the rule to contact data, and
+gives it a *second, stricter* clock. A purged candidate's `contact_emails` go
+with them, explicitly rather than by cascade; and an address that has sat
+unused past the window is dropped even when the person themselves is kept,
+unless the owner has actually acted on that person. An email address is the
+most sensitive thing this database holds, and the case for keeping it is
+"I am going to write to them" — which expires.
 """
 
 from __future__ import annotations
@@ -43,6 +51,27 @@ SELECT c.id, c.full_name, c.linkedin_slug, c.last_seen_at,
    )
  ORDER BY c.last_seen_at ASC
 """
+
+#: Contact rows whose own clock has run out, on people the owner never acted on.
+#: `ACTED_ON` mirrors the candidate rule above: your judgement beats the timer,
+#: so an address on someone you saved or wrote to stays until you say otherwise.
+ACTED_ON = ("saved", "contacted", "replied", "meeting")
+
+STALE_CONTACTS_SQL = f"""
+SELECT e.id, e.candidate_id, e.status, e.source, e.retrieved_at,
+       c.full_name, COALESCE(m.status, 'new') AS crm_status
+  FROM contact_emails e
+  JOIN candidates c ON c.id = e.candidate_id
+  LEFT JOIN crm m   ON m.candidate_id = e.candidate_id
+ WHERE COALESCE(m.status, 'new') NOT IN ({",".join("?" * len(ACTED_ON))})
+   AND COALESCE(e.retrieved_at, c.last_seen_at) < datetime('now', ?)
+ ORDER BY e.retrieved_at ASC
+"""
+
+
+def stale_contacts(conn, modifier: str) -> list[dict]:
+    """Contact rows past the retention window on people never acted on."""
+    return [dict(r) for r in conn.execute(STALE_CONTACTS_SQL, (*ACTED_ON, modifier))]
 
 
 @app.command()
@@ -80,10 +109,50 @@ def main(
             "Re-run with [bold]--apply[/] to actually delete them."
         )
     else:
+        ids = [(r["id"],) for r in rows]
+        # Explicitly, not by cascade — §6.1 makes the erasure of contact data a
+        # promise, and a promise that only holds while a connection pragma is
+        # set is not one. See `CRM.delete_and_block` for the same reasoning.
         repos.conn.executemany(
-            "DELETE FROM candidates WHERE id = ?", [(r["id"],) for r in rows]
+            "DELETE FROM contact_emails WHERE candidate_id = ?", ids
         )
-        console.print(f"[green]deleted {len(rows)} candidates[/]")
+        repos.conn.executemany("DELETE FROM candidates WHERE id = ?", ids)
+        console.print(f"[green]deleted {len(rows)} candidates[/] (and any addresses held for them)")
+
+    # ── the second clock: addresses on people who survive the purge ──
+    purged_ids = {r["id"] for r in rows} if not dry_run else set()
+    contacts = [
+        c for c in stale_contacts(repos.conn, modifier)
+        if c["candidate_id"] not in purged_ids
+    ]
+    if contacts:
+        ctable = Table(title=f"stale contact addresses (> {window} days, never acted on)")
+        ctable.add_column("person")
+        ctable.add_column("status")
+        ctable.add_column("source")
+        ctable.add_column("found")
+        for row in contacts[:20]:
+            # The address itself is deliberately not printed. This report gets
+            # pasted into terminals and issues; the count is the useful part.
+            ctable.add_row(
+                row["full_name"] or "—", row["status"] or "—",
+                row["source"] or "—", (row["retrieved_at"] or "—")[:10],
+            )
+        console.print(ctable)
+        if len(contacts) > 20:
+            console.print(f"[dim]... and {len(contacts) - 20} more[/]")
+        if dry_run:
+            console.print(
+                f"[yellow]dry run:[/] {len(contacts)} address(es) would be deleted, "
+                "keeping the people themselves."
+            )
+        else:
+            repos.conn.executemany(
+                "DELETE FROM contact_emails WHERE id = ?", [(c["id"],) for c in contacts]
+            )
+            console.print(f"[green]deleted {len(contacts)} stale address(es)[/]")
+    else:
+        console.print("[green]no stale contact addresses[/]")
 
     if purge_cache:
         from pitwall.search import SerpCache

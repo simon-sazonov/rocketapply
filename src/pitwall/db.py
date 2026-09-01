@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import sqlite3
 import threading
 from collections.abc import Iterable, Iterator, Sequence
@@ -20,7 +21,7 @@ from typing import Any
 
 from .config import Settings, get_settings
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 DDL = """
 PRAGMA journal_mode = WAL;
@@ -185,6 +186,10 @@ CREATE TABLE IF NOT EXISTS quota (
     day       TEXT NOT NULL,          -- YYYY-MM-DD (UTC)
     requests  INTEGER DEFAULT 0,
     credits   INTEGER,                -- remaining, for credit-based providers
+    -- When a monthly allowance refills, as the provider itself reports it.
+    -- Hunter's 50 credits reset on a date its /v2/account endpoint returns;
+    -- guessing "the 1st" locally would show the owner a date that is wrong.
+    reset_at  TEXT,
     PRIMARY KEY (provider, day)
 );
 
@@ -257,6 +262,94 @@ CREATE TABLE IF NOT EXISTS run_events (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_run_events_run ON run_events(run_id, id);
+
+-- ────────────── contact enrichment (§6 of PITWALL_V3_EMAIL_ENRICHMENT.md) ──
+-- Four tables, and the split between them is the whole design: `contact_emails`
+-- is about a *person*, `company_domains` and `domain_address_samples` are about
+-- a *company*, and the company-side corpus is what makes the person-side answer
+-- free. One paid Hunter call feeds `domain_address_samples` and every later
+-- candidate at that company is then resolved locally, for nothing.
+CREATE TABLE IF NOT EXISTS company_domains (
+    id                  INTEGER PRIMARY KEY,
+    company_id          INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    domain              TEXT NOT NULL,
+    -- careers_url|serp|search|manual|hunter — §2.1's resolution order, recorded
+    -- so the UI can say where a wrong domain came from.
+    source              TEXT,
+    pattern             TEXT,               -- first.last | flast | first | …
+    pattern_sample_size INTEGER DEFAULT 0,  -- §2.3: THE confidence signal
+    pattern_agreement   REAL,               -- share of samples the pattern explains
+    last_harvested_at   TEXT,
+    -- The owner's correction. Set, and resolution stops looking: a wrong domain
+    -- poisons every address derived from it, so the override outranks every
+    -- automatic source for good.
+    manual_override     INTEGER DEFAULT 0,
+    created_at          TEXT DEFAULT (datetime('now')),
+    UNIQUE (company_id, domain)
+);
+CREATE INDEX IF NOT EXISTS ix_company_domains_company ON company_domains(company_id);
+
+-- The corpus that makes patterns free. Two known addresses at a domain reveal
+-- the format; you never need the target person's own address to help them.
+CREATE TABLE IF NOT EXISTS domain_address_samples (
+    id                INTEGER PRIMARY KEY,
+    company_domain_id INTEGER NOT NULL REFERENCES company_domains(id) ON DELETE CASCADE,
+    email             TEXT NOT NULL,
+    person_name       TEXT,
+    source_url        TEXT,
+    source            TEXT,                 -- harvest|hunter_domain|manual
+    found_at          TEXT DEFAULT (datetime('now')),
+    UNIQUE (company_domain_id, email)
+);
+CREATE INDEX IF NOT EXISTS ix_domain_samples_domain ON domain_address_samples(company_domain_id);
+
+CREATE TABLE IF NOT EXISTS contact_emails (
+    id              INTEGER PRIMARY KEY,
+    candidate_id    INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+    email           TEXT NOT NULL,
+    -- verified|probable|guess|not_found — §4. Earned by evidence, never by a
+    -- number, and the UI is required to render the evidence alongside it.
+    status          TEXT NOT NULL DEFAULT 'guess',
+    -- corroborated|pattern|github|hunter_finder|hunter_domain|manual
+    source          TEXT NOT NULL,
+    evidence_json   TEXT,        -- pattern, sample size, corroborating URL, MX host
+    -- The PROVIDER'S own score, and nothing else. NULL for anything derived
+    -- locally: inventing a percentage for a pattern guess is exactly the
+    -- "number invites trust" failure §4 forbids.
+    confidence      REAL,
+    mx_valid        INTEGER,
+    is_role_address INTEGER DEFAULT 0,
+    is_disposable   INTEGER DEFAULT 0,
+    retrieved_at    TEXT DEFAULT (datetime('now')),
+    raw_json        TEXT,        -- provider payload, API key redacted
+    UNIQUE (candidate_id, email)
+);
+CREATE INDEX IF NOT EXISTS ix_contact_emails_candidate ON contact_emails(candidate_id, status);
+
+-- The audit trail. `quota` is the budget; this is the history of how it went.
+--
+-- `candidate_id` is ON DELETE SET NULL, not CASCADE, and that is deliberate:
+-- §6.1 makes blocklisting an erasure, and an erased person must leave no
+-- contact data behind — but "3 credits were spent on 12 August" is budget
+-- history, not personal data, and losing it would make the ledger lie. Nothing
+-- written here may contain an address; `enrich.redact` is what enforces that.
+CREATE TABLE IF NOT EXISTS enrichment_log (
+    id            INTEGER PRIMARY KEY,
+    candidate_id  INTEGER REFERENCES candidates(id) ON DELETE SET NULL,
+    company_id    INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+    run_id        INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    step          TEXT NOT NULL,
+    provider      TEXT,
+    -- REAL, not INTEGER: Hunter's Email Verifier costs 0.5 credits, verified
+    -- against help.hunter.io on 1 Sep 2026. An integer column would round the
+    -- ledger away from the truth on every verification.
+    credits_spent REAL DEFAULT 0,
+    outcome       TEXT,
+    detail        TEXT,          -- never an email address — see above
+    created_at    TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_enrichment_log_candidate ON enrichment_log(candidate_id, id);
+CREATE INDEX IF NOT EXISTS ix_enrichment_log_created ON enrichment_log(created_at);
 
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 """
@@ -368,6 +461,8 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
       `candidates.template_count` (§1.4).
     * v3 -> v4 added the `jobs` / `job_sources` tables and three `companies`
       columns (§2.2).
+    * v4 -> v5 added the four contact-enrichment tables and `quota.reset_at`
+      (§6 of PITWALL_V3_EMAIL_ENRICHMENT.md).
 
     `CREATE TABLE IF NOT EXISTS` covers a fresh database; an existing 2.0 MB file
     only ever needs the ALTERs, which is why each one is guarded rather than
@@ -381,6 +476,11 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     # fresh database gets them for free; only `companies` needs altering.
     for column in ("careers_url", "ats_kind", "ats_token"):
         _add_column(conn, "companies", column, "TEXT")
+    # v4 -> v5: contact enrichment. All four tables are IF NOT EXISTS above, so
+    # the only thing an existing file needs is the credit reset date — and it is
+    # on `quota` rather than a new table because §6 is explicit that credit
+    # accounting reuses `quota` instead of growing a parallel counter.
+    _add_column(conn, "quota", "reset_at", "TEXT")
 
 
 def vacuum(conn: sqlite3.Connection) -> None:
@@ -1098,20 +1198,51 @@ class QuotaRepo:
         ).fetchone()
         return int(r["credits"]) if r and r["credits"] is not None else None
 
-    def set_credits(self, provider: str, credits: int) -> None:
+    def set_credits(self, provider: str, credits: int, *, reset_at: str | None = None) -> None:
+        """Record remaining credits, and optionally when the allowance refills.
+
+        `reset_at` is only ever written when the caller has one — passing None
+        leaves whatever is already stored, so a cheap local decrement after a
+        spend does not erase the date the provider itself reported.
+        """
         self.conn.execute(
             """
-            INSERT INTO quota (provider, day, requests, credits) VALUES (?,?,0,?)
-            ON CONFLICT(provider, day) DO UPDATE SET credits = excluded.credits
+            INSERT INTO quota (provider, day, requests, credits, reset_at) VALUES (?,?,0,?,?)
+            ON CONFLICT(provider, day) DO UPDATE SET
+                credits  = excluded.credits,
+                reset_at = COALESCE(excluded.reset_at, quota.reset_at)
             """,
-            (provider, today_utc(), max(0, credits)),
+            (provider, today_utc(), max(0, credits), reset_at),
         )
 
-    def spend_credits(self, provider: str, n: int = 1) -> int | None:
+    def reset_at(self, provider: str) -> str | None:
+        r = self.conn.execute(
+            "SELECT reset_at FROM quota WHERE provider = ? AND reset_at IS NOT NULL"
+            " ORDER BY day DESC LIMIT 1",
+            (provider,),
+        ).fetchone()
+        return str(r["reset_at"]) if r and r["reset_at"] else None
+
+    def credit_state(self, provider: str) -> dict[str, Any]:
+        """`{credits, reset_at, used_today}` — one read for the whole sidebar."""
+        return {
+            "credits": self.credits(provider),
+            "reset_at": self.reset_at(provider),
+            "used_today": self.used_today(provider),
+        }
+
+    def spend_credits(self, provider: str, n: float = 1) -> int | None:
+        """Optimistic local decrement between two polls of the provider.
+
+        Rounds the *remainder* down, never up: Hunter's verifier costs half a
+        credit, and a counter that rounded 49.5 to 50 would offer the owner a
+        spend the provider is about to refuse. The provider's own number always
+        wins on the next poll; this only has to avoid over-promising until then.
+        """
         cur = self.credits(provider)
         if cur is None:
             return None
-        new = max(0, cur - n)
+        new = int(math.floor(max(0.0, cur - float(n))))
         self.set_credits(provider, new)
         return new
 
@@ -1287,6 +1418,359 @@ class JobRepo:
 # ─────────────────────────── row adapters ───────────────────────────
 
 
+class CompanyDomainRepo:
+    """Domains and their inferred address format — §2.1/§2.3 of the v3 brief.
+
+    Company-scoped on purpose. The expensive part of finding one person's
+    address is learning their employer's format, and that answer is reusable:
+    resolve Alpine's domain and pattern once and every later Alpine candidate is
+    free. This table is where that leverage lives.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def upsert(self, company_id: int, domain: str, source: str | None = None) -> int:
+        """Record a domain for a company. Never downgrades a manual override."""
+        domain = (domain or "").strip().lower().lstrip("@")
+        if not domain:
+            raise ValueError("a company domain cannot be empty")
+        self.conn.execute(
+            """
+            INSERT INTO company_domains (company_id, domain, source)
+            VALUES (?,?,?)
+            ON CONFLICT(company_id, domain) DO UPDATE SET
+                source = COALESCE(company_domains.source, excluded.source)
+            """,
+            (company_id, domain, source),
+        )
+        row = self.conn.execute(
+            "SELECT id FROM company_domains WHERE company_id = ? AND domain = ?",
+            (company_id, domain),
+        ).fetchone()
+        return int(row["id"])
+
+    def get(self, company_id: int, domain: str) -> dict[str, Any] | None:
+        r = self.conn.execute(
+            "SELECT * FROM company_domains WHERE company_id = ? AND domain = ?",
+            (company_id, (domain or "").strip().lower().lstrip("@")),
+        ).fetchone()
+        return dict(r) if r else None
+
+    def by_id(self, domain_id: int) -> dict[str, Any] | None:
+        r = self.conn.execute(
+            "SELECT * FROM company_domains WHERE id = ?", (domain_id,)
+        ).fetchone()
+        return dict(r) if r else None
+
+    def for_company(self, company_id: int) -> list[dict[str, Any]]:
+        """Every known domain, the owner's override first."""
+        return [
+            dict(r)
+            for r in self.conn.execute(
+                "SELECT * FROM company_domains WHERE company_id = ?"
+                " ORDER BY manual_override DESC, id ASC",
+                (company_id,),
+            )
+        ]
+
+    def preferred(self, company_id: int) -> dict[str, Any] | None:
+        rows = self.for_company(company_id)
+        return rows[0] if rows else None
+
+    def set_override(self, company_id: int, domain: str) -> int:
+        """The owner's correction. Exactly one override per company."""
+        domain_id = self.upsert(company_id, domain, source="manual")
+        self.conn.execute(
+            "UPDATE company_domains SET manual_override = 0 WHERE company_id = ?",
+            (company_id,),
+        )
+        self.conn.execute(
+            "UPDATE company_domains SET manual_override = 1, source = 'manual' WHERE id = ?",
+            (domain_id,),
+        )
+        return domain_id
+
+    def set_pattern(
+        self, domain_id: int, pattern: str | None, sample_size: int, agreement: float | None
+    ) -> None:
+        self.conn.execute(
+            """
+            UPDATE company_domains
+               SET pattern = ?, pattern_sample_size = ?, pattern_agreement = ?
+             WHERE id = ?
+            """,
+            (pattern, int(sample_size), agreement, domain_id),
+        )
+
+    def mark_harvested(self, domain_id: int) -> None:
+        self.conn.execute(
+            "UPDATE company_domains SET last_harvested_at = datetime('now') WHERE id = ?",
+            (domain_id,),
+        )
+
+    # ── the sample corpus ──
+
+    def add_sample(
+        self,
+        domain_id: int,
+        email: str,
+        *,
+        person_name: str | None = None,
+        source_url: str | None = None,
+        source: str = "harvest",
+    ) -> bool:
+        """Store one known address at this domain. True if it was new.
+
+        "New" is answered by looking first, not by reading `rowcount` — an
+        upsert reports 1 for both an insert and an update, and the callers use
+        this return value to count what a harvest actually gained.
+        """
+        email = (email or "").strip().lower()
+        if not email:
+            return False
+        known = self.conn.execute(
+            "SELECT 1 FROM domain_address_samples WHERE company_domain_id = ? AND email = ?",
+            (domain_id, email),
+        ).fetchone() is not None
+        self.conn.execute(
+            """
+            INSERT INTO domain_address_samples
+                   (company_domain_id, email, person_name, source_url, source)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(company_domain_id, email) DO UPDATE SET
+                person_name = COALESCE(domain_address_samples.person_name, excluded.person_name),
+                source_url  = COALESCE(domain_address_samples.source_url, excluded.source_url)
+            """,
+            (domain_id, email, person_name, source_url, source),
+        )
+        return not known
+
+    def samples(self, domain_id: int) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.conn.execute(
+                "SELECT * FROM domain_address_samples WHERE company_domain_id = ?"
+                " ORDER BY id ASC",
+                (domain_id,),
+            )
+        ]
+
+    def sample_count(self, domain_id: int) -> int:
+        r = self.conn.execute(
+            "SELECT COUNT(*) n FROM domain_address_samples WHERE company_domain_id = ?",
+            (domain_id,),
+        ).fetchone()
+        return int(r["n"])
+
+
+class ContactRepo:
+    """`contact_emails` — one row per (person, address) — §6 of the v3 brief."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def upsert(
+        self,
+        candidate_id: int,
+        email: str,
+        *,
+        status: str,
+        source: str,
+        evidence: dict[str, Any] | None = None,
+        confidence: float | None = None,
+        mx_valid: bool | None = None,
+        is_role_address: bool = False,
+        is_disposable: bool = False,
+        raw: dict[str, Any] | None = None,
+    ) -> int:
+        """Store a finding, never downgrading one that is already better.
+
+        Statuses are ordered by evidence, so a later pattern guess must not
+        overwrite an address that a corroboration search already proved. The
+        ordering is enforced here rather than at each caller because every step
+        in the chain writes through this one method.
+        """
+        email = (email or "").strip().lower()
+        if not email:
+            raise ValueError("a contact row needs an address")
+        existing = self.get(candidate_id, email)
+        if existing and STATUS_RANK.get(str(existing["status"]), 0) > STATUS_RANK.get(status, 0):
+            return int(existing["id"])
+        self.conn.execute(
+            """
+            INSERT INTO contact_emails
+                   (candidate_id, email, status, source, evidence_json, confidence,
+                    mx_valid, is_role_address, is_disposable, retrieved_at, raw_json)
+            VALUES (?,?,?,?,?,?,?,?,?, datetime('now'), ?)
+            ON CONFLICT(candidate_id, email) DO UPDATE SET
+                status          = excluded.status,
+                source          = excluded.source,
+                evidence_json   = excluded.evidence_json,
+                confidence      = excluded.confidence,
+                mx_valid        = excluded.mx_valid,
+                is_role_address = excluded.is_role_address,
+                is_disposable   = excluded.is_disposable,
+                retrieved_at    = datetime('now'),
+                raw_json        = COALESCE(excluded.raw_json, contact_emails.raw_json)
+            """,
+            (
+                candidate_id, email, status, source,
+                json.dumps(evidence or {}, ensure_ascii=False, default=str),
+                confidence,
+                None if mx_valid is None else int(mx_valid),
+                int(is_role_address), int(is_disposable),
+                json.dumps(raw, ensure_ascii=False, default=str) if raw else None,
+            ),
+        )
+        row = self.conn.execute(
+            "SELECT id FROM contact_emails WHERE candidate_id = ? AND email = ?",
+            (candidate_id, email),
+        ).fetchone()
+        return int(row["id"])
+
+    def get(self, candidate_id: int, email: str) -> dict[str, Any] | None:
+        r = self.conn.execute(
+            "SELECT * FROM contact_emails WHERE candidate_id = ? AND email = ?",
+            (candidate_id, (email or "").strip().lower()),
+        ).fetchone()
+        return _row_to_contact(r) if r else None
+
+    def for_candidate(self, candidate_id: int) -> list[dict[str, Any]]:
+        """Best evidence first — the order the UI should render them in."""
+        rows = [
+            _row_to_contact(r)
+            for r in self.conn.execute(
+                "SELECT * FROM contact_emails WHERE candidate_id = ?", (candidate_id,)
+            )
+        ]
+        rows.sort(key=lambda d: (-STATUS_RANK.get(str(d["status"]), 0), str(d["email"])))
+        return rows
+
+    def best(self, candidate_id: int) -> dict[str, Any] | None:
+        rows = self.for_candidate(candidate_id)
+        return rows[0] if rows else None
+
+    def for_candidates(self, candidate_ids: Sequence[int]) -> dict[int, list[dict[str, Any]]]:
+        """One query for a whole table page, rather than N."""
+        ids = [int(i) for i in candidate_ids]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        out: dict[int, list[dict[str, Any]]] = {}
+        for r in self.conn.execute(
+            f"SELECT * FROM contact_emails WHERE candidate_id IN ({placeholders})", ids
+        ):
+            out.setdefault(int(r["candidate_id"]), []).append(_row_to_contact(r))
+        for rows in out.values():
+            rows.sort(key=lambda d: (-STATUS_RANK.get(str(d["status"]), 0), str(d["email"])))
+        return out
+
+    def delete_for_candidate(self, candidate_id: int) -> int:
+        """The erasure primitive — §6.1. Blocklisting calls this."""
+        cur = self.conn.execute(
+            "DELETE FROM contact_emails WHERE candidate_id = ?", (candidate_id,)
+        )
+        return cur.rowcount or 0
+
+    def delete(self, candidate_id: int, email: str) -> int:
+        cur = self.conn.execute(
+            "DELETE FROM contact_emails WHERE candidate_id = ? AND email = ?",
+            (candidate_id, (email or "").strip().lower()),
+        )
+        return cur.rowcount or 0
+
+    def counts_by_status(self) -> dict[str, int]:
+        return {
+            str(r["status"]): int(r["n"])
+            for r in self.conn.execute(
+                "SELECT status, COUNT(*) n FROM contact_emails GROUP BY status"
+            )
+        }
+
+    def count(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM contact_emails").fetchone()[0])
+
+
+class EnrichmentLogRepo:
+    """The audit trail: what each step did, and what it cost."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def record(
+        self,
+        step: str,
+        *,
+        candidate_id: int | None = None,
+        company_id: int | None = None,
+        run_id: int | None = None,
+        provider: str | None = None,
+        credits_spent: float = 0.0,
+        outcome: str | None = None,
+        detail: str | None = None,
+    ) -> int:
+        """Append one line. `detail` must never carry an address (see the DDL)."""
+        cur = self.conn.execute(
+            """
+            INSERT INTO enrichment_log
+                   (candidate_id, company_id, run_id, step, provider,
+                    credits_spent, outcome, detail)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (candidate_id, company_id, run_id, step, provider,
+             float(credits_spent), outcome, detail),
+        )
+        return int(cur.lastrowid or 0)
+
+    def for_candidate(self, candidate_id: int) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.conn.execute(
+                "SELECT * FROM enrichment_log WHERE candidate_id = ? ORDER BY id ASC",
+                (candidate_id,),
+            )
+        ]
+
+    def recent(self, limit: int = 50) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.conn.execute(
+                "SELECT * FROM enrichment_log ORDER BY id DESC LIMIT ?", (limit,)
+            )
+        ]
+
+    def credits_spent(self, provider: str | None = None) -> float:
+        sql = "SELECT COALESCE(SUM(credits_spent), 0) AS c FROM enrichment_log"
+        args: tuple[Any, ...] = ()
+        if provider:
+            sql += " WHERE provider = ?"
+            args = (provider,)
+        return float(self.conn.execute(sql, args).fetchone()["c"])
+
+
+#: Evidence ordering for `contact_emails.status` — §4. `upsert` refuses to move
+#: a row down this ladder, so a cheap guess can never bury a proved address.
+STATUS_RANK: dict[str, int] = {
+    "not_found": 0,
+    "guess": 1,
+    "probable": 2,
+    "verified": 3,
+}
+
+
+def _row_to_contact(r: sqlite3.Row) -> dict[str, Any]:
+    d = dict(r)
+    try:
+        d["evidence"] = json.loads(d.get("evidence_json") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        d["evidence"] = {}
+    d["mx_valid"] = None if d.get("mx_valid") is None else bool(d["mx_valid"])
+    d["is_role_address"] = bool(d.get("is_role_address"))
+    d["is_disposable"] = bool(d.get("is_disposable"))
+    return d
+
+
 def _row_to_company(r: sqlite3.Row) -> dict[str, Any]:
     d = dict(r)
     d["aliases"] = loads(d.get("aliases"))
@@ -1320,6 +1804,9 @@ class Repos:
         self.quota = QuotaRepo(conn)
         self.jobs = JobRepo(conn)
         self.job_sources = JobSourceRepo(conn)
+        self.contacts = ContactRepo(conn)
+        self.domains = CompanyDomainRepo(conn)
+        self.enrichment = EnrichmentLogRepo(conn)
 
     @staticmethod
     def writing() -> Any:

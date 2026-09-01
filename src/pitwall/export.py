@@ -8,6 +8,7 @@ page, Analytics and the exporter all see exactly the same rows.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,8 @@ import pandas as pd
 
 from .config import Settings, get_settings
 from .db import loads
+
+log = logging.getLogger(__name__)
 
 #: One score row per candidate: the best-scoring company×role pairing.
 LEADS_SQL = """
@@ -28,6 +31,27 @@ WITH best AS (
            ) AS rn
       FROM scores s
      WHERE s.prompt_version = :prompt_version
+),
+-- One address row per candidate: the best-evidenced one. Ranked by the §4
+-- status ladder, not by recency — a pattern guess found this morning must not
+-- outrank an address a corroboration search proved last week.
+best_contact AS (
+    SELECT e.candidate_id, e.email, e.status, e.source, e.evidence_json,
+           e.mx_valid, e.is_role_address,
+           ROW_NUMBER() OVER (
+               PARTITION BY e.candidate_id
+               ORDER BY CASE e.status
+                            WHEN 'verified'  THEN 3
+                            WHEN 'probable'  THEN 2
+                            WHEN 'guess'     THEN 1
+                            ELSE 0
+                        END DESC,
+                        e.id DESC
+           ) AS rn
+      FROM contact_emails e
+),
+contact_totals AS (
+    SELECT candidate_id, COUNT(*) AS n FROM contact_emails GROUP BY candidate_id
 )
 SELECT c.id                AS candidate_id,
        c.full_name         AS name,
@@ -62,12 +86,21 @@ SELECT c.id                AS candidate_id,
        m.note              AS note,
        m.tags              AS tags_json,
        m.contacted_at      AS contacted_at,
-       m.followup_at       AS followup_at
+       m.followup_at       AS followup_at,
+       ec.email            AS contact_email,
+       ec.status           AS contact_status,
+       ec.source           AS contact_source,
+       ec.evidence_json    AS contact_evidence_json,
+       ec.mx_valid         AS contact_mx_valid,
+       ec.is_role_address  AS contact_is_role,
+       COALESCE(ct.n, 0)   AS contact_count
   FROM candidates c
   LEFT JOIN best b       ON b.candidate_id = c.id AND b.rn = 1
   LEFT JOIN companies co ON co.id = b.company_id
   LEFT JOIN roles ro     ON ro.id = b.role_id
   LEFT JOIN crm m        ON m.candidate_id = c.id
+  LEFT JOIN best_contact ec ON ec.candidate_id = c.id AND ec.rn = 1
+  LEFT JOIN contact_totals ct ON ct.candidate_id = c.id
 """
 
 EXPORT_COLUMNS = [
@@ -76,6 +109,26 @@ EXPORT_COLUMNS = [
     "is_current_employee", "company_match", "role_match", "evidence",
     "profile_url", "note", "tags", "followup_at", "contacted_at",
 ]
+
+#: Deliberately NOT in `EXPORT_COLUMNS` — §6.1 of PITWALL_V3_EMAIL_ENRICHMENT.md.
+#:
+#: A CSV leaves the application. Once it is in Downloads, on a USB stick, or
+#: attached to an email it is outside every control this database has: the
+#: blocklist cannot erase it and the retention timer cannot expire it. So the
+#: gate is opt-in and loud, not a default with a footnote. `include_contacts`
+#: is the only way these columns are ever written.
+CONTACT_COLUMNS = [
+    "contact_email", "contact_status", "contact_source", "contact_evidence",
+]
+
+#: What `--include-contacts` makes the caller acknowledge, in one sentence.
+CONTACT_EXPORT_WARNING = (
+    "This file will contain email addresses. They leave the application with it: "
+    "deleting a person here will not delete them from the export, and the "
+    "180-day retention rule does not reach it. Most of them are unconfirmed "
+    "inferences, not facts — check the contact_status column before writing to "
+    "anyone."
+)
 
 
 def leads_frame(
@@ -94,7 +147,14 @@ def leads_frame(
     df["reasons"] = df["reasons_json"].map(loads)
     df["red_flags"] = df["red_flags_json"].map(loads)
     df["tags"] = df["tags_json"].map(loads)
-    df = df.drop(columns=["reasons_json", "red_flags_json", "tags_json"])
+    df["contact_evidence"] = df["contact_evidence_json"].map(_loads_dict)
+    df = df.drop(
+        columns=["reasons_json", "red_flags_json", "tags_json", "contact_evidence_json"]
+    )
+    df["contact_status"] = df["contact_status"].fillna("not_found")
+    df["contact_count"] = pd.to_numeric(df["contact_count"], errors="coerce").fillna(0).astype(int)
+    df["contact_mx_valid"] = df["contact_mx_valid"].map({1: True, 0: False}).astype("boolean")
+    df["contact_is_role"] = df["contact_is_role"].fillna(0).astype(bool)
 
     df["score"] = pd.to_numeric(df["score"], errors="coerce").fillna(0.0)
     df["heuristic_score"] = pd.to_numeric(df["heuristic_score"], errors="coerce")
@@ -110,6 +170,22 @@ def leads_frame(
     return df.sort_values("score", ascending=False, ignore_index=True)
 
 
+def _loads_dict(value: Any) -> dict[str, Any]:
+    """`evidence_json` as a dict. A malformed or absent blob is an empty one —
+    evidence that cannot be read is evidence that cannot be shown."""
+    import json
+
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        out = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
 def _empty_frame() -> pd.DataFrame:
     cols = [
         "candidate_id", "name", "title", "company", "location", "headline",
@@ -118,7 +194,8 @@ def _empty_frame() -> pd.DataFrame:
         "company_match", "role_match", "seniority", "confidence", "reasons",
         "red_flags", "model", "scored_at", "target_company", "series", "tier",
         "target_role", "role_family", "status", "note", "tags", "contacted_at",
-        "followup_at",
+        "followup_at", "contact_email", "contact_status", "contact_source",
+        "contact_evidence", "contact_mx_valid", "contact_is_role", "contact_count",
     ]
     return pd.DataFrame({c: pd.Series(dtype="object") for c in cols})
 
@@ -178,14 +255,51 @@ def filter_frame(
 # ─────────────────────────────── writers ────────────────────────────────
 
 
-def _flatten(df: pd.DataFrame) -> pd.DataFrame:
+def _flatten(df: pd.DataFrame, *, include_contacts: bool = False) -> pd.DataFrame:
+    """The exported column set. Addresses only ever appear on request (§6.1)."""
     out = df.copy()
     for col in ("tags", "reasons", "red_flags"):
         if col in out.columns:
             out[col] = out[col].map(lambda v: " | ".join(str(x) for x in (v or [])))
     cols = [c for c in EXPORT_COLUMNS if c in out.columns]
     extra = [c for c in ("reasons", "red_flags") if c in out.columns]
-    return out[cols + extra]
+    contacts: list[str] = []
+    if include_contacts:
+        log.warning("contact export: %s", CONTACT_EXPORT_WARNING)
+        if "contact_evidence" in out.columns:
+            # The evidence travels WITH the address, always. An exported column
+            # of bare addresses would strip exactly the context §4 exists to
+            # keep attached: a `guess` in a spreadsheet reads as a fact.
+            out["contact_evidence"] = out["contact_evidence"].map(evidence_text)
+        contacts = [c for c in CONTACT_COLUMNS if c in out.columns]
+    return out[cols + extra + contacts]
+
+
+def evidence_text(evidence: Any) -> str:
+    """`{"pattern": "first.last", "sample_size": 3}` -> `pattern first.last (n=3)`.
+
+    §4: "the label must always carry its evidence". This is that sentence, and
+    it is shared by the CSV writer, the Markdown writer and the Streamlit chip
+    so all three say the same thing.
+    """
+    if not isinstance(evidence, dict) or not evidence:
+        return ""
+    bits: list[str] = []
+    pattern = evidence.get("pattern")
+    if pattern:
+        n = evidence.get("sample_size")
+        bits.append(f"pattern {pattern}" + (f" (n={int(n)})" if n else " (n=0)"))
+    url = evidence.get("corroborating_url")
+    if url:
+        bits.append(f"published: {evidence.get('corroborating_domain') or url}")
+    if evidence.get("github_repo"):
+        bits.append(f"git commit in {evidence['github_repo']}")
+    mx = evidence.get("mx_host")
+    if mx:
+        bits.append(f"mail host {mx}")
+    if evidence.get("provider_status"):
+        bits.append(f"hunter: {evidence['provider_status']}")
+    return " · ".join(bits)
 
 
 def export_path(name: str, suffix: str, settings: Settings | None = None) -> Path:
@@ -195,31 +309,53 @@ def export_path(name: str, suffix: str, settings: Settings | None = None) -> Pat
     return settings.export_dir / f"{name}-{stamp}.{suffix}"
 
 
-def to_csv(df: pd.DataFrame, path: Path | str | None = None, settings: Settings | None = None) -> Path:
+def to_csv(
+    df: pd.DataFrame, path: Path | str | None = None, settings: Settings | None = None,
+    *, include_contacts: bool = False,
+) -> Path:
     target = Path(path) if path else export_path("pitwall-leads", "csv", settings)
-    _flatten(df).to_csv(target, index=False, encoding="utf-8")
+    _flatten(df, include_contacts=include_contacts).to_csv(target, index=False, encoding="utf-8")
     return target
 
 
-def to_xlsx(df: pd.DataFrame, path: Path | str | None = None, settings: Settings | None = None) -> Path:
+def to_xlsx(
+    df: pd.DataFrame, path: Path | str | None = None, settings: Settings | None = None,
+    *, include_contacts: bool = False,
+) -> Path:
     target = Path(path) if path else export_path("pitwall-leads", "xlsx", settings)
-    _flatten(df).to_excel(target, index=False, sheet_name="leads")
+    _flatten(df, include_contacts=include_contacts).to_excel(
+        target, index=False, sheet_name="leads"
+    )
     return target
 
 
-def to_markdown(df: pd.DataFrame, path: Path | str | None = None, settings: Settings | None = None) -> Path:
+def to_markdown(
+    df: pd.DataFrame, path: Path | str | None = None, settings: Settings | None = None,
+    *, include_contacts: bool = False,
+) -> Path:
     """A contact sheet — nice for pasting into a notes app before an event."""
     target = Path(path) if path else export_path("pitwall-contacts", "md", settings)
-    target.write_text(markdown_text(df), encoding="utf-8")
+    target.write_text(markdown_text(df, include_contacts=include_contacts), encoding="utf-8")
     return target
 
 
-def markdown_text(df: pd.DataFrame) -> str:
+def markdown_text(df: pd.DataFrame, *, include_contacts: bool = False) -> str:
+    """The contact sheet.
+
+    Named "contact sheet" since v1 and it has never held an address; that stays
+    true unless the caller asks. When it does ask, every address is rendered
+    with its status word in front of it, because this is the format that gets
+    pasted into a phone before an event and read at a glance.
+    """
+    if include_contacts:
+        log.warning("contact export: %s", CONTACT_EXPORT_WARNING)
     lines = [
         "# PitWall contact sheet",
         f"_{len(df)} people · generated {datetime.now():%Y-%m-%d %H:%M}_",
         "",
     ]
+    if include_contacts:
+        lines += [f"> ⚠️ {CONTACT_EXPORT_WARNING}", ""]
     for company, group in df.groupby(df["target_company"].fillna("Unassigned"), sort=True):
         lines.append(f"## {company}")
         lines.append("")
@@ -232,6 +368,14 @@ def markdown_text(df: pd.DataFrame) -> str:
             lines.append(f"  score {score} · {row.get('verdict', '')} · {row.get('status', '')}  ")
             if row.get("profile_url"):
                 lines.append(f"  <{row['profile_url']}>  ")
+            if include_contacts and _text(row.get("contact_email")):
+                status = str(row.get("contact_status") or "guess")
+                detail = evidence_text(row.get("contact_evidence"))
+                lines.append(
+                    f"  ✉️ **{status}** `{row['contact_email']}`"
+                    + (f" — {detail}" if detail else "")
+                    + "  "
+                )
             note = str(row.get("note") or "").strip()
             if note:
                 for nl in note.splitlines():
@@ -241,15 +385,16 @@ def markdown_text(df: pd.DataFrame) -> str:
 
 
 def export_view(
-    df: pd.DataFrame, fmt: str = "csv", path: Path | str | None = None, settings: Settings | None = None
+    df: pd.DataFrame, fmt: str = "csv", path: Path | str | None = None,
+    settings: Settings | None = None, *, include_contacts: bool = False,
 ) -> Path:
     match fmt.lower():
         case "csv":
-            return to_csv(df, path, settings)
+            return to_csv(df, path, settings, include_contacts=include_contacts)
         case "xlsx" | "excel":
-            return to_xlsx(df, path, settings)
+            return to_xlsx(df, path, settings, include_contacts=include_contacts)
         case "md" | "markdown":
-            return to_markdown(df, path, settings)
+            return to_markdown(df, path, settings, include_contacts=include_contacts)
         case _:
             raise ValueError(f"unknown export format {fmt!r}")
 

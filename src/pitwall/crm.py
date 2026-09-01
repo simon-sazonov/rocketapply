@@ -18,7 +18,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from .db import CRMRepo, loads
+from .db import ContactRepo, CRMRepo, loads
 from .models import CRM_STATUSES
 
 #: Allowed transitions. Any status may go to `ignored` or `closed`.
@@ -63,6 +63,7 @@ class CRM:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
         self.repo = CRMRepo(conn)
+        self.contacts = ContactRepo(conn)
 
     # ── reads ──
 
@@ -145,15 +146,33 @@ class CRM:
         return self.set_status(candidate_id, "ignored", force=True)
 
     def delete_and_block(self, candidate_id: int, reason: str | None = None) -> str | None:
-        """Remove the person and never re-ingest them (§1.3 rule 4)."""
+        """Remove the person and never re-ingest them (§1.3 rule 4).
+
+        §6.1 of the v3 brief makes this the erasure mechanism for contact data
+        too, so the address rows are deleted **explicitly** rather than left to
+        the `ON DELETE CASCADE`. The cascade is real, but it only fires while
+        `PRAGMA foreign_keys` is on, and an erasure that silently depends on a
+        connection pragma is not an erasure. Deleting twice costs nothing;
+        discovering years later that one path left addresses behind does.
+        """
         row = self.conn.execute(
             "SELECT linkedin_slug FROM candidates WHERE id = ?", (candidate_id,)
         ).fetchone()
         slug = row["linkedin_slug"] if row else None
         if slug:
             self.repo.block(slug, reason or "deleted from the UI")
+        self.contacts.delete_for_candidate(candidate_id)
         self.conn.execute("DELETE FROM candidates WHERE id = ?", (candidate_id,))
         return slug
+
+    def erase_contacts(self, candidate_id: int) -> int:
+        """Drop every stored address for someone, keeping the person.
+
+        The narrower half of erasure: "I do not want their email in here" is a
+        different decision from "I do not want them in here", and forcing the
+        owner to delete the lead to drop the address would lose the research.
+        """
+        return self.contacts.delete_for_candidate(candidate_id)
 
     # ── queries the UI needs ──
 
