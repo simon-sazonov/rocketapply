@@ -23,6 +23,7 @@ different employers and a profile that says "Alpine" does not say which.
 from __future__ import annotations
 
 import logging
+import re
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -132,6 +133,27 @@ SIBLING_MIN_PRECISION = 0.45
 SHOP_MARKERS = (
     "shop", "store", "merch", "merchandise", "parts", "spares", "tickets",
     "hire", "rental", "dealer", "dealership", "usedcars", "boutique",
+    # A works team runs several *web properties* as well as several
+    # organisations, and the difference matters: nobody's staff mail lives on
+    # a parts catalogue or an anniversary microsite. Manthey resolved to
+    # `manthey-kit.com` and `manthey-25years.com` ahead of `manthey-racing.com`
+    # until these were added.
+    "kit", "kits", "collection", "experience", "museum", "heritage",
+    "anniversary", "jubilee", "fanshop", "tickets", "hospitality", "academy",
+)
+
+#: `manthey-25years.com`, `team50years.de` — an anniversary site is a campaign,
+#: not an employer.
+ANNIVERSARY = re.compile(r"\d{1,3}(years|jahre|anni|ans)\b")
+
+#: Words that say "this domain belongs to the racing organisation", as opposed
+#: to another property of the same brand. A modest bonus, but it is exactly
+#: what separates `manthey-racing.com` from `manthey-kit.com` — and the team is
+#: the employer, which is the only thing being asked about here.
+TEAM_WORDS = (
+    "racing", "motorsport", "motorsports", "sport", "sports", "team",
+    "competition", "competizioni", "corse", "rennsport", "engineering",
+    "grandprix", "gp", "f1", "wec", "endurance",
 )
 
 #: Softer: a *retail arm*, which is a real risk for a manufacturer-backed team
@@ -230,6 +252,7 @@ class Candidate:
     #: name; `afcorseusa` is 50%; `alpineperformanceparts` is 27%.
     precision: float = 0.0
     home_tld: bool = False
+    team_word: bool = False
     retail: bool = False
 
     @property
@@ -258,6 +281,8 @@ class Candidate:
             score += 1.5
         if self.home_tld:
             score += 1.0
+        if self.team_word:
+            score += 1.25
         if self.mx_valid:
             score += 0.75
         elif self.mx_valid is False:
@@ -274,6 +299,8 @@ class Candidate:
             bits.append("says “official”")
         if self.home_tld:
             bits.append("home TLD")
+        if self.team_word:
+            bits.append("names the team")
         if self.seen_in_search:
             bits.append(f"search #{self.best_rank + 1}")
         if self.serp_count:
@@ -451,7 +478,19 @@ def looks_retail(domain: str, name: str) -> bool:
 
 
 def is_shop(domain: str) -> bool:
-    return any(m in domain_label(domain) for m in SHOP_MARKERS)
+    label = domain_label(domain)
+    return any(m in label for m in SHOP_MARKERS) or bool(ANNIVERSARY.search(label))
+
+
+def has_team_word(domain: str, name: str) -> bool:
+    """Does the domain say it belongs to the racing organisation?
+
+    Ignored when the company's own name contains the word, because then it
+    carries no information: every candidate for "PREMA Racing" would score it.
+    """
+    label = domain_label(domain)
+    lowered = name.lower()
+    return any(w in label and w not in lowered for w in TEAM_WORDS)
 
 
 def home_tld(domain: str, country: str | None) -> bool:
@@ -578,6 +617,7 @@ def resolve(repos, searcher, company: dict, *, check_mx: bool = True) -> Result:
         item.coverage = coverage_of(item.domain, forms)
         item.precision = precision_of(item.domain, forms)
         item.home_tld = home_tld(item.domain, country)
+        item.team_word = has_team_word(item.domain, name)
         item.retail = looks_retail(item.domain, name)
 
     # MX only on the plausible few: it is free but it is still 49 x N lookups.

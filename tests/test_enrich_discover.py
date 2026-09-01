@@ -142,6 +142,38 @@ def test_a_retail_arm_is_penalised_not_excluded():
     assert usable("alpine-cars.co.uk") is True
 
 
+def test_a_brands_other_web_properties_are_excluded():
+    """A works team runs several *web properties* as well as several
+    organisations, and nobody's staff mail lives on a parts catalogue or an
+    anniversary microsite. Manthey resolved to `manthey-kit.com` and
+    `manthey-25years.com` ahead of `manthey-racing.com` until this existed."""
+    assert usable("manthey-kit.com") is False
+    assert usable("manthey-25years.com") is False
+    assert usable("porsche-experience.com") is False
+    assert usable("manthey-racing.com") is True
+
+
+def test_naming_the_team_is_a_signal(repos):
+    """The team is the employer, which is the only thing being asked about."""
+    from pitwall.enrich.discover import has_team_word
+
+    assert has_team_word("manthey-racing.com", "Manthey") is True
+    assert has_team_word("manthey.de", "Manthey") is False
+    # …but it carries no information when the company name already says it.
+    assert has_team_word("premaracing.com", "PREMA Racing") is False
+
+
+def test_the_racing_arm_beats_the_parent_brand(repos):
+    searcher = StubSearcher({"Manthey": [
+        serp("https://manthey.de/", "Manthey", "Engineering group"),
+        serp("https://manthey-racing.com/", "Manthey Racing",
+             "Porsche GT3 racing team, Nürburgring"),
+    ]})
+    result = resolve(repos, searcher, company("Manthey", country="Germany"),
+                     check_mx=False)
+    assert result.chosen.domain == "manthey-racing.com"
+
+
 def test_platforms_and_news_sites_are_never_a_company_domain():
     for domain in ("linkedin.com", "wikipedia.org", "motorsport.com",
                    "autosport.com", "greenhouse.io", "the-race.com"):
