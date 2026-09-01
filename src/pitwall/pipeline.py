@@ -13,6 +13,7 @@ import contextlib
 import functools
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -25,7 +26,7 @@ from typing import Any, cast
 
 from .config import Settings, get_settings
 from .db import Repos, open_repos
-from .extract.linkedin import parse_profile
+from .extract.linkedin import is_profile_url, parse_profile
 from .inputs import load_and_sync, load_negative_keywords
 from .models import Company, LLMVerdict, Role, Score
 from .query_builder import build_all
@@ -50,6 +51,44 @@ from .search.base import SearchProvider
 log = logging.getLogger("pitwall.pipeline")
 
 ProgressFn = Callable[[str, str, int, int], None]
+
+#: A provider that answers a `site:linkedin.com/in` query with rows that contain
+#: no profile URLs at all has not found nothing — it has ignored the operator.
+#:
+#: This is not hypothetical. On run #7 a local SearXNG fell back to Bing (every
+#: operator-capable engine was CAPTCHA-suspended), Bing dropped the `site:` and
+#: the quoted phrases, and the run recorded 2,170 rows about atrial fibrillation
+#: and McLaren road cars as a clean success: 200/200 queries `done`, 0 people.
+#: Ten minutes and 200 quota units spent looking like it worked.
+#:
+#: Treating that as a provider failure is what makes the chain fall through to
+#: one that does honour the operator, and what puts a real error on the query
+#: row instead of a green tick.
+_PROFILE_QUERY_RE = re.compile(r"site:\s*(?:[a-z]{2}\.)?linkedin\.com/in", re.I)
+
+#: Below this share of profile URLs the answer is treated as off-target. Not 0:
+#: engines legitimately mix in a company page or a stray redirect, and a single
+#: junk row among nine good ones is normal.
+MIN_PROFILE_SHARE = 0.2
+
+
+def off_target(query_text: str, hits: list[Any]) -> str | None:
+    """Why this answer should be rejected, or None if it looks real.
+
+    Only ever fires on queries that explicitly ask for profile URLs, so a
+    template that searches for something else is untouched.
+    """
+    if not hits or not _PROFILE_QUERY_RE.search(query_text):
+        return None
+    profiles = sum(1 for h in hits if is_profile_url(getattr(h, "url", "")))
+    share = profiles / len(hits)
+    if share >= MIN_PROFILE_SHARE:
+        return None
+    return (
+        f"ignored the site: operator — {profiles}/{len(hits)} rows were profile URLs "
+        f"({share:.0%} < {MIN_PROFILE_SHARE:.0%})"
+    )
+
 
 
 @dataclass
@@ -246,6 +285,8 @@ class Pipeline:
 
         disabled: set[str] = set()
         disabled_lock = threading.Lock()
+        #: Consecutive off-target answers per provider, for this stage only.
+        offtarget: dict[str, int] = {}
         throttle = AdaptiveConcurrency(workers, name="search")
 
         def fetch(row: dict[str, Any]) -> tuple[dict[str, Any], Any, str, bool]:
@@ -256,6 +297,7 @@ class Pipeline:
                 hits, provider_name, from_cache = self._search_one(
                     row["query_text"], chain, max_results, params, disabled,
                     disabled_lock=disabled_lock, throttle=throttle,
+                    offtarget=offtarget,
                 )
             return row, hits, provider_name, from_cache
 
@@ -319,6 +361,7 @@ class Pipeline:
         *,
         disabled_lock: threading.Lock | None = None,
         throttle: AdaptiveConcurrency | None = None,
+        offtarget: dict[str, int] | None = None,
     ) -> tuple[list[Any] | None, str, bool]:
         """Cache -> provider chain. Returns (hits|None, provider_or_error, cached).
 
@@ -333,7 +376,13 @@ class Pipeline:
             if not params.no_cache:
                 cached = self.cache.get(provider.name, query_text, max_results)
                 if cached is not None:
-                    return cached, provider.name, True
+                    # Junk that was cached before the guard existed must not be
+                    # replayed for the rest of its 7-day TTL.
+                    reason = off_target(query_text, cached)
+                    if reason is None:
+                        return cached, provider.name, True
+                    self.cache.drop(provider.name, query_text, max_results)
+                    log.warning("%s: dropped off-target cache entry — %s", provider.name, reason)
             if params.cache_only:
                 continue
             try:
@@ -366,11 +415,53 @@ class Pipeline:
                 log.warning("provider %s raised: %s", provider.name, exc)
                 continue
 
+            reason = off_target(query_text, hits)
+            if reason is not None:
+                # Do not cache it, and do not count it as an answer.
+                last_error = f"{provider.name}: {reason}"
+                log.warning("provider %s %s", provider.name, reason)
+                if offtarget is not None:
+                    self._note_offtarget(
+                        provider.name, offtarget, disabled, disabled_lock
+                    )
+                continue
+
+            if offtarget is not None:
+                offtarget.pop(provider.name, None)   # a good answer clears the streak
             self.cache.put(provider.name, query_text, max_results, hits)
             return hits, provider.name, False
         if params.cache_only:
             return [], chain[0].name if chain else "cache", True
         return None, last_error, False
+
+    #: Off-target answers in a row before a provider is dropped for this run.
+    #: One is a fluke — a query whose company genuinely has no LinkedIn presence
+    #: can come back with company pages. Three in a row is the operator being
+    #: ignored, and the remaining queries would all waste a request finding out.
+    OFFTARGET_STRIKES = 3
+
+    def _note_offtarget(
+        self,
+        name: str,
+        offtarget: dict[str, int],
+        disabled: set[str],
+        disabled_lock: threading.Lock | None,
+    ) -> None:
+        lock = disabled_lock or contextlib.nullcontext()
+        with lock:  # type: ignore[attr-defined]
+            offtarget[name] = offtarget.get(name, 0) + 1
+            if offtarget[name] < self.OFFTARGET_STRIKES or name in disabled:
+                return
+            disabled.add(name)
+        log.warning(
+            "%s returned off-target results %d times in a row — dropped for "
+            "the rest of this run", name, self.OFFTARGET_STRIKES,
+        )
+        self.progress(
+            "search",
+            f"{name} is ignoring the site: filter — switching to the next "
+            "provider for the rest of this run",
+        )
 
     def _record_search_quota(self, chain: list[SearchProvider], name: str) -> None:
         """Quota bookkeeping for one executed query — **submitting thread only**.

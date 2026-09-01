@@ -202,9 +202,26 @@ def test_triage_never_touches_a_candidate_that_already_has_a_verdict(pipe, repos
     assert after["llm_score"] == before["llm_score"]
 
 
-def test_the_ui_has_a_label_for_the_new_state():
+def test_the_ui_has_a_label_for_every_verdict_the_pipeline_can_emit():
+    """A verdict with no UI entry is a person the People page silently hides.
+
+    The vocabulary lives in `app/_explain.py` (it used to be inline in
+    `_shared.py`); this checks the guarantee, not the file it happens to be in.
+    """
+    import sys
     from pathlib import Path
 
-    shared = Path(__file__).resolve().parents[1] / "app" / "_shared.py"
-    source = shared.read_text(encoding="utf-8")
-    assert '"skipped_triage"' in source, "the Leads filter would silently hide them"
+    app_dir = Path(__file__).resolve().parents[1] / "app"
+    sys.path.insert(0, str(app_dir))
+    try:
+        import _explain
+    finally:
+        sys.path.remove(str(app_dir))
+
+    for verdict in (
+        "strong", "possible", "weak", "reject",
+        "needs_review", "pending_llm", "skipped_triage", "unscored",
+    ):
+        assert verdict in _explain.VERDICTS, f"{verdict} has no UI label"
+        assert _explain.VERDICTS[verdict]["what"], f"{verdict} has no explanation"
+        assert verdict in _explain.VERDICT_ORDER, f"{verdict} is missing from the filter"

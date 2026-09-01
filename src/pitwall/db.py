@@ -243,6 +243,21 @@ CREATE INDEX IF NOT EXISTS ix_jobs_company ON jobs(company_id, status);
 CREATE INDEX IF NOT EXISTS ix_jobs_status  ON jobs(status, posted_at DESC);
 CREATE INDEX IF NOT EXISTS ix_jobs_seen    ON jobs(last_seen_at);
 
+-- One row per stage a run passed through, so a finished run can still be
+-- explained: what it did, in what order, how long each part took. `run_progress`
+-- holds only the live cursor and is overwritten in place; this is the history.
+CREATE TABLE IF NOT EXISTS run_events (
+    id         INTEGER PRIMARY KEY,
+    run_id     INTEGER REFERENCES runs(id) ON DELETE CASCADE,
+    stage      TEXT NOT NULL,
+    message    TEXT,
+    current    INTEGER DEFAULT 0,
+    total      INTEGER DEFAULT 0,
+    started_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_run_events_run ON run_events(run_id, id);
+
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 """
 
@@ -992,6 +1007,42 @@ class RunRepo:
             """,
             (run_id, stage, message, current, total),
         )
+        self._record_event(run_id, stage, message, current, total)
+
+    def _record_event(
+        self, run_id: int, stage: str, message: str, current: int, total: int
+    ) -> None:
+        """Append on a stage change, update in place within a stage.
+
+        Progress fires every few queries; one row per call would be thousands of
+        rows saying the same thing. One row per stage, carrying that stage's
+        latest message and counts, is the timeline the UI actually needs.
+        """
+        last = self.conn.execute(
+            "SELECT id, stage FROM run_events WHERE run_id = ? ORDER BY id DESC LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        if last is not None and last["stage"] == stage:
+            self.conn.execute(
+                "UPDATE run_events SET message = ?, current = ?, total = ?,"
+                " updated_at = datetime('now') WHERE id = ?",
+                (message, current, total, last["id"]),
+            )
+            return
+        self.conn.execute(
+            "INSERT INTO run_events (run_id, stage, message, current, total)"
+            " VALUES (?,?,?,?,?)",
+            (run_id, stage, message, current, total),
+        )
+
+    def events(self, run_id: int) -> list[dict[str, Any]]:
+        """The stage-by-stage timeline of one run, oldest first."""
+        return [
+            dict(r)
+            for r in self.conn.execute(
+                "SELECT * FROM run_events WHERE run_id = ? ORDER BY id", (run_id,)
+            )
+        ]
 
     def get_progress(self, run_id: int) -> dict[str, Any] | None:
         r = self.conn.execute("SELECT * FROM run_progress WHERE run_id = ?", (run_id,)).fetchone()
