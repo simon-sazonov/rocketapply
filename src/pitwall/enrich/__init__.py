@@ -56,16 +56,38 @@ from .domains import (
     resolve_domain,
     set_manual_domain,
 )
+from .harvest import HarvestStep, harvest_domain, known_people_at
+from .patterns import (
+    FORMATS,
+    NameParts,
+    PatternGuess,
+    PatternStep,
+    address_for,
+    generic_addresses,
+    infer_pattern,
+    split_name,
+)
 
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "FORMATS",
     "STATUSES",
     "STATUS_MEANING",
     "AddressChecks",
     "CreditsExhausted",
     "DomainStep",
     "EmailCandidate",
+    "HarvestStep",
+    "NameParts",
+    "PatternGuess",
+    "PatternStep",
+    "address_for",
+    "generic_addresses",
+    "harvest_domain",
+    "infer_pattern",
+    "known_people_at",
+    "split_name",
     "EnrichmentContext",
     "EnrichmentError",
     "EnrichmentStep",

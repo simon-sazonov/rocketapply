@@ -296,6 +296,18 @@ class MXResult:
     error: str | None = None
 
     @property
+    def conclusive(self) -> bool:
+        """Did the lookup actually answer, either way?
+
+        The difference matters more than it looks. "This domain publishes no MX
+        records" is a verdict, and a strong hint that the resolved domain is
+        wrong. "The resolver timed out" is not a verdict about anything, and
+        treating the two the same would throw away a good finding because the
+        wifi dropped.
+        """
+        return self.valid or self.error == "no MX records"
+
+    @property
     def label(self) -> str:
         if not self.valid:
             return self.error or "the domain does not accept mail"
