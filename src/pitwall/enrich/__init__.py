@@ -36,6 +36,7 @@ from .base import (
     redact,
     run_step,
 )
+from .cache import EnrichmentCache, cache_key
 from .checks import (
     AddressChecks,
     MXResult,
@@ -108,6 +109,25 @@ def free_chain(
 def is_free(steps: Sequence[EnrichmentStep]) -> bool:
     """True when nothing in this chain can cost the owner money."""
     return not any(step.spends_credits for step in steps)
+
+
+def escalation_chain(kind: str = "finder", **kwargs: Any) -> list[EnrichmentStep]:
+    """One deliberate paid call, on one person or one company.
+
+    Not a chain in any real sense — a single step, wrapped so it goes through
+    the same `run_step` bookkeeping as everything else and lands in
+    `enrichment_log` with its cost attached. §5: Hunter is a manual escalation
+    the owner clicks, never something a pipeline reaches on its own.
+
+    The domain resolver runs in front of it because a credit spent on the wrong
+    domain is a credit gone, and it costs nothing to be sure first.
+    """
+    from .hunter import HunterDomainStep, HunterFinderStep
+
+    paid: EnrichmentStep = (
+        HunterDomainStep(**kwargs) if kind == "domain" else HunterFinderStep(**kwargs)
+    )
+    return [DomainStep(), paid]
 
 
 # ─────────────────────────── running it for one person ───────────────────
@@ -319,9 +339,12 @@ __all__ = [
     "CreditsExhausted",
     "DomainStep",
     "EmailCandidate",
+    "EnrichmentCache",
     "HarvestStep",
+    "cache_key",
     "corroborate",
     "enrich_candidate",
+    "escalation_chain",
     "enrich_many",
     "find_company",
     "free_chain",
