@@ -558,10 +558,10 @@ class PatternStep:
         self.check_mx = check_mx
 
     def run(self, ctx: EnrichmentContext) -> StepOutcome:
-        from .checks import check_address
         from .harvest import known_people_at
 
-        if not ctx.domain:
+        domains = ctx.domain_list()
+        if not domains:
             return StepOutcome(
                 step=self.name, outcome="skipped", detail="no domain resolved"
             )
@@ -572,24 +572,63 @@ class PatternStep:
                 detail=f"{ctx.full_name!r} is not a usable first-and-last name",
             )
 
-        guess = infer_pattern(ctx.samples, known_people=known_people_at(ctx))
-        ctx.pattern = guess.pattern
-        ctx.pattern_sample_size = guess.sample_size
-        ctx.pattern_agreement = guess.agreement
-        if ctx.company_domain_id is not None and guess.pattern:
+        people = known_people_at(ctx)
+        found: list[EmailCandidate] = []
+        details: list[str] = []
+        for domain in domains:
+            candidate, detail = self._for_domain(ctx, domain, parts, people)
+            details.append(f"{domain}: {detail}")
+            if candidate:
+                found.append(candidate)
+
+        if len(domains) > 1 and len(found) > 1:
+            # Several works organisations share this name, and a headline that
+            # says "Alpine" does not say which one. Both addresses are shown,
+            # each with its own evidence, rather than one being picked silently.
+            ctx.note(
+                f"{ctx.company_name} uses {len(domains)} domains "
+                f"({', '.join(domains)}), so there is one candidate address per "
+                "organisation. Check which one this person actually works for."
+            )
+
+        return StepOutcome(
+            step=self.name,
+            outcome="ok" if found else "empty",
+            detail=" · ".join(details),
+            found=found,
+        )
+
+    def _for_domain(
+        self,
+        ctx: EnrichmentContext,
+        domain: str,
+        parts: NameParts,
+        people: list[dict[str, Any]],
+    ) -> tuple[EmailCandidate | None, str]:
+        """The §4 status table, applied at one domain."""
+        from .checks import check_address
+
+        samples = ctx.samples_for(domain)
+        guess = infer_pattern(samples, known_people=people)
+        domain_id = ctx.domain_id_for(domain)
+
+        if domain == ctx.domain:
+            ctx.pattern = guess.pattern
+            ctx.pattern_sample_size = guess.sample_size
+            ctx.pattern_agreement = guess.agreement
+        if domain_id is not None and guess.pattern:
             with ctx.repos.writing():
                 ctx.repos.domains.set_pattern(
-                    ctx.company_domain_id, guess.pattern,
-                    guess.sample_size, guess.agreement,
+                    domain_id, guess.pattern, guess.sample_size, guess.agreement
                 )
 
         minimum = ctx.settings.enrich_min_samples_for_probable
         if guess.pattern:
-            address = address_for(parts, ctx.domain, guess.pattern)
+            address = address_for(parts, domain, guess.pattern)
             evidence = guess.as_evidence()
             generic = False
         else:
-            options = generic_addresses(parts, ctx.domain, limit=3)
+            options = generic_addresses(parts, domain, limit=3)
             address = options[0] if options else None
             evidence = {
                 "pattern": GENERIC_PERMUTATIONS[0],
@@ -600,31 +639,20 @@ class PatternStep:
             generic = True
 
         if not address:
-            return StepOutcome(
-                step=self.name, outcome="empty",
-                detail=f"no address could be built for {ctx.domain} "
-                       f"({guess.describe()})",
-            )
+            return None, f"no address could be built ({guess.describe()})"
 
         checks = check_address(address, check_mx=self.check_mx, resolver=self.resolver)
         if not checks.usable:
-            return StepOutcome(
-                step=self.name, outcome="empty",
-                detail="the derived address is not usable: "
-                       + "; ".join(checks.reasons()),
-            )
+            return None, "not usable: " + "; ".join(checks.reasons())
         if checks.mx is not None and checks.mx.conclusive and not checks.mx.valid:
             # A domain that publishes no MX records accepts no mail. Every
             # address derived from it is worthless, and the likeliest
             # explanation is that the domain itself is wrong.
             ctx.note(
-                f"{ctx.domain} publishes no MX records, so it accepts no mail — "
-                "the domain is probably wrong. Correct it and try again."
+                f"{domain} publishes no MX records, so it accepts no mail — "
+                "that domain is probably wrong. Correct it and try again."
             )
-            return StepOutcome(
-                step=self.name, outcome="empty",
-                detail=f"{ctx.domain} accepts no mail (no MX records)",
-            )
+            return None, "accepts no mail (no MX records)"
 
         mx_confirmed = bool(checks.mx and checks.mx.valid)
         status = "guess"
@@ -632,29 +660,31 @@ class PatternStep:
             status = "probable"
         elif not generic and guess.meets(minimum) and not mx_confirmed:
             ctx.note(
-                "the mail server could not be checked, so this stays a guess "
-                "rather than becoming probable"
+                f"the mail server for {domain} could not be checked, so this "
+                "stays a guess rather than becoming probable"
             )
 
         evidence.update(checks.as_evidence())
-        evidence["derived_from_domain"] = ctx.domain
+        evidence["derived_from_domain"] = domain
         evidence["domain_source"] = ctx.domain_source
+        if len(ctx.domains) > 1:
+            # Which of the company's organisations this address belongs to is
+            # part of the evidence, not a footnote: the reader has to be able
+            # to tell `jane.doe@alpinef1.com` from `jane.doe@alpinecars.com`.
+            evidence["company_domains"] = list(ctx.domains)
 
-        return StepOutcome(
-            step=self.name, outcome="ok",
-            detail=f"{status} from {guess.describe()}",
-            found=[
-                EmailCandidate(
-                    email=address,
-                    status=status,
-                    source="pattern",
-                    evidence=evidence,
-                    # Deliberately None. §4: never render a bare confidence
-                    # number for a locally-derived guess.
-                    confidence=None,
-                    mx_valid=checks.mx_valid,
-                    is_role_address=checks.is_role,
-                    is_disposable=checks.is_disposable,
-                )
-            ],
+        return (
+            EmailCandidate(
+                email=address,
+                status=status,
+                source="pattern",
+                evidence=evidence,
+                # Deliberately None. §4: never render a bare confidence
+                # number for a locally-derived guess.
+                confidence=None,
+                mx_valid=checks.mx_valid,
+                is_role_address=checks.is_role,
+                is_disposable=checks.is_disposable,
+            ),
+            f"{status} from {guess.describe()}",
         )

@@ -282,7 +282,7 @@ def test_a_recent_harvest_is_reused_instead_of_re_searching(enrich_ctx, repos):
     outcome = HarvestStep().run(ctx)
     assert outcome.ok
     assert searcher.queries == []
-    assert "no searches needed" in (outcome.detail or "")
+    assert "harvested recently" in (outcome.detail or "")
     assert len(ctx.samples) == 2
 
 

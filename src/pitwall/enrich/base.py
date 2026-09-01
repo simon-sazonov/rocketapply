@@ -172,9 +172,30 @@ class EnrichmentContext:
     run_id: int | None = None
 
     # ── filled in as the chain runs ──
+    #: The primary domain — the one the company is most likely to use.
     domain: str | None = None
     domain_source: str | None = None
     company_domain_id: int | None = None
+
+    #: **Every** domain this company is known to use, best first.
+    #:
+    #: A works team is often several organisations sharing a name. Alpine runs
+    #: an F1 team on one domain and a sportscar programme on another; Toyota
+    #: Gazoo Racing, BMW M Motorsport, Ferrari and Peugeot are all the same
+    #: shape. A person whose profile says "Alpine" may be in either, and there
+    #: is no way to tell from a headline — so the chain harvests all of them and
+    #: produces one candidate address per domain, each carrying its own
+    #: evidence. Picking one and hiding the rest would be a guess wearing a
+    #: single answer's clothes.
+    domains: list[str] = field(default_factory=list)
+    #: domain -> its `company_domains.id`, for writing samples back.
+    domain_ids: dict[str, int] = field(default_factory=dict)
+    #: domain -> the address samples harvested at it.
+    samples_by_domain: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
+    #: The primary domain's samples. Kept as its own field because most of the
+    #: package only ever cares about one domain, and threading a dict through
+    #: every call site would obscure that.
     samples: list[dict[str, Any]] = field(default_factory=list)
     pattern: str | None = None
     pattern_sample_size: int = 0
@@ -222,6 +243,49 @@ class EnrichmentContext:
 
     def note(self, text: str) -> None:
         self.notes.append(text)
+
+    def set_domains(self, domains: Sequence[str], ids: dict[str, int] | None = None) -> None:
+        """Record every domain for this company, best first."""
+        seen: list[str] = []
+        for domain in domains:
+            cleaned = str(domain or "").strip().lower()
+            if cleaned and cleaned not in seen:
+                seen.append(cleaned)
+        self.domains = seen
+        self.domain = seen[0] if seen else None
+        if ids:
+            self.domain_ids.update(ids)
+        self.company_domain_id = self.domain_ids.get(self.domain or "")
+
+    def domain_id_for(self, domain: str) -> int | None:
+        """This domain's `company_domains.id`.
+
+        Falls back to `company_domain_id` for the primary domain, so a caller
+        that only ever knew about one — the CLI, a test, anything written
+        before multi-domain support — keeps working unchanged.
+        """
+        known = self.domain_ids.get(domain)
+        if known is not None:
+            return known
+        return self.company_domain_id if domain == self.domain else None
+
+    def domain_list(self) -> list[str]:
+        """Every domain to work through; the primary alone if that is all
+        anyone set."""
+        if self.domains:
+            return self.domains
+        return [self.domain] if self.domain else []
+
+    def samples_for(self, domain: str) -> list[dict[str, Any]]:
+        stored = self.samples_by_domain.get(domain)
+        if stored is not None:
+            return stored
+        return self.samples if domain == self.domain else []
+
+    def record_samples(self, domain: str, samples: list[dict[str, Any]]) -> None:
+        self.samples_by_domain[domain] = samples
+        if domain == self.domain:
+            self.samples = samples
 
     def best(self) -> EmailCandidate | None:
         if not self.findings:

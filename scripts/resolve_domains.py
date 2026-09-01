@@ -114,6 +114,21 @@ DEFAULT_ENGINES = "google,google cse,qwant,brave,duckduckgo,startpage,mojeek"
 PROBE_QUERY = '"Scuderia Ferrari" official website'
 PROBE_EXPECT = "ferrari"
 
+#: How many domains may be recorded for one company. Matches `enrich.domains`'
+#: own cap: a works team is an F1 entry, a sportscar programme and a parent,
+#: and past that the extra addresses are noise rather than coverage.
+MAX_COMPANY_DOMAINS = 3
+
+#: How far behind the winner a domain may score and still be treated as a
+#: *second organisation* rather than a runner-up.
+#:
+#: Deliberately generous. `alpinef1.com` and `alpinecars.com` are both Alpine;
+#: whichever the scorer happens to prefer, discarding the other would hide half
+#: the answer for anyone whose profile just says "Alpine". A false extra domain
+#: costs one more clearly-labelled candidate address; a missing one costs the
+#: right answer entirely.
+SIBLING_MARGIN = 2.5
+
 #: Never a company's staff-email domain, whatever else it is. A merchandise
 #: shop or a parts store is a separate property on a separate domain, and
 #: `toyotagazooracingb2bshop.com` matches the full team name perfectly while
@@ -271,8 +286,18 @@ class Result:
     series: str | None
     current: str | None
     chosen: Candidate | None = None
+    #: Other domains this company genuinely uses — a second works organisation,
+    #: not a runner-up. Stored alongside the primary, because the person may be
+    #: in either. See `SIBLING_MARGIN`.
+    siblings: list[Candidate] = field(default_factory=list)
     alternatives: list[Candidate] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def domains(self) -> list[str]:
+        return ([self.chosen.domain] if self.chosen else []) + [
+            c.domain for c in self.siblings
+        ]
     searches_run: int = 0
     searches_empty: int = 0
     searches_failed: int = 0
@@ -541,6 +566,15 @@ def resolve(repos, searcher, company: dict, *, check_mx: bool = True) -> Result:
     if ranked:
         result.chosen = ranked[0]
         result.alternatives = ranked[1:4]
+        # A works team is several organisations sharing a name — Alpine's F1
+        # entry and its sportscar programme are different domains and a profile
+        # saying "Alpine" does not say which. Anything close behind the winner
+        # is kept as a real second answer rather than as a footnote, and
+        # `--apply` records all of them.
+        result.siblings = [
+            c for c in ranked[1:MAX_COMPANY_DOMAINS]
+            if c.score >= ranked[0].score - SIBLING_MARGIN and c.coverage >= 0.5
+        ]
         if result.chosen.retail:
             result.warnings.append("the winner looks like a retail site — check it")
         if result.chosen.coverage < 0.5:
@@ -689,7 +723,7 @@ def main(
             print(
                 "\t".join([
                     item.name,
-                    item.chosen.domain if item.chosen else "-",
+                    ",".join(item.domains) or "-",
                     item.chosen.why() if item.chosen else "; ".join(item.warnings),
                     ",".join(a.domain for a in item.alternatives),
                 ])
@@ -708,7 +742,7 @@ def main(
                 style = "yellow"
             table.add_row(
                 item.name,
-                f"[{style}]{item.chosen.domain if item.chosen else '—'}[/]",
+                f"[{style}]{'  +  '.join(item.domains) if item.chosen else '—'}[/]",
                 item.chosen.why() if item.chosen else "; ".join(item.warnings),
                 ", ".join(a.domain for a in item.alternatives) or "[dim]none[/]",
             )
@@ -733,9 +767,9 @@ def main(
         )
         raise typer.Exit(0)
 
-    # Write through the CSV, which is the source of truth; the next run syncs
-    # it into the database. Writing the database directly would be undone by
-    # the first `load_and_sync`.
+    # The primary goes to the CSV, which is the source of truth for a single
+    # value and gets synced into the database on the next run. Writing the
+    # database directly would be undone by the first `load_and_sync`.
     chosen = {r.name: r.chosen.domain for r in found}
     models = load_companies()
     written = 0
@@ -744,8 +778,36 @@ def main(
             model.domain = chosen[model.name]
             written += 1
     path = save_companies(models)
-    console.print(f"[green]wrote {written} domain(s)[/] -> {path}")
-    console.print("Run [bold]pitwall validate[/] to re-sync them into the database.")
+    console.print(f"[green]wrote {written} primary domain(s)[/] -> {path}")
+
+    # …and **every** domain goes to `company_domains`, which is the table that
+    # can hold more than one. The CSV has a single `domain` column and a works
+    # team has more than one organisation; this is where Alpine's F1 entry and
+    # its sportscar programme both survive, and the enrichment chain reads from
+    # here rather than from the CSV.
+    extra = 0
+    by_name = {c["name"]: c for c in rows}
+    with repos.writing():
+        for item in found:
+            company = by_name.get(item.name)
+            if not company:
+                continue
+            for domain in item.domains:
+                repos.domains.upsert(int(company["id"]), domain, source="resolved")
+                extra += 1
+    console.print(
+        f"[green]recorded {extra} domain(s)[/] against "
+        f"{len(found)} companies in `company_domains`"
+    )
+    multi = [r for r in found if r.siblings]
+    if multi:
+        console.print(
+            f"[dim]{len(multi)} compan(ies) use more than one — an email lookup "
+            "will offer one address per organisation:[/]"
+        )
+        for item in multi:
+            console.print(f"  [dim]· {item.name}: {', '.join(item.domains)}[/]")
+    console.print("Run [bold]pitwall validate[/] to re-sync the CSV into the database.")
 
 
 if __name__ == "__main__":

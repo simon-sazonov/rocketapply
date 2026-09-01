@@ -365,25 +365,41 @@ class HarvestStep:
         self.force = force
 
     def run(self, ctx: EnrichmentContext) -> StepOutcome:
-        if not ctx.domain:
+        domains = ctx.domain_list()
+        if not domains:
             return StepOutcome(
                 step=self.name, outcome="skipped", detail="no domain resolved yet"
             )
 
-        domain_id = ctx.company_domain_id
-        if domain_id is not None and not self.force and _harvested_recently(ctx, domain_id):
-            ctx.samples = ctx.repos.domains.samples(domain_id)
-            return StepOutcome(
-                step=self.name, outcome="ok",
-                detail=f"{len(ctx.samples)} sample(s) already stored for {ctx.domain}, "
-                       "harvested recently — no searches needed",
-            )
+        parts: list[str] = []
+        total_added = 0
+        any_found = False
+        for domain in domains:
+            added, detail, found = self._harvest_one(ctx, domain)
+            total_added += added
+            any_found = any_found or found
+            parts.append(detail)
 
-        report = harvest_domain(
-            ctx, ctx.domain, ctx.company_name, fetcher=self.fetcher
+        return StepOutcome(
+            step=self.name,
+            outcome="ok" if any_found else "empty",
+            detail=" · ".join(parts),
+            samples_added=total_added,
         )
+
+    def _harvest_one(self, ctx: EnrichmentContext, domain: str) -> tuple[int, str, bool]:
+        """One domain's corpus. Returns (new samples, a detail line, found any)."""
+        domain_id = ctx.domain_id_for(domain)
+
+        if domain_id is not None and not self.force and _harvested_recently(ctx, domain_id):
+            stored = ctx.repos.domains.samples(domain_id)
+            ctx.record_samples(domain, stored)
+            return 0, f"{domain}: {len(stored)} stored, harvested recently", bool(stored)
+
+        report = harvest_domain(ctx, domain, ctx.company_name, fetcher=self.fetcher)
         for note in report.notes:
-            ctx.note(note)
+            if note not in ctx.notes:      # the same "no operators" note per domain
+                ctx.note(note)
 
         added = 0
         if domain_id is not None and report.found:
@@ -396,29 +412,27 @@ class HarvestStep:
                     ):
                         added += 1
                 ctx.repos.domains.mark_harvested(domain_id)
-            ctx.samples = ctx.repos.domains.samples(domain_id)
+            ctx.record_samples(domain, ctx.repos.domains.samples(domain_id))
         elif report.found:
             # No company row to hang the corpus off — still usable for this one
             # person, just not cached for the next.
-            ctx.samples = [
+            ctx.record_samples(domain, [
                 {"email": h.email, "person_name": h.person_name, "source_url": h.source_url}
                 for h in report.found
-            ]
+            ])
+        else:
+            ctx.record_samples(domain, ctx.samples_for(domain))
 
         named = sum(1 for h in report.found if h.person_name)
         detail = (
-            f"{len(report.found)} address(es) at {ctx.domain} "
-            f"({named} with a name), {added} new, "
-            f"{report.queries_run} search(es), {report.pages_fetched} page(s) read"
+            f"{domain}: {len(report.found)} address(es) ({named} named), "
+            f"{added} new, {report.queries_run} search(es)"
         )
+        if report.pages_fetched:
+            detail += f", {report.pages_fetched} page(s) read"
         if report.role_addresses_skipped:
             detail += f", {report.role_addresses_skipped} shared mailbox(es) skipped"
-        return StepOutcome(
-            step=self.name,
-            outcome="ok" if report.found else "empty",
-            detail=detail,
-            samples_added=added,
-        )
+        return added, detail, bool(report.found)
 
 
 def _harvested_recently(ctx: EnrichmentContext, domain_id: int) -> bool:

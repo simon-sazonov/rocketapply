@@ -196,11 +196,28 @@ class ResolvedDomain:
     alternatives: list[str] = field(default_factory=list)
 
 
+#: How many of a company's domains the chain will work through. A works team
+#: is rarely more than two or three organisations — an F1 entry, a sportscar
+#: programme, the parent — and beyond that the extra addresses are noise rather
+#: than coverage.
+MAX_DOMAINS = 3
+
+
 class DomainStep:
-    """Resolve, cache and record the company's mail domain."""
+    """Resolve, cache and record **every** domain the company uses.
+
+    Not just the best one. `alpinef1.com` and `alpinecars.com` are both Alpine,
+    a profile that says "Alpine" does not say which, and the same is true of
+    Toyota Gazoo Racing, BMW M Motorsport, Ferrari and Peugeot. The stored
+    domains are the answer to "where might this person's mail live", and that
+    question genuinely has more than one answer for a works team.
+    """
 
     name = "domain"
     spends_credits = False
+
+    def __init__(self, *, max_domains: int = MAX_DOMAINS) -> None:
+        self.max_domains = max(1, int(max_domains))
 
     def run(self, ctx: EnrichmentContext) -> StepOutcome:
         company_id = (ctx.company or {}).get("id")
@@ -211,30 +228,53 @@ class DomainStep:
                 detail="no employer on this person to resolve a domain for",
             )
 
-        resolved = resolve_domain(ctx, company_id, name)
-        if not resolved.domain:
+        # Anything already recorded against this company comes first, in the
+        # repository's own order — the owner's override, then the rest. Those
+        # were established deliberately (by `resolve_domains.py`, by a Hunter
+        # call, or by hand) and outrank a fresh guess.
+        known: list[str] = []
+        ids: dict[str, int] = {}
+        if company_id:
+            for row in ctx.repos.domains.for_company(int(company_id)):
+                known.append(str(row["domain"]))
+                ids[str(row["domain"])] = int(row["id"])
+
+        source = "stored" if known else None
+        if not known:
+            resolved = resolve_domain(ctx, company_id, name)
+            source = resolved.source
+            if resolved.domain:
+                known.append(resolved.domain)
+            if resolved.alternatives:
+                ctx.note(
+                    f"other candidate domains for {name}: "
+                    + ", ".join(resolved.alternatives[:4])
+                )
+
+        if not known:
             return StepOutcome(
                 step=self.name, outcome="empty",
-                detail=f"no domain found for {name!r} ({resolved.detail or 'nothing matched'})",
+                detail=f"no domain found for {name!r}",
             )
 
-        ctx.domain = resolved.domain
-        ctx.domain_source = resolved.source
+        known = known[: self.max_domains]
         if company_id:
             with ctx.repos.writing():
-                ctx.company_domain_id = ctx.repos.domains.upsert(
-                    int(company_id), resolved.domain, source=resolved.source
-                )
-                ctx.samples = ctx.repos.domains.samples(ctx.company_domain_id)
-        if resolved.alternatives:
-            ctx.note(
-                f"other candidate domains for {name}: "
-                + ", ".join(resolved.alternatives[:4])
-            )
-        return StepOutcome(
-            step=self.name, outcome="ok",
-            detail=f"{resolved.domain} (from {resolved.source})",
-        )
+                for domain in known:
+                    if domain not in ids:
+                        ids[domain] = ctx.repos.domains.upsert(
+                            int(company_id), domain, source=source
+                        )
+        ctx.domain_source = source
+        ctx.set_domains(known, ids)
+        for domain in known:
+            if domain in ids:
+                ctx.record_samples(domain, ctx.repos.domains.samples(ids[domain]))
+
+        detail = f"{known[0]} (from {source})"
+        if len(known) > 1:
+            detail += f" · also {', '.join(known[1:])}"
+        return StepOutcome(step=self.name, outcome="ok", detail=detail)
 
 
 def resolve_domain(
