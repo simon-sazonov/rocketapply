@@ -148,3 +148,36 @@ jobs:
   timeout_seconds: 20
   max_detail_fetches: 40    # per source per poll, so a big sitemap cannot run away
   close_after_days: 7       # unseen for this long -> status `closed`, never deleted
+
+# ── contact enrichment (v3) ─────────────────────────────────────────────
+# PitWall's own free logic runs first and in full; Hunter is only ever reached
+# by clicking on one specific person. See PITWALL_V3_EMAIL_ENRICHMENT.md.
+enrich:
+  # §4. Below this many agreeing samples a derived address is a `guess`, not
+  # `probable`, and the UI says so. The single most important number here: it
+  # is what stops a hypothesis being rendered as a finding.
+  min_samples_for_probable: 2
+  # Three good samples settle a format. The twentieth adds nothing and costs a
+  # search, so the corpus per domain is capped.
+  max_samples: 25
+  # Searches per domain harvest, and per corroboration check. Both small on
+  # purpose — this is a manual tool on a manual selection, not a sweep.
+  harvest_queries: 3
+  corroborate_queries: 2
+  harvest_ttl_days: 30
+  # Hard ceiling on one "find emails for selected" click. §0.2: enrichment
+  # never runs in bulk over the whole table.
+  max_selection: 25
+  hunter:
+    # The free plan's monthly allowance. Only used to draw a sensible bar
+    # before /v2/account has ever answered; the live number always wins.
+    free_monthly_credits: 50
+    # §5.2: at this many unresolved people at one company, one Domain Search
+    # beats one Email Finder call each. Verified against Hunter's own docs —
+    # Domain Search is 1 credit per 1-10 addresses returned, Email Finder is
+    # 1 credit per successful call, so the crossover really is 3.
+    domain_search_threshold: 3
+    timeout_seconds: 20
+    # /v2/account is free; this only stops a Streamlit rerun polling it on
+    # every keystroke.
+    account_ttl_seconds: 180

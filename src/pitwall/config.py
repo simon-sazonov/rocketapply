@@ -127,6 +127,16 @@ YAML_MAP: dict[str, str] = {
     "jobs.timeout_seconds": "jobs_timeout_seconds",
     "jobs.max_detail_fetches": "jobs_max_detail_fetches",
     "jobs.close_after_days": "jobs_close_after_days",
+    "enrich.min_samples_for_probable": "enrich_min_samples_for_probable",
+    "enrich.max_samples": "enrich_max_samples",
+    "enrich.harvest_queries": "enrich_harvest_queries",
+    "enrich.corroborate_queries": "enrich_corroborate_queries",
+    "enrich.harvest_ttl_days": "enrich_harvest_ttl_days",
+    "enrich.max_selection": "enrich_max_selection",
+    "enrich.hunter.free_monthly_credits": "hunter_free_monthly_credits",
+    "enrich.hunter.domain_search_threshold": "hunter_domain_search_threshold",
+    "enrich.hunter.timeout_seconds": "hunter_timeout_seconds",
+    "enrich.hunter.account_ttl_seconds": "hunter_account_ttl_seconds",
 }
 
 
@@ -321,6 +331,49 @@ class Settings(BaseSettings):
     jobs_max_detail_fetches: int = Field(default=40, ge=0)
     #: Days a posting can go unseen before `status` becomes `closed`.
     jobs_close_after_days: int = Field(default=7, ge=1)
+
+    # ── contact enrichment (PITWALL_V3_EMAIL_ENRICHMENT.md) ──
+    #: Hunter is the ONLY paid step, it is never automatic, and it is never
+    #: bulk. Without a key the whole free engine still runs — §0.2 is explicit
+    #: that PitWall's own logic runs first and Hunter is a per-person escalation
+    #: the owner clicks, one credit at a time.
+    hunter_api_key: str = ""
+    hunter_base_url: str = "https://api.hunter.io/v2"
+    #: The free plan's monthly allowance, used only to render a sensible bar
+    #: before `/v2/account` has ever been polled. The live number always wins.
+    hunter_free_monthly_credits: int = Field(default=50, ge=0)
+    #: §5.2 — at this many unresolved people at one company, a single Domain
+    #: Search is the better spend than one Email Finder call each.
+    hunter_domain_search_threshold: int = Field(default=3, ge=1)
+    hunter_timeout_seconds: float = Field(default=20.0, ge=1)
+    #: How long `/v2/account` is trusted before it is polled again (§5.1,
+    #: "cache for a few minutes"). The endpoint is free; this only stops a
+    #: Streamlit rerun from making a request per keystroke.
+    hunter_account_ttl_seconds: float = Field(default=180.0, ge=0)
+
+    #: Optional. Raises GitHub's unauthenticated 60 requests/hour to 5,000.
+    #: A read-only token with no scopes is enough — this reads public events.
+    github_token: str = ""
+    github_base_url: str = "https://api.github.com"
+    github_timeout_seconds: float = Field(default=15.0, ge=1)
+
+    #: §4: `probable` needs a pattern that at least this many real addresses
+    #: agree on. Below it the finding is a `guess`, and the UI says so. This is
+    #: the single number that decides whether the owner is shown a hypothesis
+    #: dressed as a fact, so it is configuration, not a literal in a branch.
+    enrich_min_samples_for_probable: int = Field(default=2, ge=1)
+    #: Ceiling on the harvest corpus per domain. Three good samples settle a
+    #: format; the twentieth adds nothing and costs a search.
+    enrich_max_samples: int = Field(default=25, ge=1)
+    #: Searches per domain harvest, and per corroboration check. Both are small
+    #: on purpose: this is a manual tool on a manual selection, not a sweep.
+    enrich_harvest_queries: int = Field(default=3, ge=0, le=10)
+    enrich_corroborate_queries: int = Field(default=2, ge=0, le=10)
+    #: Days a harvest is trusted before a re-harvest is worth doing.
+    enrich_harvest_ttl_days: int = Field(default=30, ge=0)
+    #: Hard ceiling on how many people one "find emails for selected" click may
+    #: process. §0.2: enrichment never runs in bulk over the whole table.
+    enrich_max_selection: int = Field(default=25, ge=1, le=200)
 
     # ── query budget ──
     max_queries_per_run: int = Field(default=200, ge=1)

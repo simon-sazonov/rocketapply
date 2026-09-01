@@ -179,6 +179,116 @@ class StubProvider:
 
 
 
+# ───────────── contact enrichment, with the network stubbed out ─────────
+#
+# §8 of PITWALL_V3_EMAIL_ENRICHMENT.md: "No test makes a real network call —
+# not Hunter, not GitHub, not SearXNG, not DNS." Every fixture below exists to
+# make that structural rather than a habit: a step reaches the network only
+# through an injected searcher, resolver or HTTP client, and each of these
+# raises rather than connecting if a test forgets to stub one.
+
+
+class StubSearcher:
+    """A deterministic stand-in for the SearXNG-backed enrichment searcher.
+
+    Keyed on a substring of the query rather than the whole string, because the
+    steps build their queries from templates and asserting on the exact text
+    would make every test a change-detector.
+    """
+
+    def __init__(self, pages=None):
+        self.pages = dict(pages or {})
+        self.queries: list[str] = []
+        self.fail_on: set[str] = set()
+
+    def supports_operators(self) -> bool:
+        return True
+
+    def search(self, query: str, *, max_results: int = 10):
+        self.queries.append(query)
+        for needle in self.fail_on:
+            if needle in query:
+                raise RuntimeError(f"stub searcher refusing {needle!r}")
+        for needle, hits in self.pages.items():
+            if needle in query:
+                return list(hits)[:max_results]
+        return []
+
+
+@pytest.fixture()
+def searcher():
+    return StubSearcher
+
+
+@pytest.fixture()
+def no_dns():
+    """An MX resolver that fails the test if anything actually asks DNS."""
+
+    def _resolver(domain):
+        raise AssertionError(f"a test tried to resolve MX for {domain!r}")
+
+    return _resolver
+
+
+@pytest.fixture()
+def mx_ok():
+    """A resolver that answers as Google Workspace for every domain."""
+    return lambda domain: ["aspmx.l.google.com", "alt1.aspmx.l.google.com"]
+
+
+@pytest.fixture()
+def enrich_ctx(settings, repos):
+    """Factory for an `EnrichmentContext` around a real (throwaway) database."""
+    from pitwall.enrich.base import EnrichmentContext
+    from pitwall.enrich.checks import reset_mx_cache
+
+    reset_mx_cache()
+
+    def _make(
+        *,
+        name="Jane Doe",
+        company_name="Alpine",
+        searcher=None,
+        candidate=None,
+        company=None,
+        **kwargs,
+    ):
+        if company is None and company_name:
+            repos.conn.execute(
+                "INSERT OR IGNORE INTO companies (name) VALUES (?)", (company_name,)
+            )
+            row = repos.conn.execute(
+                "SELECT * FROM companies WHERE name = ?", (company_name,)
+            ).fetchone()
+            company = dict(row) if row else None
+        if candidate is None:
+            slug = name.lower().replace(" ", "-")
+            cid, _ = repos.candidates.upsert(
+                {
+                    "linkedin_slug": slug,
+                    "profile_url": f"https://uk.linkedin.com/in/{slug}",
+                    "full_name": name,
+                    "current_company": company_name,
+                }
+            )
+            candidate = repos.conn.execute(
+                "SELECT * FROM candidates WHERE id = ?", (cid,)
+            ).fetchone()
+            candidate = dict(candidate)
+        return EnrichmentContext(
+            candidate=candidate, settings=settings, repos=repos,
+            company=company, searcher=searcher, **kwargs,
+        )
+
+    yield _make
+    reset_mx_cache()
+
+
+def serp(url, title="", snippet=""):
+    """One SERP hit, for the stub searcher's pages."""
+    return SearchHit(0, url, title, snippet, {})
+
+
 @pytest.fixture()
 def pipeline(settings, repos, monkeypatch, company, role):
     """A Pipeline whose provider chain is a stub — no test makes a request."""

@@ -18,6 +18,13 @@ tenacity>=9.0        # retries with exponential backoff
 # ─── LLM ──────────────────────────────────────────────────────────────
 openai>=1.50         # used ONLY as an OpenAI-compatible client for Z.ai/DeepSeek/Ollama
 
+# ─── Contact enrichment (v3) ──────────────────────────────────────────
+# The MX lookup of §3.2. DNS runs on port 53 and is never blocked, which is
+# exactly why it is the verification that works everywhere and SMTP probing is
+# not built at all (§3.1). Optional at runtime: without it the MX check reports
+# "unknown" and the rest of the free engine is unaffected.
+dnspython>=2.7
+
 # ─── Text handling ────────────────────────────────────────────────────
 rapidfuzz>=3.10      # fuzzy name/company matching for dedup
 python-slugify>=8.0
