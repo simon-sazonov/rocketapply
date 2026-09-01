@@ -273,6 +273,14 @@ class Result:
     chosen: Candidate | None = None
     alternatives: list[Candidate] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    searches_run: int = 0
+    searches_empty: int = 0
+    searches_failed: int = 0
+
+    @property
+    def search_worked(self) -> bool:
+        """Did any query this company ran come back with anything at all?"""
+        return self.searches_run > self.searches_empty and not self.searches_failed
 
     @property
     def changed(self) -> bool:
@@ -468,7 +476,14 @@ def resolve(repos, searcher, company: dict, *, check_mx: bool = True) -> Result:
             hits = searcher.search(query, max_results=12)
         except Exception as exc:  # noqa: BLE001 - one dead query is not fatal
             result.warnings.append(f"search failed: {str(exc)[:80]}")
+            result.searches_failed += 1
             continue
+        result.searches_run += 1
+        if not hits:
+            # A live engine returning nothing for a quoted company name is
+            # unusual; a *suspended* one returns nothing every time. Counted so
+            # the caller can tell the difference across several companies.
+            result.searches_empty += 1
         for rank, hit in enumerate(hits):
             domain = domain_from_url(hit.url)
             if not usable(domain):
@@ -622,6 +637,16 @@ def main(
         raise typer.Exit(1)
 
     results: list[Result] = []
+    aborted = False
+    #: Consecutive companies whose every search came back empty or failed.
+    #: An engine that dies mid-run does not announce it — it just answers
+    #: nothing, forever, while tenacity spends ~30 seconds retrying each query.
+    #: The first version of this script probed once at the start and then ran
+    #: for twenty minutes producing nothing, which is the worst possible
+    #: outcome: all of the cost, none of the answer, and no warning.
+    barren = 0
+    BARREN_LIMIT = 4
+
     with Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(), TextColumn("{task.completed}/{task.total}"), TimeRemainingColumn(),
@@ -630,8 +655,31 @@ def main(
         task = progress.add_task("resolving", total=len(todo))
         for company in todo:
             progress.update(task, description=f"resolving {company['name'][:28]}")
-            results.append(resolve(repos, searcher, company, check_mx=not no_mx))
+            item = resolve(repos, searcher, company, check_mx=not no_mx)
+            results.append(item)
             progress.advance(task)
+
+            barren = 0 if item.search_worked else barren + 1
+            if barren < BARREN_LIMIT:
+                continue
+
+            # Confirm it is the engine rather than four odd companies in a row.
+            still_ok, _ = probe_engines(settings, healthy)
+            if still_ok:
+                barren = 0
+                continue
+            progress.stop()
+            console.print(
+                f"\n[yellow]Stopping after {len(results)} of {len(todo)}.[/] "
+                f"{', '.join(healthy)} stopped answering partway through — "
+                "suspended for making too many requests, which is what a long "
+                "pass does to an engine.\n"
+                "Whatever resolved before that is below and is worth applying; "
+                "re-run in 15–60 minutes for the rest, and the ones already "
+                "written are skipped."
+            )
+            aborted = True
+            break
 
     if plain:
         # Tab-separated and untruncated. A rich table wraps long domains into
@@ -675,6 +723,7 @@ def main(
     console.print(
         f"\n[green]{len(found)}[/] of {len(results)} resolved · "
         f"{sum(1 for r in found if r.warnings)} need a look"
+        + (f" · [yellow]{len(todo) - len(results)} not attempted[/]" if aborted else "")
     )
 
     if not apply:
