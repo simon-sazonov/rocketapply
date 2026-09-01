@@ -129,6 +129,14 @@ MAX_COMPANY_DOMAINS = 3
 #: right answer entirely.
 SIBLING_MARGIN = 2.5
 
+#: …but a sibling must still be *mostly* the company's name. Coverage alone is
+#: too easy to satisfy: "ART Grand Prix" reduces to the token `art` once the
+#: generic motorsport words are stripped, so `grandprixart.co.uk` — an art shop
+#: — covers 100% of it while being only 25% name. Being recorded as a second
+#: domain means addresses get generated at it, so the bar is higher than for
+#: merely appearing in the alternatives list.
+SIBLING_MIN_PRECISION = 0.45
+
 #: Never a company's staff-email domain, whatever else it is. A merchandise
 #: shop or a parts store is a separate property on a separate domain, and
 #: `toyotagazooracingb2bshop.com` matches the full team name perfectly while
@@ -573,7 +581,9 @@ def resolve(repos, searcher, company: dict, *, check_mx: bool = True) -> Result:
         # `--apply` records all of them.
         result.siblings = [
             c for c in ranked[1:MAX_COMPANY_DOMAINS]
-            if c.score >= ranked[0].score - SIBLING_MARGIN and c.coverage >= 0.5
+            if c.score >= ranked[0].score - SIBLING_MARGIN
+            and c.coverage >= 0.5
+            and c.precision >= SIBLING_MIN_PRECISION
         ]
         if result.chosen.retail:
             result.warnings.append("the winner looks like a retail site — check it")
