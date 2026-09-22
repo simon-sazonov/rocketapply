@@ -156,13 +156,17 @@ class JobSearch:
         if not sources:
             stats.notes.append("no job sources enabled — see the Sources tab of 🧭 Job Setup")
             return
-        companies = self.repos.companies.all(active_only=False)
-        by_name = {c["name"].casefold(): c for c in companies}
+        exact = self.networking_names()
 
         def link(source: Any, posting: Any) -> tuple[int | None, int | None]:
+            # The people-search list is matched on its CANONICAL name only.
+            # Its aliases are loose on purpose ("Genesis" for Genesis Magma
+            # Racing) because the LinkedIn sweep has negative keywords to
+            # disambiguate; an open job feed has none, and the first live run
+            # filed a Paris AI start-up's vacancy under a WEC team that way.
             company_id = getattr(source, "company_id", None)
             if company_id is None:
-                company_id = self.pipe._match_company(posting, by_name)
+                company_id = exact.get(normalize_company(posting.company_name))
             target_id = getattr(source, "target_company_id", None)
             if target_id is None:
                 hit = index.match(normalize_company(posting.company_name))
@@ -179,9 +183,49 @@ class JobSearch:
         stats.closed += run_stats.jobs_closed - before[3]
         stats.sources_failed += run_stats.job_sources_failed - before[4]
 
+    def networking_names(self) -> dict[str, int]:
+        """Normalised canonical name -> people-search company id. No aliases."""
+        out: dict[str, int] = {}
+        for company in self.repos.companies.all(active_only=False):
+            key = normalize_company(company["name"])
+            if key:
+                out.setdefault(key, int(company["id"]))
+        return out
+
+    def relink(self) -> int:
+        """Undo alias-based links on postings from the job search's sources.
+
+        Runs every time, so links made by an older rule heal themselves. The
+        Openings page's own sources are left alone: they link by alias on
+        purpose, and each of them is one company's own board anyway.
+        """
+        exact = self.networking_names()
+        rows = self.conn.execute(
+            """
+            SELECT j.id, j.company_id, j.posting_company FROM jobs j
+              JOIN job_sources s ON s.id = j.source_id
+             WHERE j.company_id IS NOT NULL AND s.company_id IS NULL
+               AND (s.kind IN ('job_board', 'aggregator_api')
+                    OR s.target_company_id IS NOT NULL)
+            """
+        ).fetchall()
+        fixed = 0
+        with self.repos.writing():
+            for row in rows:
+                right = exact.get(normalize_company(row["posting_company"]))
+                if right != row["company_id"]:
+                    self.conn.execute("UPDATE jobs SET company_id = ? WHERE id = ?",
+                                      (right, row["id"]))
+                    fixed += 1
+        return fixed
+
     # ── stage 2-3: normalise, dedupe ──
 
     def normalize(self, index: TargetIndex, stats: JobSearchStats, *, force: bool = False) -> None:
+        relinked = self.relink()
+        if relinked:
+            stats.notes.append(f"{relinked} posting(s) unlinked from a people-search company "
+                               "they only shared a nickname with")
         vocab = vocabulary()
         rows = rows_to_normalize(self.conn, force=force)
         self.pipe.progress("normalize", f"{len(rows)} posting(s) to read", 0, len(rows))

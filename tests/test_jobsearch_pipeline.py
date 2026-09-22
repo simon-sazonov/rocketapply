@@ -501,3 +501,31 @@ def test_new_since_last_run_counts_only_what_the_latest_run_found(search):
     search.conn.execute("UPDATE runs SET started_at = datetime('now', '-1 day')")
     search.run(sources=[source])
     assert load_inbox(search.conn).counts()["new_since_last_run"] == 0
+
+
+def test_a_people_search_nickname_does_not_claim_an_open_market_posting(search, write_inputs):
+    """"Genesis" is an alias of Genesis Magma Racing for the LinkedIn sweep. A
+    Paris start-up called Genesis posting on Arbeitnow is not that team."""
+    from pitwall.export import openings_frame
+    from pitwall.inputs import load_and_sync
+    from pitwall.models import Company, Role
+
+    write_inputs(
+        [Company(name="Genesis Magma Racing", aliases="Genesis|Hyundai Motorsport", tier=1),
+         Company(name="Apex Racing", tier=1)],
+        [Role(title="Data Scientist", family="data_science")],
+    )
+    load_and_sync(search.conn)
+    postings = [
+        JobPosting(title="Simulation Engineer", url="https://a.test/1", company_name="Genesis",
+                   location="Paris", description="Physics simulation."),
+        JobPosting(title="Data Scientist", url="https://a.test/2", company_name="Apex Racing",
+                   location="Munich", description="Python."),
+    ]
+    search.run(sources=[Stub("arbeitnow", "job_board", postings)])
+    links = {r["title"]: r["company_id"] for r in search.conn.execute(
+        "SELECT title, company_id FROM jobs")}
+    assert links["Simulation Engineer"] is None, "an alias is not enough"
+    assert links["Data Scientist"] is not None, "the canonical name is"
+    titles = [r["title"] for r in openings_frame(search.conn)]
+    assert titles == ["Data Scientist"], "Openings shows only the linked one"

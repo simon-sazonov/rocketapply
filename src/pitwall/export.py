@@ -527,6 +527,13 @@ def openings_frame(
               LEFT JOIN companies c   ON c.id = j.company_id
               LEFT JOIN job_sources s ON s.id = j.source_id
              WHERE j.status = 'open'
+               -- The job search's own sources (open job feeds, target-company
+               -- boards) bring thousands of postings from employers you have
+               -- no people at. They belong on 🎯 Job Search; here they appear
+               -- only when linked to a company on the people-search list.
+               AND (j.company_id IS NOT NULL OR (
+                    COALESCE(s.kind, '') NOT IN ('job_board', 'aggregator_api')
+                    AND s.target_company_id IS NULL))
              ORDER BY COALESCE(j.posted_at, j.first_seen_at) DESC
             """
         )
