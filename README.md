@@ -299,10 +299,57 @@ is why it is a CSV column and not code.
 | **👤 Leads** | the table you live in: filter, sort, select a person, read the evidence, act |
 | **📋 Pipeline** | kanban by CRM status, with overdue follow-ups pinned in red |
 | **📊 Analytics** | coverage heatmap, score distribution, funnels, quota burn-down |
+| **🎯 Job Search** | the daily job inbox — new matches, filtered-out jobs with their reasons, save / dismiss / mark applied |
+| **📨 Applications** | the application tracker: status, dates, next actions, history |
+| **🧭 Job Setup** | your job-search profile, skills, target companies, and source health |
 
 On the Leads page, selecting a row shows **why this score**: the heuristic reasons,
 the LLM reasons, the red flags, and every search result that surfaced the person
 with its raw title and snippet. When a score looks wrong you can see exactly why.
+
+---
+
+## The job search
+
+The second half of the app, built to `job_search_assistant_engineering_spec.md`:
+a personal job search for entry-level ML / data / AI roles that collects,
+filters, ranks and explains, then tracks the applications. It shares the
+database with the people search and leaves the people search alone —
+its employers live in their own list.
+
+```
+sources ─► normalise ─► dedupe ─► hard filters ─► score + reasons ─► inbox ─► tracker
+```
+
+| where | what |
+|---|---|
+| `config/job_search.yaml` | your profile: countries, roles, experience limit, work authorisation, weights. **Personal, gitignored**; `job_search.example.yaml` loads until it exists. Edit it on 🧭 Job Setup. |
+| `config/my_skills.yaml` | your skills, proficiency and evidence. Personal, gitignored. |
+| `config/skills_vocab.yaml` | the skill vocabulary both sides are mapped onto (`sklearn` = `scikit-learn`). |
+| `config/target_companies.csv` | employers to watch, priority A/B/C, and their public ATS board |
+
+**Sources.** Every target company's public ATS board (Greenhouse, Lever, Ashby,
+Workable, SmartRecruiters, Recruitee — `make job-targets-ats` finds them and
+*verifies* each one names the company before adopting it), the keyless
+Arbeitnow feed, and Adzuna's search API if you add `ADZUNA_APP_ID` and
+`ADZUNA_APP_KEY` to `.env` (free). No LinkedIn, no scraping behind logins.
+
+**Rules the whole thing keeps.** An unknown never rejects a job — only what a
+posting *states* can: "3+ years required", "we cannot sponsor", "PhD required".
+Rejected jobs stay visible under *Filtered out* with their reason. Every score
+comes with its `+` reasons, `?` uncertainties and `-` concerns. Visa status is
+always quoted from the posting, never inferred and presented as fact. The same
+vacancy from several sources is one card, and the employer's own board is the
+Apply link.
+
+```bash
+make job-search        # poll, filter, rank — prints the new matches
+make job-rerank        # after editing your profile: re-rank, no network
+make job-targets-ats   # find (and verify) ATS boards for target companies
+```
+
+To run it every morning at 07:00, see `scripts/launchd/com.pitwall.jobsearch.plist`
+— a template, not installed for you.
 
 ---
 

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The daily job search at 07:00 — §75 of job_search_assistant_engineering_spec.md.
+
+  A TEMPLATE. Nothing installs it; that is your decision. To use it:
+
+    1. Check the two paths below point at this checkout (they do if you have
+       not moved it).
+    2. cp scripts/launchd/com.pitwall.jobsearch.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.pitwall.jobsearch.plist
+
+  To stop it: launchctl unload ~/Library/LaunchAgents/com.pitwall.jobsearch.plist
+  A Mac that is asleep at 07:00 runs the job when it wakes. Output goes to
+  data/job-search.log; the 🎯 Job Search page shows the run either way.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pitwall.jobsearch</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/Simon/Documents/Projects/People search/networking_lead_finder</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/Simon/Documents/Projects/People search/networking_lead_finder/.venv/bin/python</string>
+        <string>scripts/run_pipeline.py</string>
+        <string>job-search</string>
+        <string>--top</string>
+        <string>0</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/Simon/Documents/Projects/People search/networking_lead_finder/data/job-search.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/Simon/Documents/Projects/People search/networking_lead_finder/data/job-search.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
