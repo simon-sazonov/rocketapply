@@ -348,3 +348,32 @@ def pipeline(settings, repos, monkeypatch, company, role):
     pipe = Pipeline(settings, repos)
     pipe.stub = provider
     return pipe
+
+
+# ─────────────────────────── the app under AppTest ───────────────────────
+#
+# Shared, because more than one module now runs a page for real: the fixture is
+# what keeps those runs off the owner's own database, and a second copy of it
+# is a second chance to get that wrong.
+
+@pytest.fixture()
+def app_root(project, monkeypatch, tmp_path):
+    """Point the app at a throwaway project root, never the owner's database."""
+    import streamlit as st
+
+    from pitwall.config import reload_settings
+    from pitwall.db import close_all
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "ui.db"))
+    monkeypatch.setenv("CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("HUNTER_API_KEY", "")
+    monkeypatch.setenv("GITHUB_TOKEN", "")
+    st.cache_resource.clear()
+    st.cache_data.clear()
+    close_all()
+    reload_settings()
+    yield tmp_path
+    st.cache_resource.clear()
+    st.cache_data.clear()
+    close_all()
+    reload_settings()

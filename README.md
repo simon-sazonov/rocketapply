@@ -295,7 +295,7 @@ is why it is a CSV column and not code.
 |---|---|
 | **🏁 Home** | headline metrics, the last run, follow-ups due, top unreviewed leads |
 | **⚙️ Setup** | edit both CSVs in a grid, validation report, provider/quota status, backup & reset |
-| **🔎 Run Search** | pick companies/roles/templates, **see the cost before you commit**, run in the background with live progress |
+| **🔎 Run Search** | pick companies/roles/templates, **see the cost before you commit**, run in the background with live progress, and **resume the AI analysis** for anyone a stopped run or a triage budget never read |
 | **👤 Leads** | the table you live in: filter, sort, select a person, read the evidence, act |
 | **📋 Pipeline** | kanban by CRM status, with overdue follow-ups pinned in red |
 | **📊 Analytics** | coverage heatmap, score distribution, funnels, quota burn-down |

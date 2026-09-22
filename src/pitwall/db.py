@@ -961,8 +961,38 @@ class ScoreRepo:
             )
         ]
 
-    def awaiting_llm(self, prompt_version: str, limit: int | None = None) -> list[dict[str, Any]]:
-        sql = """
+    #: The three states that mean "no AI has read this person yet": a run that
+    #: never reached them, a budget that passed over them (§1.2), and an answer
+    #: that came back unreadable. All three are still candidates.
+    AWAITING_LLM = ("pending_llm", "needs_review", "skipped_triage")
+
+    @staticmethod
+    def _candidate_filter(candidate_ids: Sequence[int] | None) -> tuple[str, list[Any]]:
+        """An optional `AND s.candidate_id IN (…)`, as SQL plus its parameters.
+
+        Through `json_each` rather than a placeholder per id: the People page
+        can hand this a selection of many hundreds, and one JSON parameter has
+        no variable-count ceiling to trip over.
+        """
+        if candidate_ids is None:
+            return "", []
+        ids = [int(i) for i in candidate_ids]
+        return " AND s.candidate_id IN (SELECT value FROM json_each(?))", [json.dumps(ids)]
+
+    def awaiting_llm(
+        self,
+        prompt_version: str,
+        limit: int | None = None,
+        candidate_ids: Sequence[int] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Who the LLM stage would read next, best heuristic score first.
+
+        `candidate_ids` narrows it to a chosen few — what the People page's
+        "analyse these people" button runs on. An empty sequence means exactly
+        that: nobody was chosen, so nothing is returned (`None` means no filter).
+        """
+        where, args = self._candidate_filter(candidate_ids)
+        sql = f"""
             SELECT s.*, c.name AS company_name, r.title AS role_title
               FROM scores s
               LEFT JOIN companies c ON c.id = s.company_id
@@ -972,12 +1002,64 @@ class ScoreRepo:
                -- `skipped_triage` is included on purpose: a candidate the last
                -- run chose not to spend a verdict on is still a candidate. A
                -- lower bar, or a bigger budget, picks it up next time (§1.2).
-               AND s.verdict IN ('pending_llm','needs_review','skipped_triage')
+               AND s.verdict IN {self.AWAITING_LLM}
+               {where}
              ORDER BY s.heuristic_score DESC
         """
         if limit:
             sql += f" LIMIT {int(limit)}"
-        return [dict(r) for r in self.conn.execute(sql, (prompt_version,))]
+        return [dict(r) for r in self.conn.execute(sql, (prompt_version, *args))]
+
+    def awaiting_llm_counts(
+        self, prompt_version: str, candidate_ids: Sequence[int] | None = None
+    ) -> dict[str, int]:
+        """How many candidates `awaiting_llm` would return, split by verdict.
+
+        The same WHERE clause, counted rather than read, so the "resume the
+        analysis" controls can say how much work is left without pulling every
+        row into the browser process. The split matters: waiting for AI and
+        skipped to save budget are different facts (§1.2), and the keys here are
+        the verdicts the UI already has words for.
+        """
+        where, args = self._candidate_filter(candidate_ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT s.verdict, COUNT(*) AS n
+              FROM scores s
+             WHERE s.prompt_version = ?
+               AND s.llm_score IS NULL
+               AND s.verdict IN {self.AWAITING_LLM}
+               {where}
+             GROUP BY s.verdict
+            """,
+            (prompt_version, *args),
+        ).fetchall()
+        return {str(r["verdict"]): int(r["n"]) for r in rows}
+
+    def awaiting_llm_candidates(
+        self, prompt_version: str, candidate_ids: Sequence[int] | None = None
+    ) -> list[int]:
+        """The distinct people awaiting a verdict — one id each, best first.
+
+        `awaiting_llm` returns score ROWS, and one person can hold several (one
+        per company/role pair they were matched against). What the People page
+        counts and ticks is people, so it asks for them this way.
+        """
+        where, args = self._candidate_filter(candidate_ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT s.candidate_id, MAX(s.heuristic_score) AS best
+              FROM scores s
+             WHERE s.prompt_version = ?
+               AND s.llm_score IS NULL
+               AND s.verdict IN {self.AWAITING_LLM}
+               {where}
+             GROUP BY s.candidate_id
+             ORDER BY best DESC
+            """,
+            (prompt_version, *args),
+        ).fetchall()
+        return [int(r["candidate_id"]) for r in rows]
 
     def mark_triaged(self, ids: Sequence[int]) -> int:
         """Mark score rows as deliberately not sent to the LLM (§1.2)."""
@@ -1064,24 +1146,62 @@ class RunRepo:
         )
         return run_id
 
-    def reset_stale(self, before_id: int | None = None) -> int:
+    #: How long a `running` row may go without a progress heartbeat before it is
+    #: assumed to belong to a process that is gone. Generously above the longest
+    #: gap a live run can leave: an LLM stage waiting out a rate limit reports
+    #: every 90 seconds at the very worst.
+    STALE_AFTER_MINUTES = 30.0
+
+    def reset_stale(self, idle_minutes: float | None = None, keep: int | None = None) -> int:
         """Close run rows left at `running` by a process that never came back.
 
         A crash, a `kill`, or a laptop lid: SIGTERM does not raise in Python, so
         `tracked()`'s `finally` never runs and the row stays open for ever. The
         next run sweeps them, so history shows `interrupted` rather than a
         handful of jobs that look like they are still going.
+
+        Staleness is measured by the progress heartbeat, never by "an older row
+        exists". Two runs can legitimately overlap — the app can start one while
+        the CLI is mid-sweep — and closing the older one because a newer one
+        began marked a *live* run as interrupted, which is how a run that was
+        still scoring people appeared to have died.
         """
-        sql = (
-            "UPDATE runs SET status = 'interrupted', finished_at = datetime('now'),"
-            " error = COALESCE(error, 'process ended without closing this run')"
-            " WHERE status = 'running'"
-        )
-        args: tuple[Any, ...] = ()
-        if before_id is not None:
-            sql += " AND id < ?"
-            args = (before_id,)
+        idle = self.STALE_AFTER_MINUTES if idle_minutes is None else float(idle_minutes)
+        sql = """
+            UPDATE runs SET status = 'interrupted', finished_at = datetime('now'),
+                   error = COALESCE(error, 'process ended without closing this run')
+             WHERE status = 'running'
+               AND COALESCE(
+                     (SELECT p.updated_at FROM run_progress p WHERE p.run_id = runs.id),
+                     started_at
+                   ) < datetime('now', ?)
+        """
+        args: list[Any] = [f"-{idle:g} minutes"]
+        if keep is not None:
+            sql += " AND id <> ?"
+            args.append(int(keep))
         return self.conn.execute(sql, args).rowcount or 0
+
+    def active(self, idle_minutes: float = 2.0) -> dict[str, Any] | None:
+        """The run that is going on right now, if there is one.
+
+        "Running, and it said something recently." The heartbeat is what makes
+        this safe to act on: a row abandoned by a killed process stops updating
+        and stops counting as active, so one crash cannot lock the button that
+        starts the next run for ever.
+        """
+        row = self.conn.execute(
+            """
+            SELECT r.*, p.stage, p.message, p.current, p.total, p.updated_at AS heartbeat
+              FROM runs r
+              LEFT JOIN run_progress p ON p.run_id = r.id
+             WHERE r.status = 'running'
+               AND COALESCE(p.updated_at, r.started_at) >= datetime('now', ?)
+             ORDER BY r.id DESC LIMIT 1
+            """,
+            (f"-{float(idle_minutes):g} minutes",),
+        ).fetchone()
+        return dict(row) if row else None
 
     def bump(self, run_id: int, **counters: int | float) -> None:
         if not counters:

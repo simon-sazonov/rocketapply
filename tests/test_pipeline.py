@@ -339,9 +339,19 @@ def test_the_full_run_is_still_labelled_run(pipeline, repos):
 
 def test_a_run_left_open_by_a_killed_process_is_closed_by_the_next_one(pipeline, repos):
     """SIGTERM does not raise in Python, so `finally` never runs and the row
-    would stay `running` for ever."""
+    would stay `running` for ever.
+
+    "Killed" is now proved by a heartbeat that stopped, not by a newer run
+    existing: a second run starting is not evidence that the first one died,
+    and treating it as such marked live runs interrupted while they worked.
+    """
     orphan = repos.runs.start({}, "score")
     assert repos.runs.get(orphan)["status"] == "running"
+    repos.conn.execute(
+        "UPDATE run_progress SET updated_at = datetime('now', '-45 minutes')"
+        " WHERE run_id = ?",
+        (orphan,),
+    )
 
     stats = RunStats()
     with pipeline.tracked(_params(), stats, "search"):

@@ -158,6 +158,13 @@ class RunParams:
     concurrency: int | None = None
     triage_min_heuristic: float | None = None
     triage_top_n: int | None = None
+    #: Send every waiting candidate, whatever the configured triage gates say.
+    #: What "finish the analysis" means: the budget that skipped them last time
+    #: is not a reason to skip them again on a run asked for on purpose.
+    ignore_triage: bool = False
+    #: Read only these people. The People page's ticked rows arrive here, so a
+    #: run can be exactly the handful somebody chose. `None` = everyone waiting.
+    candidate_ids: list[int] | None = None
     #: Which job-source kinds to poll; None = the configured set.
     job_kinds: list[str] | None = None
 
@@ -754,7 +761,9 @@ class Pipeline:
 
         cap = self.settings.daily_llm_request_cap
 
-        pending = self.repos.scores.awaiting_llm(prompt_version, limit=params.limit)
+        pending = self.repos.scores.awaiting_llm(
+            prompt_version, limit=params.limit, candidate_ids=params.candidate_ids
+        )
         pending = self._triage(pending, params, stats)
         groups: dict[tuple[int | None, int | None], list[dict[str, Any]]] = {}
         for row in pending:
@@ -1000,7 +1009,8 @@ class Pipeline:
 
         Two independent gates, both off by default so the v1 behaviour is
         unchanged: a floor on the heuristic score, and a hard cap per run taking
-        the highest heuristic first.
+        the highest heuristic first. `params.ignore_triage` waives both, which
+        is what a run started to *finish* an earlier one wants.
 
         What is *not* done matters as much: the candidates below the bar keep
         their heuristic score and are marked `skipped_triage`, a state distinct
@@ -1008,6 +1018,8 @@ class Pipeline:
         not get that far" look identical otherwise, and `awaiting_llm` still
         returns them, so a later run with a lower bar picks them up.
         """
+        if params.ignore_triage:
+            return pending
         floor = (
             params.triage_min_heuristic
             if params.triage_min_heuristic is not None
@@ -1151,11 +1163,19 @@ class Pipeline:
             nxt.degraded_from = scorer.provider
             return nxt
 
-        stats.notes.append(
+        note = (
             f"every LLM provider in the chain failed ({str(exc)[:160]}); remaining "
             "candidates left as pending_llm — progress saved"
         )
-        self.progress("llm", "LLM chain exhausted — progress saved, nothing lost", 0, 0)
+        stats.notes.append(note)
+        # This message is what the app shows the owner when a run scores nobody,
+        # so it has to carry the reason rather than the fact. "Chain exhausted"
+        # told them only that something had not worked.
+        self.progress(
+            "llm",
+            f"no AI provider could be reached — {str(exc)[:200]}",
+            0, 0,
+        )
         return None
 
     def _finish_llm(self, scorer: LLMScorer, stats: RunStats) -> RunStats:
@@ -1362,8 +1382,11 @@ class Pipeline:
         `failed` row carrying the error, not a row stuck at `running`.
         """
         run_id = self.repos.runs.start(params.as_dict(), command)
-        # Anything still `running` now belongs to a process that is gone.
-        stale = self.repos.runs.reset_stale(before_id=run_id)
+        # Anything that has stopped reporting for half an hour belongs to a
+        # process that is gone. Deliberately NOT "every older running row": a
+        # concurrent run is a live run, and closing it here reported a working
+        # sweep as interrupted while it was still scoring people.
+        stale = self.repos.runs.reset_stale(keep=run_id)
         if stale:
             log.info("closed %d run row(s) left open by an interrupted process", stale)
         self._run_id = run_id
@@ -1399,6 +1422,21 @@ class Pipeline:
             )
         finally:
             self._run_id = None
+
+    def resume_llm(self, params: RunParams | None = None) -> RunStats:
+        """Stage 5 on its own, over whoever an earlier run never reached.
+
+        No searching, no extraction, no re-scoring: `awaiting_llm` already knows
+        who is outstanding — the candidates left `pending_llm` when a run was
+        stopped, the ones `skipped_triage` passed over to save budget, and the
+        ones whose answer came back unreadable. It gets its own `runs` row so
+        the cost lands in Analytics like any other run.
+        """
+        params = params or RunParams()
+        stats = RunStats()
+        with self.tracked(params, stats, "resume-llm"):
+            self.score_llm(params, stats)
+        return stats
 
     def run(self, params: RunParams | None = None) -> RunStats:
         params = params or RunParams()

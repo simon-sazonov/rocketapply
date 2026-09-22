@@ -1,50 +1,50 @@
 name,aliases,negative_keywords,linkedin_slug,domain,series,country,tier,active
-Genesis Magma Racing,Genesis|Hyundai Motorsport,dealership|Genesis Motor sales|Hyundai retail,,,WEC/IMSA,Multi-site,1,true
-Toyota Gazoo Racing,TGR-E|Toyota Gazoo Racing Europe,dealership|Toyota Motor Sales|Toyota Financial,,,WEC,Germany,1,true
-Alpine Endurance Team,Alpine Racing|Signatech,Alpine Electronics|Alpine audio|alpine skiing|Alpine Bank,,,WEC,France,1,true
-BMW M Motorsport,BMW Group|BMW M Team WRT,dealership|BMW sales|BMW Financial,,,WEC/GT,Germany,1,true
-Ferrari - Attivita Sportive GT,Ferrari Competizioni GT,dealership|Ferrari North America sales|showroom,,,WEC/GT,Italy,1,true
-JOTA,Cadillac Hertz Team JOTA|JOTA Sport,Cadillac dealership|GM sales|General Motors retail,,,WEC,United Kingdom,1,true
-Peugeot TotalEnergies,Peugeot Sport,dealership|Peugeot retail,,,WEC,France,1,true
+Genesis Magma Racing,Genesis|Hyundai Motorsport,dealership|Genesis Motor sales|Hyundai retail,,genesis.com,WEC/IMSA,Multi-site,1,true
+Toyota Gazoo Racing,TGR-E|Toyota Gazoo Racing Europe,dealership|Toyota Motor Sales|Toyota Financial,,toyota-racing.com,WEC,Germany,1,true
+Alpine Endurance Team,Alpine Racing|Signatech,Alpine Electronics|Alpine audio|alpine skiing|Alpine Bank,,alpinecars.com,WEC,France,1,true
+BMW M Motorsport,BMW Group|BMW M Team WRT,dealership|BMW sales|BMW Financial,,bmw.co.uk,WEC/GT,Germany,1,true
+Ferrari - Attivita Sportive GT,Ferrari Competizioni GT,dealership|Ferrari North America sales|showroom,,ferrari.com,WEC/GT,Italy,1,true
+JOTA,Cadillac Hertz Team JOTA|JOTA Sport,Cadillac dealership|GM sales|General Motors retail,,jotasport.com,WEC,United Kingdom,1,true
+Peugeot TotalEnergies,Peugeot Sport,dealership|Peugeot retail,,peugeot-sport.com,WEC,France,1,true
 AF Corse,Ferrari AF Corse|Vista AF Corse,dealership|Ferrari North America sales|showroom|Corse coffee,,,WEC/GT,Italy,1,true
-Akkodis ASP Team,ASP Team,dealership|Lexus sales|Akkodis staffing|Akkodis recruitment consultant,,,WEC/GT,France,1,true
-Heart of Racing Team,Aston Martin THOR Team|THOR,Aston Martin Lagonda road cars|dealership|showroom,,,WEC/IMSA/GT,USA / United Kingdom,1,true
-Manthey,Manthey Racing|Manthey EMA,dealership|Porsche Cars sales|road car sales|Manthey heating|Manthey construction,,,WEC/GT/NLS,Germany,1,true
-TF Sport,Racing Team Turkey by TF,Chevrolet dealership|GM sales,,,WEC/ELMS/GT,United Kingdom,1,true
-Team WRT,BMW M Team WRT|W Racing Team,dealership|BMW sales|BMW Financial|WRT radio|WRT construction,,,WEC/GT,Belgium,1,true
-ART Grand Prix,,,,,F2/F3/F1A,France,1,true
-Hitech TGR,Hitech Grand Prix|Hitech Pulse-Eight,Hitech Systems|Hi-Tech Solutions|Hitech recruitment,,,F2/F3,United Kingdom,1,true
+Akkodis ASP Team,ASP Team,dealership|Lexus sales|Akkodis staffing|Akkodis recruitment consultant,,akkodis-asp-team.com,WEC/GT,France,1,true
+Heart of Racing Team,Aston Martin THOR Team|THOR,Aston Martin Lagonda road cars|dealership|showroom,,theheartofracing.org,WEC/IMSA/GT,USA / United Kingdom,1,true
+Manthey,Manthey Racing|Manthey EMA,dealership|Porsche Cars sales|road car sales|Manthey heating|Manthey construction,,manthey-racing.com,WEC/GT/NLS,Germany,1,true
+TF Sport,Racing Team Turkey by TF,Chevrolet dealership|GM sales,,tfsport.co.uk,WEC/ELMS/GT,United Kingdom,1,true
+Team WRT,BMW M Team WRT|W Racing Team,dealership|BMW sales|BMW Financial|WRT radio|WRT construction,,w-racingteam.com,WEC/GT,Belgium,1,true
+ART Grand Prix,,,,art-grandprix.com,F2/F3/F1A,France,1,true
+Hitech TGR,Hitech Grand Prix|Hitech Pulse-Eight,Hitech Systems|Hi-Tech Solutions|Hitech recruitment,,hitechgp.co.uk,F2/F3,United Kingdom,1,true
 PREMA Racing,PREMA Powerteam,,,,F2/F3,Italy,1,true
-Rodin Motorsport,Rodin Carlin|Carlin,Rodin sculpture|Rodin museum,,,F2/F3/F1A,United Kingdom,1,true
-Comtoyou Racing,,Aston Martin Lagonda road cars|dealership|showroom|Comtoyou trading,,,WEC/GT,Belgium,2,true
+Rodin Motorsport,Rodin Carlin|Carlin,Rodin sculpture|Rodin museum,,rodin-cars.com,F2/F3/F1A,United Kingdom,1,true
+Comtoyou Racing,,Aston Martin Lagonda road cars|dealership|showroom|Comtoyou trading,,comtoyouracing.com,WEC/GT,Belgium,2,true
 Emil Frey Racing,,dealership|Ferrari North America sales|showroom|Emil Frey dealership|Emil Frey retail,,,GT/DTM,Switzerland,2,true
 Garage 59,,McLaren Health Care|McLaren Automotive|hospital|Macomb,,,WEC/GT,United Kingdom,2,true
 GetSpeed,GetSpeed Performance,dealership|Mercedes-Benz Cars|van sales,,,ELMS/GT/NLS,Germany,2,true
 HRT Ford Racing,Haupt Racing Team|HRT,Ford dealership|Ford Credit|Ford Motor Credit|Haupt pharmacy,,,WEC/GT/NLS,Germany,2,true
-Iron Lynx,,dealership|Mercedes-Benz Cars|van sales|Lynx software|Lynx cargo,,,WEC/GT,Italy,2,true
-Proton Competition,,dealership|Porsche Cars sales|road car sales|Ford dealership|Ford Credit|Ford Motor Credit,,,WEC/ELMS/GT,Germany,2,true
-ROWE Racing,Rowe Racing,dealership|BMW sales|BMW Financial,,,IMSA/GT/NLS,Germany,2,true
-Rutronik Racing,,dealership|Porsche Cars sales|road car sales,,,GT/DTM,Germany,2,true
-Winward Racing,,dealership|Mercedes-Benz Cars|van sales|Winward capital|Windward maritime,,,IMSA/GT,Germany / USA,2,true
-AIX Racing,PHM Racing,,,,F2/F3,Germany,2,true
-Campos Racing,,Campos coffee,,,F2/F3,Spain,2,true
+Iron Lynx,,dealership|Mercedes-Benz Cars|van sales|Lynx software|Lynx cargo,,ironlynx.com,WEC/GT,Italy,2,true
+Proton Competition,,dealership|Porsche Cars sales|road car sales|Ford dealership|Ford Credit|Ford Motor Credit,,proton-competition.com,WEC/ELMS/GT,Germany,2,true
+ROWE Racing,Rowe Racing,dealership|BMW sales|BMW Financial,,rowe-racing.com,IMSA/GT/NLS,Germany,2,true
+Rutronik Racing,,dealership|Porsche Cars sales|road car sales,,rutronikracing.com,GT/DTM,Germany,2,true
+Winward Racing,,dealership|Mercedes-Benz Cars|van sales|Winward capital|Windward maritime,,winwardracingusa.com,IMSA/GT,Germany / USA,2,true
+AIX Racing,PHM Racing,,,aixracing.com,F2/F3,Germany,2,true
+Campos Racing,,Campos coffee,,camposracing.com,F2/F3,Spain,2,true
 DAMS Lucas Oil,DAMS,,,,F2/F3,France,2,true
-Invicta Racing,Virtuosi Racing|Invicta Virtuosi Racing,Invicta watches retail,,,F2,United Kingdom,2,true
-MP Motorsport,,MP materials|MP Biomedicals,,,F2/F3,Netherlands,2,true
-Trident,Trident Motorsport,Trident submarine|Trident seafoods|Trident systems,,,F2/F3,Italy,2,true
-Van Amersfoort Racing,VAR,,,,F2/F3/FRegional,Netherlands,2,true
-2Seas Motorsport,,dealership|Mercedes-Benz Cars|van sales,,,GT,United Kingdom,2,true
-Century Motorsport,,dealership|BMW sales|BMW Financial,,,GT,United Kingdom,2,true
-Herberth Motorsport,,dealership|Porsche Cars sales|road car sales|Herberth construction,,,GT/NLS,Germany,2,true
-Optimum Motorsport,,McLaren Health Care|McLaren Automotive|hospital|Macomb|Optimum nutrition|Optimum health,,,GT,United Kingdom,2,true
-Saintéloc Racing,Sainteloc Racing,dealership|Audi sales|Audi Retail,,,GT,France,2,true
-Tresor Attempto Racing,Attempto Racing,dealership|Audi sales|Audi Retail|Lamborghini showroom|Attempto publishing|Attempto Verlag,,,GT,Germany / Italy,2,true
-Walkenhorst Motorsport,,dealership|BMW sales|BMW Financial,,,GT/NLS,Germany,2,true
+Invicta Racing,Virtuosi Racing|Invicta Virtuosi Racing,Invicta watches retail,,invictaracing.com,F2,United Kingdom,2,true
+MP Motorsport,,MP materials|MP Biomedicals,,mpmotorsport.com,F2/F3,Netherlands,2,true
+Trident,Trident Motorsport,Trident submarine|Trident seafoods|Trident systems,,tridentmotorsport.com,F2/F3,Italy,2,true
+Van Amersfoort Racing,VAR,,,vanamersfoortracing.nl,F2/F3/FRegional,Netherlands,2,true
+2Seas Motorsport,,dealership|Mercedes-Benz Cars|van sales,,2seasmotorsport.co.uk,GT,United Kingdom,2,true
+Century Motorsport,,dealership|BMW sales|BMW Financial,,centurymotorsport.com,GT,United Kingdom,2,true
+Herberth Motorsport,,dealership|Porsche Cars sales|road car sales|Herberth construction,,herberth-motorsport.de,GT/NLS,Germany,2,true
+Optimum Motorsport,,McLaren Health Care|McLaren Automotive|hospital|Macomb|Optimum nutrition|Optimum health,,optimum-motorsport.com,GT,United Kingdom,2,true
+Saintéloc Racing,Sainteloc Racing,dealership|Audi sales|Audi Retail,,sainteloc.com,GT,France,2,true
+Tresor Attempto Racing,Attempto Racing,dealership|Audi sales|Audi Retail|Lamborghini showroom|Attempto publishing|Attempto Verlag,,attemptoracing.de,GT,Germany / Italy,2,true
+Walkenhorst Motorsport,,dealership|BMW sales|BMW Financial,,walkenhorst-motorsport.de,GT/NLS,Germany,2,true
 75 Express,,dealership|Mercedes-Benz Cars|van sales,,,GT,USA / Australia,3,true
-Boutsen VDS,Boutsen Ginion,dealership|Mercedes-Benz Cars|van sales|Aston Martin Lagonda road cars|showroom,,,GT,Belgium / Monaco,3,true
+Boutsen VDS,Boutsen Ginion,dealership|Mercedes-Benz Cars|van sales|Aston Martin Lagonda road cars|showroom,,boutsenracing.com,GT,Belgium / Monaco,3,true
 Car Collection Motorsport,,dealership|Audi sales|Audi Retail,,,GT,Germany,3,true
 Dinamic GT,Dinamic Motorsport,dealership|Porsche Cars sales|road car sales,,,GT,Italy,3,true
-Kessel Racing,,dealership|Ferrari North America sales|showroom,,,ELMS/GT,Switzerland,3,true
+Kessel Racing,,dealership|Ferrari North America sales|showroom,,kessel.ch,ELMS/GT,Switzerland,3,true
 Pure Rxcing,,dealership|Porsche Cars sales|road car sales,,,ELMS/GT,Lithuania,3,true
 Schumacher CLRT,CLRT,dealership|Porsche Cars sales|road car sales,,,GT,France,3,true
 VSR,Vincenzo Sospiri Racing,dealership|Lamborghini showroom,,,GT,Italy,3,true
