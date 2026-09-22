@@ -339,20 +339,29 @@ def iso_date(value: Any) -> str | None:
 
 
 def strip_html(value: Any, limit: int = 8000) -> str | None:
-    """Descriptions arrive as HTML from most boards; the LLM wants text."""
+    """Descriptions arrive as HTML from most boards; the LLM wants text.
+
+    Greenhouse sends `content` entity-ENCODED — `&lt;p&gt;Join us&lt;/p&gt;` —
+    so it is decoded before the tags are stripped, not after. The other order
+    stripped nothing, then decoded the escaped tags into literal `<p>` text:
+    every Greenhouse description in the database carried its markup as words.
+    """
+    import html
     import re
 
     if not value:
         return None
-    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", str(value), flags=re.S | re.I)
-    text = re.sub(r"<br\s*/?>|</p>|</li>|</div>", "\n", text, flags=re.I)
+    text = str(value)
+    if "&lt;" in text or "&gt;" in text:
+        text = html.unescape(text)
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.S | re.I)
+    text = re.sub(r"<br\s*/?>|</p>|</li>|</div>|</h[1-6]>|</tr>|</ul>|</ol>", "\n", text,
+                  flags=re.I)
+    text = re.sub(r"<li[^>]*>", "\n• ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text)
-    text = (
-        text.replace("&nbsp;", " ").replace("&amp;", "&")
-        .replace("&lt;", "<").replace("&gt;", ">").replace("&#39;", "'")
-        .replace("&quot;", '"')
-    )
+    text = html.unescape(text).replace("\xa0", " ")
     text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" ?\n ?", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text[:limit] or None
 

@@ -25,7 +25,7 @@ from .locations import country_code, parse_location
 from .skills import Vocabulary
 
 #: Bump when a rule changes; every open posting is re-normalised on the next run.
-NORMALIZER_VERSION = "js1"
+NORMALIZER_VERSION = "js2"   # js2: qualitative seniority, decoded Greenhouse HTML
 
 # ───────────────────────────── canonical URL ─────────────────────────────
 

@@ -125,6 +125,22 @@ def test_a_graduate_title_with_a_silent_body_is_entry_level():
     assert exp.level == "entry" and exp.min_years is None
 
 
+@pytest.mark.parametrize("text", [
+    "Strong candidates will have a track record of solving large-scale systems problems.",
+    "You bring deep expertise in distributed training.",
+    "You will mentor junior engineers on the team.",
+    "Mehrjährige Berufserfahrung in Python.",
+])
+def test_seniority_without_a_number_scores_down_but_never_filters(text):
+    exp = experience.extract("Research Engineer", text)
+    assert exp.level == "mid" and exp.min_years is None and not exp.required
+
+
+def test_an_entry_title_outranks_body_seniority_language():
+    exp = experience.extract("Graduate Research Engineer", "A track record of shipping.")
+    assert exp.level == "entry"
+
+
 def test_member_of_technical_staff_is_not_a_staff_level_title():
     assert experience.title_level("Member of Technical Staff (Applied AI)") == "unknown"
     assert experience.title_level("Staff ML Engineer") == "senior"
@@ -294,3 +310,11 @@ def test_employment_types_come_from_the_source_and_the_title():
 def test_a_required_language_is_noticed():
     assert languages_required("Data Scientist", "Fluent German is required.", "en") == ["de"]
     assert languages_required("Data Scientist", "English only.", "en") == []
+
+
+def test_greenhouse_entity_encoded_html_comes_out_as_text():
+    from pitwall.sources.jobs.base import strip_html
+
+    text = strip_html("&lt;p&gt;Join us.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Python &amp;amp; SQL"
+                      "&lt;/li&gt;&lt;li&gt;3+ years&lt;/li&gt;&lt;/ul&gt;")
+    assert "<" not in text and "Python & SQL" in text and "3+ years" in text

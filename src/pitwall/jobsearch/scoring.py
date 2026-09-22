@@ -139,7 +139,7 @@ def experience_component(job: dict[str, Any], cfg: JobSearchConfig,
         minus.append("- Marked as a senior role by the source")
         return Component(0.25, "weak", "senior")
     minus.append("? Experience not stated")
-    return Component(0.6, "unknown", "not stated")
+    return Component(0.5, "unknown", "not stated")
 
 
 def skills_component(job: dict[str, Any], owned: dict[str, OwnedSkill], vocab: Vocabulary,

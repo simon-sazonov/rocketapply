@@ -189,7 +189,7 @@ class Inbox:
     def counts(self) -> dict[str, int]:
         counts = {name: len(self.view(name)) for name in VIEWS}
         counts["new_since_last_run"] = sum(
-            1 for c in self.view("matches") if self.since and c["first_seen"] > self.since
+            1 for c in self.view("matches") if self.since and c["first_seen"] >= self.since
         )
         return counts
 
@@ -215,16 +215,16 @@ def _in_view(c: dict[str, Any], name: str) -> bool:
 
 
 def previous_run_started(conn: sqlite3.Connection) -> str | None:
-    """When the last FINISHED job-search run began — "new since last run" (§41)."""
-    rows = conn.execute(
+    """When the latest finished job-search run began — "new since last run" (§41).
+
+    A vacancy first seen after that moment is one the latest run discovered.
+    Before any run has finished there is no "since", and nothing is counted.
+    """
+    row = conn.execute(
         "SELECT started_at FROM runs WHERE command = 'job-search' AND status = 'done'"
-        " ORDER BY id DESC LIMIT 2"
-    ).fetchall()
-    # The newest finished run is the one that just produced the inbox; "new"
-    # means new relative to the run BEFORE it.
-    if len(rows) >= 2:
-        return str(rows[1]["started_at"])
-    return None
+        " ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    return str(row["started_at"]) if row else None
 
 
 def load_inbox(conn: sqlite3.Connection) -> Inbox:

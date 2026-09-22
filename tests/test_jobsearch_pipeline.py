@@ -491,3 +491,13 @@ def test_a_board_is_only_adopted_with_evidence_it_is_the_companys(target, token,
     name, *aliases = target.split("|")
     verdict, why = verify_board(TargetCompany(name=name, aliases=aliases), token, postings)
     assert verdict is ok, why
+
+
+def test_new_since_last_run_counts_only_what_the_latest_run_found(search):
+    source = Stub("arbeitnow", "job_board", arbeitnow_postings())
+    search.run(sources=[source])
+    assert load_inbox(search.conn).counts()["new_since_last_run"] == 2
+    search.conn.execute("UPDATE jobs SET first_seen_at = datetime('now', '-1 day')")
+    search.conn.execute("UPDATE runs SET started_at = datetime('now', '-1 day')")
+    search.run(sources=[source])
+    assert load_inbox(search.conn).counts()["new_since_last_run"] == 0

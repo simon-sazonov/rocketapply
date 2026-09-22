@@ -64,12 +64,19 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(rf"experience of\s+{_NUM}\s*{_YEARS}\b", re.I), "exact"),
 )
 
-#: Qualitative requirements with no number (German postings especially).
+#: Requirements with no number that still say "not your first job". German
+#: postings rarely give years ("mehrjährige Berufserfahrung"), and frontier-lab
+#: postings often refuse to ("years of experience will correlate with the
+#: internal job level") while asking for a track record, deep expertise, or
+#: mentoring. Scored down as `mid`; never filtered — the filter needs a number.
 _QUALITATIVE_MID = re.compile(
     r"mehrjährige\w*\s+(?:berufs)?erfahrung|langjährige\w*\s+(?:berufs)?erfahrung|"
-    r"several years of|many years of|extensive experience|proven track record of \d|"
-    r"significant (?:industry |professional )?experience|solide berufserfahrung|"
-    r"plusieurs années d'expérience",
+    r"several years of|many years of|multiple years of|extensive experience|"
+    r"(?:strong |proven |demonstrated |established )?track record (?:of|in)\b|"
+    r"(?:significant|substantial|considerable|deep) (?:industry |professional |hands-on )?"
+    r"(?:experience|expertise)|solide berufserfahrung|plusieurs années d'expérience|"
+    r"mentor(?:ing|ed)? (?:junior|other|more junior|less experienced)|technical leadership|"
+    r"(?:you have|you've) led\b|experience leading (?:a |teams|projects|engineers)",
     re.I,
 )
 
