@@ -211,6 +211,8 @@ class ATSSource:
     """One company's board on one ATS."""
 
     kind = "ats_json"
+    #: A board lists every live posting, so absence really does mean closed.
+    complete_listing = True
 
     def __init__(
         self,

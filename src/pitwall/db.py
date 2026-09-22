@@ -17,11 +17,11 @@ from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from .config import Settings, get_settings
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 DDL = """
 PRAGMA journal_mode = WAL;
@@ -351,8 +351,175 @@ CREATE TABLE IF NOT EXISTS enrichment_log (
 CREATE INDEX IF NOT EXISTS ix_enrichment_log_candidate ON enrichment_log(candidate_id, id);
 CREATE INDEX IF NOT EXISTS ix_enrichment_log_created ON enrichment_log(created_at);
 
+-- ─────────────────────────── job search (v6) ───────────────────────────
+-- The personal job search, built to job_search_assistant_engineering_spec.md.
+-- It shares `jobs` and `job_sources` with the Openings page — one posting is
+-- one row whoever polled it — and adds only what is about the SEARCH: the
+-- owner's target employers, how each posting scored against their profile,
+-- what they decided about it, and the applications that followed.
+
+-- The job-search employer list, from config/target_companies.csv. Separate
+-- from `companies` on purpose: that table is what the people sweep searches,
+-- and adding a hundred job targets must not add a hundred LinkedIn sweeps.
+CREATE TABLE IF NOT EXISTS target_companies (
+    id                    INTEGER PRIMARY KEY,
+    name                  TEXT NOT NULL UNIQUE,
+    aliases               TEXT,            -- JSON array
+    country               TEXT,            -- ISO 3166 alpha-2 where known
+    cities                TEXT,            -- JSON array
+    industry              TEXT,
+    priority              TEXT DEFAULT 'B',   -- A|B|C — a search priority, not a rating
+    careers_url           TEXT,
+    ats_kind              TEXT,
+    ats_token             TEXT,
+    sponsorship           TEXT DEFAULT 'unknown',  -- yes|sometimes|no|unknown, the owner's note
+    visa_notes            TEXT,
+    tags                  TEXT,            -- JSON array
+    active                INTEGER DEFAULT 1,
+    -- The same organisation on the people-search list, when it is there, so a
+    -- posting can say "you know 3 people at this company".
+    networking_company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+    updated_at            TEXT DEFAULT (datetime('now'))
+);
+
+-- One row per posting: did it pass the hard filters, and how well does it fit?
+-- Recomputed on every run — deterministic and cheap — so a change to the
+-- profile re-ranks everything. `config_hash` says which profile produced it.
+CREATE TABLE IF NOT EXISTS job_matches (
+    job_id        INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    config_hash   TEXT,
+    passed        INTEGER NOT NULL DEFAULT 0,
+    filter_reasons TEXT,                  -- JSON [{code, message}]
+    score         REAL,
+    label         TEXT,                   -- strong|good|fair|weak
+    components    TEXT,                   -- JSON {name: {value, label, weight}}
+    reasons_plus  TEXT,                   -- JSON array: why it matched
+    reasons_minus TEXT,                   -- JSON array: concerns, "?"/"-" prefixed
+    matched_skills TEXT,                  -- JSON array
+    missing_skills TEXT,                  -- JSON array
+    visa_fit      TEXT,                   -- ok|explicit|likely|unknown|no
+    ai_score      REAL,
+    ai_reasons    TEXT,                   -- JSON array
+    ai_model      TEXT,
+    scored_at     TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_job_matches_passed ON job_matches(passed, score DESC);
+
+-- What the owner decided about a vacancy. Keyed by cluster — the vacancy, not
+-- one source's copy of it — so dismissing a job on Arbeitnow also dismisses
+-- the same job arriving from the company's ATS tomorrow.
+CREATE TABLE IF NOT EXISTS job_review (
+    cluster_id       INTEGER PRIMARY KEY,
+    seen_at          TEXT,
+    dismissed_at     TEXT,
+    dismissed_reason TEXT,
+    note             TEXT,
+    feedback         TEXT,                 -- good_match|bad_match (§91)
+    updated_at       TEXT DEFAULT (datetime('now'))
+);
+
+-- The application tracker (§37-38). `cluster_id` is NULL for an application
+-- entered by hand for a job the search never saw.
+CREATE TABLE IF NOT EXISTS applications (
+    id                   INTEGER PRIMARY KEY,
+    cluster_id           INTEGER,
+    job_id               INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    target_company_id    INTEGER REFERENCES target_companies(id) ON DELETE SET NULL,
+    company_name         TEXT NOT NULL,
+    company_norm         TEXT,
+    title                TEXT NOT NULL,
+    location             TEXT,
+    status               TEXT NOT NULL DEFAULT 'SHORTLISTED',
+    date_applied         TEXT,
+    cv_version           TEXT,
+    cover_letter_version TEXT,
+    application_url      TEXT,
+    contact_person       TEXT,
+    notes                TEXT,
+    salary               TEXT,
+    response_date        TEXT,
+    next_action          TEXT,
+    next_action_date     TEXT,
+    created_at           TEXT DEFAULT (datetime('now')),
+    updated_at           TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_applications_cluster ON applications(cluster_id);
+CREATE INDEX IF NOT EXISTS ix_applications_company ON applications(company_norm);
+
+-- Every status change, so "when did this go to INTERVIEW?" has an answer and
+-- the later response-rate analytics (§80) have something to count.
+CREATE TABLE IF NOT EXISTS application_events (
+    id             INTEGER PRIMARY KEY,
+    application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    from_status    TEXT,
+    to_status      TEXT NOT NULL,
+    note           TEXT,
+    at             TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_application_events_app ON application_events(application_id, id);
+
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 """
+
+#: v5 -> v6: what normalisation extracts from a posting, stored on the posting.
+#: Facts about the job, not about the owner — those live in `job_matches`.
+JOB_SEARCH_COLUMNS: tuple[tuple[str, str], ...] = (
+    # The employer as the posting names it. Not `company_name`: every query
+    # that joins `companies` already selects `c.name AS company_name`.
+    ("posting_company", "TEXT"),
+    ("target_company_id", "INTEGER"),
+    ("company_norm", "TEXT"),
+    ("title_norm", "TEXT"),
+    ("title_key", "TEXT"),
+    ("canonical_url", "TEXT"),
+    ("country", "TEXT"),
+    ("countries", "TEXT"),
+    ("city", "TEXT"),
+    ("cities", "TEXT"),
+    ("remote_status", "TEXT"),
+    ("remote_region", "TEXT"),
+    ("employment_types", "TEXT"),
+    ("experience_min", "REAL"),
+    ("experience_max", "REAL"),
+    ("experience_level", "TEXT"),
+    ("experience_required", "INTEGER"),
+    ("experience_confidence", "REAL"),
+    ("experience_evidence", "TEXT"),
+    ("education_required", "TEXT"),
+    ("education_preferred", "TEXT"),
+    ("salary_min", "REAL"),
+    ("salary_max", "REAL"),
+    ("salary_currency", "TEXT"),
+    ("salary_text", "TEXT"),
+    ("visa_status", "TEXT"),
+    ("visa_evidence", "TEXT"),
+    ("visa_scope", "TEXT"),       # ISO2 / EU: where a stated refusal applies
+    ("relocation", "INTEGER"),
+    ("role_labels", "TEXT"),
+    ("skills", "TEXT"),
+    ("description_truncated", "INTEGER DEFAULT 0"),
+    ("language", "TEXT"),
+    ("languages_required", "TEXT"),
+    ("content_hash", "TEXT"),
+    ("previous_description", "TEXT"),
+    ("content_changed_at", "TEXT"),
+    ("normalized_hash", "TEXT"),
+    ("normalizer_version", "TEXT"),
+    ("cluster_id", "INTEGER"),
+    ("possible_duplicate_of", "INTEGER"),
+)
+
+#: v5 -> v6: source health (§46).
+JOB_SOURCE_HEALTH_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("target_company_id", "INTEGER"),
+    ("last_success_at", "TEXT"),
+    ("last_failure_at", "TEXT"),
+    ("last_error", "TEXT"),
+    ("jobs_found", "INTEGER"),
+    ("jobs_new", "INTEGER"),
+    ("jobs_updated", "INTEGER"),
+    ("duration_ms", "INTEGER"),
+)
 
 _local = threading.local()
 
@@ -463,6 +630,9 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
       columns (§2.2).
     * v4 -> v5 added the four contact-enrichment tables and `quota.reset_at`
       (§6 of PITWALL_V3_EMAIL_ENRICHMENT.md).
+    * v5 -> v6 added the job search: `target_companies`, `job_matches`,
+      `job_review`, `applications`, `application_events`, the normalised
+      columns on `jobs` and the health columns on `job_sources`.
 
     `CREATE TABLE IF NOT EXISTS` covers a fresh database; an existing 2.0 MB file
     only ever needs the ALTERs, which is why each one is guarded rather than
@@ -481,6 +651,16 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     # on `quota` rather than a new table because §6 is explicit that credit
     # accounting reuses `quota` instead of growing a parallel counter.
     _add_column(conn, "quota", "reset_at", "TEXT")
+    # v5 -> v6: the job search. New tables are IF NOT EXISTS above; the columns
+    # on `jobs` and `job_sources` are added here, and so are their indexes —
+    # an index in DDL would run before the column exists on an old file.
+    for column, ddl in JOB_SEARCH_COLUMNS:
+        _add_column(conn, "jobs", column, ddl)
+    for column, ddl in JOB_SOURCE_HEALTH_COLUMNS:
+        _add_column(conn, "job_sources", column, ddl)
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_jobs_company_norm ON jobs(company_norm)")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_jobs_cluster ON jobs(cluster_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_jobs_canonical_url ON jobs(canonical_url)")
 
 
 def vacuum(conn: sqlite3.Connection) -> None:
@@ -1382,16 +1562,27 @@ class JobSourceRepo:
         self.conn = conn
 
     def upsert(self, name: str, kind: str, base_url: str | None = None,
-               company_id: int | None = None, enabled: bool = True) -> int:
+               company_id: int | None = None, enabled: bool = True,
+               target_company_id: int | None = None) -> int:
+        """Register a source. The company links only ever fill in.
+
+        One board can be polled by both the Openings run (which knows its
+        people-search company) and the job search (which knows its target
+        company). Each passes only the link it knows, so an unconditional
+        overwrite would have each run erase the other's.
+        """
         self.conn.execute(
             """
-            INSERT INTO job_sources (name, kind, base_url, company_id, enabled)
-            VALUES (?,?,?,?,?)
+            INSERT INTO job_sources (name, kind, base_url, company_id, enabled, target_company_id)
+            VALUES (?,?,?,?,?,?)
             ON CONFLICT(name) DO UPDATE SET
                 kind=excluded.kind, base_url=excluded.base_url,
-                company_id=excluded.company_id, enabled=excluded.enabled
+                company_id=COALESCE(excluded.company_id, job_sources.company_id),
+                target_company_id=COALESCE(excluded.target_company_id,
+                                           job_sources.target_company_id),
+                enabled=excluded.enabled
             """,
-            (name, kind, base_url, company_id, int(enabled)),
+            (name, kind, base_url, company_id, int(enabled), target_company_id),
         )
         row = self.conn.execute("SELECT id FROM job_sources WHERE name = ?", (name,)).fetchone()
         return int(row["id"])
@@ -1404,6 +1595,38 @@ class JobSourceRepo:
             (status[:200], source_id),
         )
 
+    def record_poll(self, source_id: int, *, ok: bool, error: str | None = None,
+                    found: int = 0, new: int = 0, updated: int = 0,
+                    duration_ms: int = 0) -> None:
+        """§46: enough to tell a healthy source from a silently dead one.
+
+        `last_status` keeps its v4 meaning ('ok' or the error) so the Openings
+        page reads it unchanged.
+        """
+        if ok:
+            self.conn.execute(
+                """
+                UPDATE job_sources
+                   SET last_polled_at = datetime('now'), last_status = 'ok',
+                       last_success_at = datetime('now'), last_error = NULL,
+                       jobs_found = ?, jobs_new = ?, jobs_updated = ?, duration_ms = ?
+                 WHERE id = ?
+                """,
+                (found, new, updated, duration_ms, source_id),
+            )
+        else:
+            message = (error or "failed")[:300]
+            self.conn.execute(
+                """
+                UPDATE job_sources
+                   SET last_polled_at = datetime('now'), last_status = ?,
+                       last_failure_at = datetime('now'), last_error = ?,
+                       jobs_found = 0, jobs_new = 0, jobs_updated = 0, duration_ms = ?
+                 WHERE id = ?
+                """,
+                (message[:200], message, duration_ms, source_id),
+            )
+
     def all(self, *, enabled_only: bool = False) -> list[dict[str, Any]]:
         sql = "SELECT * FROM job_sources"
         if enabled_only:
@@ -1415,48 +1638,106 @@ class JobSourceRepo:
         return dict(r) if r else None
 
 
+def content_hash(title: Any, description: Any, location: Any) -> str:
+    """What counts as "the posting changed" (§42): the words a person reads.
+
+    Whitespace is collapsed first, so a board re-rendering the same text with
+    different line breaks does not announce a change nobody could see.
+    """
+    import hashlib
+
+    text = " ".join(str(v or "") for v in (title, location, description))
+    return hashlib.sha1(" ".join(text.split()).encode("utf-8")).hexdigest()
+
+
+class JobUpsert(NamedTuple):
+    """What `JobRepo.upsert` did — indexable like the v4 `(job_id, is_new)`."""
+
+    job_id: int
+    is_new: bool
+    changed: bool = False
+
+
 class JobRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def upsert(self, source_id: int, job: Any, company_id: int | None = None) -> tuple[int, bool]:
-        """Insert or refresh one posting. Returns (job_id, is_new).
+    def upsert(self, source_id: int, job: Any, company_id: int | None = None,
+               target_company_id: int | None = None) -> JobUpsert:
+        """Insert or refresh one posting. Returns `(job_id, is_new, changed)`.
 
         `last_seen_at` is bumped on every sighting; that timestamp plus a status
         transition is how a closed posting is detected without deleting it.
+
+        `changed` is True when the text a person reads differs from last time
+        (§42). The previous description is kept — one generation, enough for
+        the UI to show what moved — and `content_changed_at` is stamped.
         """
         existing = self.conn.execute(
-            "SELECT id FROM jobs WHERE source_id = ? AND url = ?", (source_id, job.url)
+            "SELECT id, content_hash, description FROM jobs WHERE source_id = ? AND url = ?",
+            (source_id, job.url),
         ).fetchone()
-        payload = (
-            company_id, source_id, job.external_id, job.title, job.description,
-            job.location, job.employment_type, job.url, job.posted_at,
-            json.dumps(job.raw, ensure_ascii=False, default=str)[:40000],
+        digest = content_hash(job.title, job.description, job.location)
+        raw = json.dumps(job.raw, ensure_ascii=False, default=str)[:40000]
+        extra = (
+            getattr(job, "salary_min", None), getattr(job, "salary_max", None),
+            getattr(job, "salary_currency", None),
+            int(bool(getattr(job, "description_truncated", False))),
+            getattr(job, "company_name", None),
         )
         if existing is None:
             cur = self.conn.execute(
                 """
-                INSERT INTO jobs (company_id, source_id, external_id, title, description,
-                                  location, employment_type, url, posted_at, raw_json,
+                INSERT INTO jobs (company_id, target_company_id, source_id, external_id, title,
+                                  description, location, employment_type, url, posted_at,
+                                  raw_json, content_hash, salary_min, salary_max,
+                                  salary_currency, description_truncated, posting_company,
                                   status, first_seen_at, last_seen_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?, 'open', datetime('now'), datetime('now'))
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open', datetime('now'),
+                        datetime('now'))
                 """,
-                payload,
+                (company_id, target_company_id, source_id, job.external_id, job.title,
+                 job.description, job.location, job.employment_type, job.url, job.posted_at,
+                 raw, digest, *extra),
             )
-            return int(cur.lastrowid or 0), True
+            return JobUpsert(int(cur.lastrowid or 0), True, False)
+        # A row from before v6 has no hash; filling it in is not a change.
+        changed = bool(existing["content_hash"]) and existing["content_hash"] != digest
         self.conn.execute(
-            """
+            f"""
             UPDATE jobs
-               SET company_id = COALESCE(?, company_id), title = ?, description = ?,
+               SET company_id = COALESCE(?, company_id),
+                   target_company_id = COALESCE(?, target_company_id),
+                   title = ?, description = ?,
                    location = ?, employment_type = ?, posted_at = COALESCE(?, posted_at),
-                   raw_json = ?, status = 'open', last_seen_at = datetime('now')
+                   raw_json = ?, content_hash = ?,
+                   salary_min = COALESCE(?, salary_min), salary_max = COALESCE(?, salary_max),
+                   salary_currency = COALESCE(?, salary_currency), description_truncated = ?,
+                   posting_company = COALESCE(?, posting_company),
+                   status = 'open', last_seen_at = datetime('now')
+                   {", previous_description = ?, content_changed_at = datetime('now')"
+                    if changed else ""}
              WHERE id = ?
             """,
-            (company_id, job.title, job.description, job.location, job.employment_type,
-             job.posted_at, json.dumps(job.raw, ensure_ascii=False, default=str)[:40000],
-             existing["id"]),
+            (company_id, target_company_id, job.title, job.description, job.location,
+             job.employment_type, job.posted_at, raw, digest, *extra,
+             *((existing["description"],) if changed else ()), existing["id"]),
         )
-        return int(existing["id"]), False
+        return JobUpsert(int(existing["id"]), False, changed)
+
+    def close_stale(self, source_id: int, days: int) -> int:
+        """Close what a PARTIAL source has not shown for `days` (§43).
+
+        The counterpart of `close_missing` for searches, capped feeds and
+        sitemaps: one fetch cannot prove a posting gone, but a week of fetches
+        that never return it is a reasonable sign. Closed, never deleted.
+        """
+        cur = self.conn.execute(
+            "UPDATE jobs SET status = 'closed' WHERE source_id = ? AND status = 'open'"
+            " AND last_seen_at < datetime('now', ?)",
+            (source_id, f"-{int(days)} days"),
+        )
+        return cur.rowcount or 0
 
     def close_missing(self, source_id: int, seen_ids: Sequence[int]) -> int:
         """Mark postings this source stopped returning as `closed`.

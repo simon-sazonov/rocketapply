@@ -331,6 +331,10 @@ class Settings(BaseSettings):
     jobs_max_detail_fetches: int = Field(default=40, ge=0)
     #: Days a posting can go unseen before `status` becomes `closed`.
     jobs_close_after_days: int = Field(default=7, ge=1)
+    #: The job search's open-market source (developer.adzuna.com, free). Empty
+    #: = the source is skipped and Sources & health says why.
+    adzuna_app_id: str = ""
+    adzuna_app_key: str = ""
 
     # ── contact enrichment (PITWALL_V3_EMAIL_ENRICHMENT.md) ──
     #: Hunter is the ONLY paid step, it is never automatic, and it is never

@@ -1,0 +1,103 @@
+{
+ "data": [
+  {
+   "slug": "graduate-ml-engineer-munich-1001",
+   "company_name": "Apex Mobility GmbH",
+   "title": "Graduate Machine Learning Engineer (m/w/d)",
+   "description": "<p>Join our perception team in Munich.</p><ul><li>0-2 years of experience in machine learning</li><li>Python, PyTorch and SQL</li><li>Master's degree in a quantitative field</li></ul><p>We sponsor work visas for international hires.</p>",
+   "remote": false,
+   "url": "https://www.arbeitnow.com/jobs/companies/apex-mobility/graduate-ml-engineer-munich-1001",
+   "tags": [
+    "IT"
+   ],
+   "job_types": [
+    "Full Time",
+    "Entry"
+   ],
+   "location": "Munich",
+   "created_at": 1790000000
+  },
+  {
+   "slug": "senior-ml-engineer-berlin-1002",
+   "company_name": "Apex Mobility GmbH",
+   "title": "Senior ML Engineer",
+   "description": "<p>You bring 8+ years of experience building ML systems in production.</p>",
+   "remote": false,
+   "url": "https://www.arbeitnow.com/jobs/companies/apex-mobility/senior-ml-engineer-berlin-1002",
+   "tags": [],
+   "job_types": [
+    "Full Time",
+    "Experienced"
+   ],
+   "location": "Berlin",
+   "created_at": 1790000100
+  },
+  {
+   "slug": "junior-data-scientist-hamburg-1003",
+   "company_name": "Northwind Analytics",
+   "title": "Junior Data Scientist",
+   "description": "<p>You have 3+ years of professional experience in data science and statistics.</p>",
+   "remote": false,
+   "url": "https://www.arbeitnow.com/jobs/companies/northwind/junior-data-scientist-hamburg-1003",
+   "tags": [],
+   "job_types": [
+    "Full Time"
+   ],
+   "location": "Hamburg",
+   "created_at": 1790000200
+  },
+  {
+   "slug": "decision-intelligence-scientist-amsterdam-1004",
+   "company_name": "Tulip Logistics B.V.",
+   "title": "Decision Intelligence Scientist",
+   "description": "<p>Build optimisation and simulation models for routing. Python, Monte Carlo, operations research.</p>",
+   "remote": false,
+   "url": "https://www.arbeitnow.com/jobs/companies/tulip/decision-intelligence-scientist-1004",
+   "tags": [],
+   "job_types": [],
+   "location": "Amsterdam",
+   "created_at": 1790000300
+  },
+  {
+   "slug": "account-executive-ai-paris-1005",
+   "company_name": "Brightline AI",
+   "title": "AI Deployment Strategist",
+   "description": "<p>Drive adoption of our AI platform with enterprise customers.</p>",
+   "remote": false,
+   "url": "https://www.arbeitnow.com/jobs/companies/brightline/ai-deployment-strategist-1005",
+   "tags": [],
+   "job_types": [
+    "Full Time"
+   ],
+   "location": "Paris",
+   "created_at": 1790000400
+  },
+  {
+   "slug": "ml-engineer-remote-us-1006",
+   "company_name": "Cobalt Robotics Inc.",
+   "title": "Machine Learning Engineer",
+   "description": "<p>Remote role. You must be authorized to work in the U.S. We are unable to sponsor visas.</p>",
+   "remote": true,
+   "url": "https://www.arbeitnow.com/jobs/companies/cobalt/ml-engineer-remote-us-1006",
+   "tags": [
+    "Remote"
+   ],
+   "job_types": [
+    "Full Time"
+   ],
+   "location": "Remote – US only",
+   "created_at": 1790000500
+  }
+ ],
+ "links": {
+  "first": "https://www.arbeitnow.com/api/job-board-api?page=1",
+  "last": null,
+  "prev": null,
+  "next": "https://www.arbeitnow.com/api/job-board-api?page=2"
+ },
+ "meta": {
+  "current_page": 1,
+  "per_page": 250,
+  "terms": "This is a free public API for jobs, please do not abuse."
+ }
+}

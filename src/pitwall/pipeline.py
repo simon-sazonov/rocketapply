@@ -112,6 +112,7 @@ class RunStats:
     llm_triaged: int = 0
     jobs_seen: int = 0
     jobs_new: int = 0
+    jobs_updated: int = 0
     jobs_closed: int = 0
     jobs_scored: int = 0
     job_sources_failed: int = 0
@@ -1199,7 +1200,7 @@ class Pipeline:
         * **A posting that stops appearing is closed, not deleted.** "You missed
           this one" is history worth keeping, and Appendix C forbids deleting it.
         """
-        from .sources.jobs import SourceError, build_sources
+        from .sources.jobs import build_sources
 
         params = params or RunParams()
         stats = stats or RunStats()
@@ -1207,15 +1208,49 @@ class Pipeline:
         companies = self.repos.companies.all(active_only=True)
         by_name = {c["name"].casefold(): c for c in companies}
         sources = build_sources(self.settings, companies, kinds=params.job_kinds)
-        total = len(sources)
-        self.progress("jobs", f"{total} job source(s) to poll", 0, total)
         if not sources:
+            self.progress("jobs", "0 job source(s) to poll", 0, 0)
             stats.notes.append(
                 "no job sources configured — run scripts/discover_ats.py, or add "
                 "entries to config/job_sources.yaml"
             )
             return stats
 
+        def link(source: Any, posting: Any) -> tuple[int | None, int | None]:
+            company_id = getattr(source, "company_id", None)
+            if company_id is None:
+                company_id = self._match_company(posting, by_name)
+            return company_id, None
+
+        self.poll_sources(sources, stats, link=link, no_cache=params.no_cache)
+        return stats
+
+    def poll_sources(
+        self,
+        sources: list[Any],
+        stats: RunStats,
+        *,
+        link: Any,
+        no_cache: bool = False,
+        stage: str = "jobs",
+    ) -> list[int]:
+        """Fetch every source and store what it returned. Shared by the Openings
+        poll and the job search, so both keep the same two rules (§2.3):
+
+        * **A failing adapter is non-fatal.** Its failure is recorded on
+          `job_sources` and the loop moves on.
+        * **A posting that stops appearing is closed, not deleted** — at once
+          for a source that lists everything, after `jobs.close_after_days`
+          for a search or a capped feed, where one absence proves nothing.
+
+        `link(source, posting)` returns `(company_id, target_company_id)`.
+        Returns the ids of every posting seen, for the caller's next stage.
+        """
+        from .sources.jobs import SourceError, returns_complete_listing
+
+        total = len(sources)
+        self.progress(stage, f"{total} job source(s) to poll", 0, total)
+        seen_all: list[int] = []
         for i, source in enumerate(sources, start=1):
             if self.cancelled():
                 stats.notes.append("cancelled during job polling")
@@ -1224,51 +1259,68 @@ class Pipeline:
                 source.name, source.kind,
                 base_url=getattr(source, "url", None) or getattr(source, "base_url", None),
                 company_id=getattr(source, "company_id", None),
+                target_company_id=getattr(source, "target_company_id", None),
             )
+            started = time.monotonic()
             try:
-                postings = source.fetch(no_cache=params.no_cache)
-            except SourceError as exc:
-                log.warning("job source %s failed: %s", source.name, exc)
-                stats.job_sources_failed += 1
-                stats.notes.append(f"{source.name}: {exc}")
-                with self.repos.writing():
-                    self.repos.job_sources.mark_polled(source_id, str(exc))
-                continue
+                postings = source.fetch(no_cache=no_cache)
             except Exception as exc:  # noqa: BLE001 - an adapter must never end the run
-                log.exception("job source %s raised", source.name)
+                if isinstance(exc, SourceError):
+                    log.warning("job source %s failed: %s", source.name, exc)
+                    message = str(exc)
+                else:
+                    log.exception("job source %s raised", source.name)
+                    message = f"{type(exc).__name__}: {exc}"
                 stats.job_sources_failed += 1
-                stats.notes.append(f"{source.name}: {type(exc).__name__}: {exc}")
+                stats.notes.append(f"{source.name}: {message}")
                 with self.repos.writing():
-                    self.repos.job_sources.mark_polled(source_id, f"{type(exc).__name__}: {exc}")
+                    self.repos.job_sources.record_poll(
+                        source_id, ok=False, error=message,
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                    )
+                self.progress(stage, f"{i}/{total} · {source.name}: failed", i, total)
                 continue
 
             seen: list[int] = []
+            new = updated = 0
             with self.repos.writing():
                 for posting in postings:
-                    company_id = getattr(source, "company_id", None)
-                    if company_id is None:
-                        company_id = self._match_company(posting, by_name)
-                    job_id, is_new = self.repos.jobs.upsert(source_id, posting, company_id)
-                    seen.append(job_id)
-                    stats.jobs_new += int(is_new)
-                    stats.jobs_seen += 1
-                closed = self.repos.jobs.close_missing(source_id, seen)
-                stats.jobs_closed += closed
-                self.repos.job_sources.mark_polled(source_id, "ok")
+                    company_id, target_id = link(source, posting)
+                    result = self.repos.jobs.upsert(
+                        source_id, posting, company_id, target_company_id=target_id,
+                    )
+                    seen.append(result.job_id)
+                    new += int(result.is_new)
+                    updated += int(result.changed)
+                if returns_complete_listing(source):
+                    closed = self.repos.jobs.close_missing(source_id, seen)
+                else:
+                    closed = self.repos.jobs.close_stale(
+                        source_id, self.settings.jobs_close_after_days
+                    )
+                self.repos.job_sources.record_poll(
+                    source_id, ok=True, found=len(postings), new=new, updated=updated,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                )
+            stats.jobs_seen += len(postings)
+            stats.jobs_new += new
+            stats.jobs_updated += updated
+            stats.jobs_closed += closed
+            seen_all.extend(seen)
             self.progress(
-                "jobs",
+                stage,
                 f"{i}/{total} · {source.name}: {len(postings)} posting(s), "
-                f"{closed} closed",
+                f"{new} new, {closed} closed",
                 i, total,
             )
 
         self.progress(
-            "jobs",
+            stage,
             f"{stats.jobs_seen} posting(s) · {stats.jobs_new} new · "
             f"{stats.jobs_closed} closed · {stats.job_sources_failed} source(s) failed",
             total, total,
         )
-        return stats
+        return seen_all
 
     def score_jobs(self, params: RunParams | None = None, stats: RunStats | None = None) -> RunStats:
         """Score open postings against `config/profile.md` — §2.6, optional.
@@ -1413,10 +1465,14 @@ class Pipeline:
             )
             status = "cancelled" if self.cancelled() else "done"
             self.repos.runs.finish(run_id, status)
+            found = (
+                f"{stats.jobs_new} new posting(s)" if command in ("jobs", "job-search")
+                else f"{stats.candidates_new} new people"
+            )
             self.progress(
                 "done",
                 f"{command} {status} in {time.time() - started:.0f}s · "
-                f"{stats.candidates_new} new people · ${stats.cost_estimate:.4f}",
+                f"{found} · ${stats.cost_estimate:.4f}",
                 1,
                 1,
             )

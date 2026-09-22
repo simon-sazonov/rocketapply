@@ -140,6 +140,9 @@ class AggregatorSource:
     """A job board read through its sitemap and its JSON-LD."""
 
     kind = "aggregator"
+    #: Reads the newest `max_details` pages only, so a posting it did not return
+    #: this time may simply be older than the cap — not gone.
+    complete_listing = False
 
     def __init__(
         self,

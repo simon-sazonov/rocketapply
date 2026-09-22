@@ -1,0 +1,50 @@
+{
+ "count": 2,
+ "mean": 61000,
+ "results": [
+  {
+   "id": "4400001",
+   "title": "Graduate <strong>Machine Learning</strong> Engineer",
+   "description": "Join our perception team in Munich. 0-2 years of experience in machine learning, Python, PyTorch…",
+   "redirect_url": "https://www.adzuna.de/land/ad/4400001?se=abc&utm_medium=api",
+   "company": {
+    "display_name": "Apex Mobility"
+   },
+   "location": {
+    "display_name": "München, Bayern",
+    "area": [
+     "Deutschland",
+     "Bayern",
+     "München"
+    ]
+   },
+   "salary_min": 55000,
+   "salary_max": 65000,
+   "salary_is_predicted": "0",
+   "created": "2026-09-20T08:00:00Z",
+   "contract_type": "permanent",
+   "contract_time": "full_time"
+  },
+  {
+   "id": "4400002",
+   "title": "<strong>Data Scientist</strong>",
+   "description": "An exciting opportunity for a data scientist…",
+   "redirect_url": "https://www.adzuna.de/land/ad/4400002",
+   "company": {
+    "display_name": "Quillon AG"
+   },
+   "location": {
+    "display_name": "Berlin",
+    "area": [
+     "Deutschland",
+     "Berlin"
+    ]
+   },
+   "salary_min": 70000,
+   "salary_max": 70000,
+   "salary_is_predicted": "1",
+   "created": "2026-09-21T08:00:00Z",
+   "contract_time": "full_time"
+  }
+ ]
+}

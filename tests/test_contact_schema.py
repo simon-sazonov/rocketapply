@@ -39,9 +39,10 @@ def seeded(repos):
 # ───────────────────────────── the migration ─────────────────────────────
 
 
-def test_schema_version_is_five(repos):
+def test_schema_version_is_current(repos):
+    # 5 added contact enrichment; 6 (the job search) builds on it unchanged.
     row = repos.conn.execute("SELECT MAX(version) v FROM schema_version").fetchone()
-    assert row["v"] == SCHEMA_VERSION == 5
+    assert row["v"] == SCHEMA_VERSION == 6
 
 
 def test_the_four_tables_exist(repos):
@@ -84,8 +85,8 @@ def test_migration_from_v4_is_clean_and_idempotent(tmp_path):
     )
     conn.commit()
 
-    assert init_schema(conn) == 5
-    assert init_schema(conn) == 5  # idempotent
+    assert init_schema(conn) == SCHEMA_VERSION
+    assert init_schema(conn) == SCHEMA_VERSION  # idempotent
 
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []

@@ -19,7 +19,9 @@ from typing import Any
 import yaml
 
 from ...config import Settings, config_dir, get_settings
+from .adzuna import AdzunaSource
 from .aggregator import AggregatorSource
+from .arbeitnow import ArbeitnowSource
 from .ats import ATS_KINDS, ENDPOINTS, ATSSource, endpoint_for
 from .base import (
     JobCache,
@@ -29,6 +31,7 @@ from .base import (
     RobotsDisallowed,
     RobotsGate,
     SourceError,
+    returns_complete_listing,
 )
 from .career_page import CareerPageSource
 
@@ -39,7 +42,9 @@ SOURCES_YAML = "job_sources.yaml"
 __all__ = [
     "ATS_KINDS",
     "ENDPOINTS",
+    "AdzunaSource",
     "AggregatorSource",
+    "ArbeitnowSource",
     "ATSSource",
     "CareerPageSource",
     "JobCache",
@@ -50,6 +55,7 @@ __all__ = [
     "RobotsGate",
     "SourceError",
     "build_sources",
+    "returns_complete_listing",
     "endpoint_for",
     "load_source_config",
 ]

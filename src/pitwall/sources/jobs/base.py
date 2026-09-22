@@ -50,6 +50,17 @@ class JobPosting:
     posted_at: str | None = None
     company_name: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+    # ── optional structure, filled only where a source states it ──
+    #: True/False when the source says so outright; None = not stated.
+    remote: bool | None = None
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    #: ISO 3166 alpha-2, when the source is country-scoped (an Adzuna search is).
+    country_hint: str | None = None
+    #: The source only returns a snippet (Adzuna). Downstream this lowers
+    #: confidence rather than letting "not mentioned" read as "not required".
+    description_truncated: bool = False
 
     def __post_init__(self) -> None:
         if not self.title or not self.url:
@@ -69,9 +80,21 @@ class JobSource(Protocol):
     """Every adapter implements exactly this."""
 
     name: str
-    kind: str          # ats_json | aggregator | career_page
+    kind: str          # ats_json | aggregator | career_page | job_board | aggregator_api
 
     def fetch(self, *, no_cache: bool = False) -> list[JobPosting]: ...
+
+
+def returns_complete_listing(source: Any) -> bool:
+    """Whether one fetch returns EVERY live posting this source has.
+
+    Only then does "missing from this fetch" mean "closed". An ATS board lists
+    everything; a keyword search, a capped sitemap or a paginated feed read to a
+    page limit does not, and closing what they happened not to return would
+    close half the table every run. Those sources age postings out instead
+    (`JobRepo.close_stale`). Unknown adapters keep the old behaviour.
+    """
+    return bool(getattr(source, "complete_listing", True))
 
 
 # ────────────────────────────── robots.txt ───────────────────────────────
@@ -149,12 +172,21 @@ class JobCache:
     """
 
     def __init__(self, root: Path | str | None = None, ttl_days: int | None = None,
-                 settings: Settings | None = None) -> None:
+                 settings: Settings | None = None, *, ttl_hours: float | None = None) -> None:
         settings = settings or get_settings()
         self.root = Path(root) if root else settings.cache_path / "jobs"
         self.ttl_days = settings.cache_ttl_days if ttl_days is None else ttl_days
+        #: Overrides `ttl_days` when set. A daily job search needs hours: with
+        #: the 7-day default a board polled on Monday would show Monday's
+        #: postings until the next Monday.
+        self.ttl_hours = ttl_hours
         self.hits = 0
         self.misses = 0
+
+    def _max_age(self) -> timedelta | None:
+        if self.ttl_hours is not None:
+            return timedelta(hours=self.ttl_hours) if self.ttl_hours > 0 else None
+        return timedelta(days=self.ttl_days) if self.ttl_days > 0 else None
 
     def path_for(self, key: str) -> Path:
         digest = hashlib.sha1(key.encode()).hexdigest()
@@ -171,12 +203,13 @@ class JobCache:
             self.misses += 1
             return None
         fetched = data.get("fetched_at")
-        if self.ttl_days > 0 and fetched:
+        max_age = self._max_age()
+        if max_age is not None and fetched:
             try:
                 ts = datetime.fromisoformat(fetched)
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=UTC)
-                if datetime.now(UTC) - ts > timedelta(days=self.ttl_days):
+                if datetime.now(UTC) - ts > max_age:
                     self.misses += 1
                     return None
             except ValueError:
@@ -234,11 +267,15 @@ class PoliteClient:
                 time.sleep(gap)
             self._last_request[host] = time.monotonic()
 
-    def get(self, url: str, *, no_cache: bool = False, accept: str = "*/*") -> str:
+    def get(self, url: str, *, no_cache: bool = False, accept: str = "*/*",
+            cache_key: str | None = None) -> str:
+        """`cache_key` replaces the URL as the cache key — for URLs that carry a
+        credential, which must not end up written into a cache file."""
+        key = cache_key or url
         if not self.robots.allows(url):
-            raise RobotsDisallowed(f"robots.txt disallows {url}")
+            raise RobotsDisallowed(f"robots.txt disallows {key}")
         if not no_cache:
-            cached = self.cache.get(url)
+            cached = self.cache.get(key)
             if cached is not None:
                 return str(cached)
         self._wait(url)
@@ -250,26 +287,30 @@ class PoliteClient:
                 follow_redirects=True,
             )
         except httpx.HTTPError as exc:
-            raise SourceError(f"{url}: {exc}") from exc
+            # httpx's message repeats the URL, so it is left out whenever the
+            # URL is the one thing that must not be shown.
+            detail = type(exc).__name__ if cache_key else str(exc)
+            raise SourceError(f"{key}: {detail}") from exc
         if resp.status_code == 404:
-            raise SourceError(f"{url}: not found (404)")
+            raise SourceError(f"{key}: not found (404)")
         if resp.status_code == 403:
             raise SourceError(
-                f"{url}: refused (403). The site declines this User-Agent "
+                f"{key}: refused (403). The site declines this User-Agent "
                 f"({self.user_agent!r}). Impersonating a browser to get past it would "
                 "be working around the answer, so this source stays dark — see §2.1."
             )
         if resp.status_code >= 400:
-            raise SourceError(f"{url}: HTTP {resp.status_code}")
-        self.cache.put(url, resp.text)
+            raise SourceError(f"{key}: HTTP {resp.status_code}")
+        self.cache.put(key, resp.text)
         return resp.text
 
-    def get_json(self, url: str, *, no_cache: bool = False) -> Any:
-        body = self.get(url, no_cache=no_cache, accept="application/json")
+    def get_json(self, url: str, *, no_cache: bool = False,
+                 cache_key: str | None = None) -> Any:
+        body = self.get(url, no_cache=no_cache, accept="application/json", cache_key=cache_key)
         try:
             return json.loads(body)
         except json.JSONDecodeError as exc:
-            raise SourceError(f"{url}: response is not JSON ({exc})") from exc
+            raise SourceError(f"{cache_key or url}: response is not JSON ({exc})") from exc
 
 
 def iso_date(value: Any) -> str | None:
