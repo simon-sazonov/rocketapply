@@ -1,0 +1,149 @@
+# The job-search profile — §4 and §45 of job_search_assistant_engineering_spec.md.
+#
+# THIS IS THE EXAMPLE. It loads only while config/job_search.yaml does not
+# exist. The 🧭 Job Setup page writes your answers to job_search.yaml, which is
+# gitignored because it holds personal facts (work authorisation above all).
+# Copy this file by hand if you prefer editing YAML:
+#
+#     cp config/job_search.example.yaml config/job_search.yaml
+#
+# Two rules the whole search keeps, whatever you put here:
+#   * an UNKNOWN value never rejects a job — only a stated one can;
+#   * hard filters remove, everything else only re-orders.
+
+# ── where ───────────────────────────────────────────────────────────────
+locations:
+  # Names or ISO codes. Empty = anywhere.
+  countries: [Germany, Netherlands, France, United Kingdom, Ireland, Switzerland,
+              Sweden, Finland, Denmark, Italy, Spain, Portugal, United States]
+  # Scored up; never required.
+  preferred_cities: [Munich, Berlin, Stuttgart, Amsterdam, Paris, London, Dublin,
+                     Zurich, Stockholm, Milan, Lisbon, San Francisco, New York]
+  # A job located ONLY in these is filtered out.
+  excluded_cities: []
+  # Where you live. Decides whether "Remote (EU)" / "Remote – US only" is
+  # open to you (§59). Leave empty and remote jobs are judged on country alone.
+  home_country:
+  # remote | hybrid | onsite
+  work_modes: [remote, hybrid, onsite]
+
+# ── what ────────────────────────────────────────────────────────────────
+roles:
+  # A job must carry one of these labels (from its title, or for a generic
+  # title its description). Everything else lands in "Filtered out" with the
+  # reason, where you can check the rule is not too strict.
+  # Labels: MACHINE_LEARNING AI DATA_SCIENCE APPLIED_SCIENCE DECISION_SCIENCE
+  #         OPTIMIZATION SIMULATION DATA_ENGINEERING SOFTWARE_ENGINEERING
+  #         ANALYTICS BI OTHER
+  accepted: [MACHINE_LEARNING, AI, DATA_SCIENCE, APPLIED_SCIENCE, DECISION_SCIENCE,
+             OPTIMIZATION, SIMULATION]
+  # 0-1 per label: how much the role component is worth. Technical beats
+  # dashboard work, per §3.
+  preference:
+    MACHINE_LEARNING: 1.0
+    OPTIMIZATION: 1.0
+    AI: 0.95
+    SIMULATION: 0.95
+    DECISION_SCIENCE: 0.95
+    APPLIED_SCIENCE: 0.85   # the broadest label: research roles in any field
+    DATA_SCIENCE: 0.9
+    DATA_ENGINEERING: 0.5
+    SOFTWARE_ENGINEERING: 0.45
+    ANALYTICS: 0.35
+    BI: 0.15
+    OTHER: 0.0
+  # Close matches earn a bonus. Nothing has to match one.
+  preferred_titles:
+    - Data Scientist
+    - Junior Data Scientist
+    - Graduate Data Scientist
+    - Applied Scientist
+    - Decision Scientist
+    - Machine Learning Engineer
+    - Graduate Machine Learning Engineer
+    - Applied ML Engineer
+    - AI Engineer
+    - Applied AI Engineer
+    - Research Engineer
+    - ML Research Engineer
+    - Optimization Scientist
+    - Operations Research Scientist
+    - Simulation Engineer
+    - Data & Simulation Engineer
+    - Race Strategy Engineer
+
+seniority:
+  # Whole words in the TITLE that remove a job (§14)…
+  excluded_title_words: [senior, sr, staff, principal, lead, manager, director,
+                         head, vp, vice president, chief, distinguished]
+  # …unless one of these phrases is there too.
+  allowed_title_phrases: [member of technical staff, member of the technical staff]
+  # A job that explicitly REQUIRES more years than this is filtered out. The
+  # description is read, so "Junior" over "3+ years required" is caught (§4.1).
+  max_experience_years: 2
+
+# full_time part_time internship working_student graduate_programme
+# fixed_term permanent contract freelance
+employment_types: [full_time, part_time, internship, working_student,
+                   graduate_programme, fixed_term, permanent, contract]
+
+# ── eligibility ─────────────────────────────────────────────────────────
+work_authorization:
+  # If true, a posting that explicitly says it will not sponsor is filtered
+  # out — but only for countries not listed below. Silence never filters.
+  needs_sponsorship: true
+  # Countries where you can ALREADY work without sponsorship. Fill this in:
+  # it is the one answer the search cannot work out for you.
+  authorized_countries: []
+
+# Your highest degree, finished or in progress: bachelors | masters | phd.
+# A posting that states a PhD is REQUIRED is filtered out unless this is phd;
+# "PhD preferred" never filters.
+degree: masters
+
+# ── direction (§23) ─────────────────────────────────────────────────────
+# Pulls matching jobs up the list; never required.
+career_interests: [optimisation, simulation, decision making, reinforcement learning,
+                   forecasting, time series, risk, probabilistic, uncertainty,
+                   monte carlo, autonomous systems, robotics, vehicle, motorsport,
+                   race strategy]
+
+# Languages you work in (ISO codes). A posting that asks for another one is
+# marked down and says which — never filtered out.
+languages_spoken: [en]
+
+# ── ranking (§25) ───────────────────────────────────────────────────────
+# Relative weights; they are normalised, so they need not sum to 100.
+weights:
+  role: 25
+  experience: 20
+  skills: 20
+  location: 10
+  visa: 10
+  career: 10
+  company: 5
+
+# ── sources ─────────────────────────────────────────────────────────────
+sources:
+  # Every company in config/target_companies.csv with an ats_kind/ats_token.
+  target_ats: true
+  arbeitnow:
+    enabled: true
+    max_pages: 4          # x250 postings, newest first
+  adzuna:
+    # Needs ADZUNA_APP_ID and ADZUNA_APP_KEY in .env (free, developer.adzuna.com).
+    # Without them it is skipped and Sources & health says so.
+    enabled: true
+    queries: [data scientist, machine learning, AI engineer, applied scientist,
+              research engineer, decision scientist, optimisation, simulation engineer]
+    countries: []         # empty = your countries above that Adzuna covers
+    max_requests_per_run: 40
+    daily_request_cap: 200
+    results_per_page: 50
+    max_days_old: 14
+    title_only: true
+  cache_hours: 6
+
+# Ask the LLM for a second opinion on the top N jobs each run (needs
+# config/profile.md written, and a Groq key). 0 = off.
+ai_fit_top_n: 0

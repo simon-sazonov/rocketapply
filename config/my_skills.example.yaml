@@ -1,0 +1,52 @@
+# Your skill inventory — §18-19 of the job-search spec.
+#
+# THIS IS THE EXAMPLE, taken from the spec's own candidate profile. It loads
+# only while config/my_skills.yaml does not exist; the 🧭 Job Setup page writes
+# that file (gitignored) the first time you save.
+#
+#   skill        any name or synonym from config/skills_vocab.yaml
+#   proficiency  1 = touched it, 2 = working knowledge, 3 = strong
+#                (every entry below starts at 2 — set your own)
+#   years        optional
+#   evidence     where you used it — what a CV line could point to (§19).
+#                Later, CV tailoring will only put forward skills with evidence.
+#
+# A skill missing here reads as "missing" on every job that asks for it, so
+# list what you can defend in an interview, and nothing else.
+
+skills:
+  # programming
+  - {skill: Python, proficiency: 2, evidence: [Ophis Research, WikiArt project, Airbnb database project, Thesis]}
+  - {skill: SQL, proficiency: 2}
+  - {skill: "C#", proficiency: 2}
+  - {skill: JavaScript, proficiency: 2}
+  - {skill: TypeScript, proficiency: 2}
+  - {skill: Kotlin, proficiency: 2}
+  - {skill: R, proficiency: 2}
+  # machine learning
+  - {skill: Machine Learning, proficiency: 2}
+  - {skill: Deep Learning, proficiency: 2}
+  - {skill: Predictive Modelling, proficiency: 2}
+  - {skill: Data Mining, proficiency: 2}
+  - {skill: Computer Vision, proficiency: 2}
+  - {skill: NLP, proficiency: 2}
+  # statistics
+  - {skill: Statistics, proficiency: 2}
+  - {skill: Probability, proficiency: 2}
+  - {skill: Hypothesis Testing, proficiency: 2}
+  - {skill: Model Evaluation, proficiency: 2}
+  - {skill: Calibration, proficiency: 2}
+  # optimisation / decision
+  - {skill: Optimisation, proficiency: 2}
+  - {skill: Genetic Algorithms, proficiency: 2}
+  - {skill: Monte Carlo, proficiency: 2}
+  - {skill: Risk Modelling, proficiency: 2}
+  - {skill: Reinforcement Learning, proficiency: 2}
+  - {skill: Sequential Decision Making, proficiency: 2}
+  # engineering
+  - {skill: Git, proficiency: 2}
+  - {skill: Docker, proficiency: 2}
+  - {skill: APIs, proficiency: 2}
+  - {skill: Data Pipelines, proficiency: 2}
+  - {skill: Testing, proficiency: 2}
+  - {skill: Software Engineering, proficiency: 2}

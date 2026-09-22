@@ -12,7 +12,8 @@ SXNG_URL := http://localhost:8888
 .DEFAULT_GOAL := help
 .PHONY: help venv test lint typecheck searxng searxng-env searxng-check \
         searxng-stop searxng-logs searxng-pull groq-check app cli \
-        coverage sweep relabel domains domains-apply domains-show
+        coverage sweep relabel domains domains-apply domains-show \
+        job-search job-rerank job-targets-ats
 
 help:  ## show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -100,6 +101,17 @@ domains-apply:  ## …and write them into config/companies.csv
 
 domains-show:  ## which companies already have a domain
 	$(PY) scripts/resolve_domains.py --show
+
+# ───────────────────────────── job search ──────────────────────────────
+
+job-search:  ## the daily job inbox: poll every source, filter, rank
+	$(PY) scripts/run_pipeline.py job-search
+
+job-rerank:  ## re-rank stored jobs after editing the profile (no network)
+	$(PY) scripts/run_pipeline.py job-search --no-poll
+
+job-targets-ats:  ## find the public ATS board of each target company
+	$(PY) scripts/discover_ats.py --targets
 
 # ──────────────────────────────── app ──────────────────────────────────
 

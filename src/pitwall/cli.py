@@ -10,6 +10,8 @@ anyone who has not run `pip install -e .`.
     pitwall score --rescore-all --prompt-version v2
     pitwall jobs --score-fit           # live openings, and how they fit you
     pitwall openings                   # who to write to, and why now
+    pitwall job-search                 # the daily job inbox: poll, filter, rank
+    pitwall job-search --no-poll       # re-rank what is stored after a profile edit
     pitwall enrich -c 41 -c 88         # find addresses, free engine only
     pitwall search --cache-only && pitwall extract --reprocess
 """
@@ -580,6 +582,64 @@ def jobs(
     console.print("jobs: " + (", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "none"))
     for note in stats.notes:
         console.print(f"[yellow]note:[/] {note}")
+
+
+@app.command("job-search")
+def job_search(
+    no_poll: bool = typer.Option(
+        False, "--no-poll", help="skip the sources; re-read and re-rank what is stored"
+    ),
+    no_cache: bool = typer.Option(False, "--no-cache", help="refetch every source"),
+    ai_fit: int | None = typer.Option(
+        None, help="ask the LLM about the top N jobs (default: ai_fit_top_n in the profile)"
+    ),
+    export: Path | None = typer.Option(
+        None, help="also write the matching jobs to this CSV file"
+    ),
+    top: int = typer.Option(15, help="how many of the best new jobs to print"),
+    verbose: bool = typer.Option(False, "-v", "--verbose"),
+) -> None:
+    """The job search — collect, filter and rank, then print the new matches.
+
+    Driven by config/job_search.yaml and config/target_companies.csv; the
+    💼 pages in the dashboard read the same database.
+    """
+    from .jobsearch.export import jobs_csv
+    from .jobsearch.run import JobSearch
+    from .jobsearch.settings import load_config
+    from .jobsearch.store import load_inbox
+
+    settings = _bootstrap(verbose)
+    try:
+        cfg = load_config()
+    except ValueError as exc:
+        console.print(f"[red]job_search.yaml is invalid:[/] {exc}")
+        raise typer.Exit(1) from exc
+    search = JobSearch(Pipeline(settings, on_progress=_progress), cfg)
+    stats = search.rerank() if no_poll else search.run(no_cache=no_cache, ai_fit=ai_fit)
+
+    console.print(
+        f"[green]{stats.passed}[/] relevant of {stats.scored} open posting(s) · "
+        f"{stats.new} new · {stats.merged} merged as duplicates · "
+        f"{stats.sources_failed} of {stats.sources} source(s) failed · {stats.seconds:g}s"
+    )
+    inbox = load_inbox(search.conn)
+    new = inbox.view("new")
+    table = Table(title=f"{len(new)} new match(es) in the inbox")
+    for column in ("score", "title", "company", "where", "visa"):
+        table.add_column(column)
+    for job in new[:top]:
+        table.add_row(
+            f"{job['score']:.0f}", job["title"][:60], (job["company"] or "?")[:28],
+            ", ".join(job.get("cities") or job.get("countries") or [])[:24] or "?",
+            job.get("visa_fit") or "?",
+        )
+    console.print(table)
+    for note in stats.notes:
+        console.print(f"[yellow]note:[/] {note}")
+    if export:
+        export.write_text(jobs_csv(search.conn, "matches"), encoding="utf-8")
+        console.print(f"[green]wrote[/] {export}")
 
 
 @app.command()

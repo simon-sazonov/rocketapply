@@ -1,0 +1,114 @@
+# The controlled skill vocabulary — §17 of the job-search spec.
+#
+# Every skill the job search can recognise, keyed by a canonical id, with the
+# spellings postings actually use. Job descriptions and your own skill list
+# (config/my_skills.yaml) are both mapped onto these ids, so "sklearn" in a
+# posting matches "scikit-learn" in your profile.
+#
+#   label           how it is shown
+#   category        for grouping on the Profile page
+#   synonyms        matched as whole words, case-insensitively
+#   case_sensitive  synonyms matched exactly as written — for short tokens
+#                   like "R", "ML" or "Go" that are also ordinary words
+#
+# Add freely. A synonym belongs to exactly one id; the loader rejects a
+# duplicate rather than guessing which one you meant.
+
+# ── programming ──────────────────────────────────────────────────────
+python:        {label: Python, category: programming, synonyms: [python, python3]}
+sql:           {label: SQL, category: programming, synonyms: [sql, postgresql, postgres, mysql, t-sql, pl/sql, sqlite]}
+r_lang:        {label: R, category: programming, case_sensitive: true, synonyms: ["R", "RStudio", "tidyverse"]}
+scala:         {label: Scala, category: programming, synonyms: [scala]}
+java:          {label: Java, category: programming, synonyms: [java]}
+cpp:           {label: C++, category: programming, synonyms: ["c++", "cpp"]}
+csharp:        {label: "C#", category: programming, synonyms: ["c#", ".net", "dotnet"]}
+javascript:    {label: JavaScript, category: programming, synonyms: [javascript, node.js, nodejs]}
+typescript:    {label: TypeScript, category: programming, synonyms: [typescript]}
+kotlin:        {label: Kotlin, category: programming, synonyms: [kotlin]}
+golang:        {label: Go, category: programming, synonyms: [golang]}
+rust:          {label: Rust, category: programming, synonyms: [rust]}
+matlab:        {label: MATLAB, category: programming, synonyms: [matlab, simulink]}
+julia:         {label: Julia, category: programming, case_sensitive: true, synonyms: ["Julia"]}
+bash:          {label: Bash / shell, category: programming, synonyms: [bash, shell scripting]}
+
+# ── machine learning ─────────────────────────────────────────────────
+machine_learning:    {label: Machine Learning, category: ml, synonyms: [machine learning, machine-learning, "maschinelles lernen", "apprentissage automatique"]}
+ml_abbrev:           {label: Machine Learning, category: ml, case_sensitive: true, synonyms: ["ML"], alias_of: machine_learning}
+deep_learning:       {label: Deep Learning, category: ml, synonyms: [deep learning, neural networks, neural network]}
+nlp:                 {label: NLP, category: ml, synonyms: [nlp, natural language processing, text mining]}
+computer_vision:     {label: Computer Vision, category: ml, synonyms: [computer vision, image processing, object detection, image recognition]}
+llm:                 {label: LLMs / GenAI, category: ml, synonyms: [llm, llms, large language model, large language models, generative ai, genai, gen ai, foundation models]}
+rag:                 {label: RAG, category: ml, synonyms: [rag, retrieval-augmented generation, retrieval augmented generation]}
+reinforcement_learning: {label: Reinforcement Learning, category: ml, synonyms: [reinforcement learning, deep rl]}
+predictive_modeling: {label: Predictive Modelling, category: ml, synonyms: [predictive modeling, predictive modelling, predictive analytics, predictive models]}
+data_mining:         {label: Data Mining, category: ml, synonyms: [data mining]}
+recommender_systems: {label: Recommender Systems, category: ml, synonyms: [recommender systems, recommendation systems, recommender system, recommendations engine]}
+time_series:         {label: Time Series, category: ml, synonyms: [time series, time-series, timeseries]}
+forecasting:         {label: Forecasting, category: ml, synonyms: [forecasting, demand forecasting]}
+anomaly_detection:   {label: Anomaly Detection, category: ml, synonyms: [anomaly detection, outlier detection, fraud detection]}
+feature_engineering: {label: Feature Engineering, category: ml, synonyms: [feature engineering]}
+model_evaluation:    {label: Model Evaluation, category: ml, synonyms: [model evaluation, model validation, cross-validation, cross validation]}
+mlops:               {label: MLOps, category: ml, synonyms: [mlops, ml ops, model deployment, model serving]}
+
+# ── libraries and frameworks ─────────────────────────────────────────
+pytorch:       {label: PyTorch, category: libraries, synonyms: [pytorch, torch]}
+tensorflow:    {label: TensorFlow, category: libraries, synonyms: [tensorflow, tf2]}
+keras:         {label: Keras, category: libraries, synonyms: [keras]}
+jax:           {label: JAX, category: libraries, case_sensitive: true, synonyms: ["JAX", "jax"]}
+scikit_learn:  {label: scikit-learn, category: libraries, synonyms: [scikit-learn, scikit learn, sklearn]}
+xgboost:       {label: XGBoost / LightGBM, category: libraries, synonyms: [xgboost, lightgbm, catboost, gradient boosting]}
+pandas:        {label: pandas, category: libraries, synonyms: [pandas]}
+numpy:         {label: NumPy / SciPy, category: libraries, synonyms: [numpy, scipy]}
+spark:         {label: Spark, category: libraries, synonyms: [spark, pyspark, apache spark, spark mllib]}
+polars:        {label: Polars, category: libraries, synonyms: [polars]}
+huggingface:   {label: Hugging Face, category: libraries, synonyms: [hugging face, huggingface, transformers library]}
+langchain:     {label: LangChain / LlamaIndex, category: libraries, synonyms: [langchain, llamaindex, llama index, langgraph]}
+statsmodels:   {label: statsmodels, category: libraries, synonyms: [statsmodels]}
+fastapi:       {label: FastAPI / Flask, category: libraries, synonyms: [fastapi, flask, django]}
+streamlit:     {label: Streamlit, category: libraries, synonyms: [streamlit, plotly dash, plotly]}
+
+# ── statistics ───────────────────────────────────────────────────────
+statistics:          {label: Statistics, category: statistics, synonyms: [statistics, statistical analysis, statistical modeling, statistical modelling, statistik, statistiques]}
+probability:         {label: Probability, category: statistics, synonyms: [probability, probabilistic, probabilistic modeling, probabilistic modelling, stochastic]}
+bayesian:            {label: Bayesian Methods, category: statistics, synonyms: [bayesian, bayes, pymc]}
+hypothesis_testing:  {label: Hypothesis Testing, category: statistics, synonyms: [hypothesis testing, significance testing, statistical tests]}
+ab_testing:          {label: A/B Testing, category: statistics, synonyms: [a/b testing, a/b tests, ab testing, experimentation, online experiments]}
+causal_inference:    {label: Causal Inference, category: statistics, synonyms: [causal inference, causal modeling, causal modelling, uplift modeling, econometrics]}
+calibration:         {label: Calibration, category: statistics, synonyms: [calibration, uncertainty quantification]}
+
+# ── optimisation and decision ────────────────────────────────────────
+optimization:          {label: Optimisation, category: decision, synonyms: [optimization, optimisation, mathematical optimization, mathematical programming, linear programming, integer programming, mixed-integer, milp, convex optimization, gurobi, cplex, or-tools, pyomo]}
+operations_research:   {label: Operations Research, category: decision, synonyms: [operations research, operational research]}
+genetic_algorithms:    {label: Genetic Algorithms, category: decision, synonyms: [genetic algorithm, genetic algorithms, evolutionary algorithms, metaheuristics]}
+monte_carlo:           {label: Monte Carlo, category: decision, synonyms: [monte carlo, monte-carlo, mcmc]}
+simulation:            {label: Simulation, category: decision, synonyms: [simulation, simulations, discrete-event simulation, agent-based modeling, digital twin]}
+risk_modeling:         {label: Risk Modelling, category: decision, synonyms: [risk modeling, risk modelling, risk models, credit risk, market risk]}
+sequential_decisions:  {label: Sequential Decision Making, category: decision, synonyms: [sequential decision, decision making under uncertainty, markov decision process, mdp, multi-armed bandit, bandits]}
+
+# ── engineering ──────────────────────────────────────────────────────
+git:            {label: Git, category: engineering, synonyms: [git, github, gitlab]}
+docker:         {label: Docker, category: engineering, synonyms: [docker, containers, containerization]}
+kubernetes:     {label: Kubernetes, category: engineering, synonyms: [kubernetes, k8s, helm]}
+ci_cd:          {label: CI/CD, category: engineering, synonyms: [ci/cd, continuous integration, github actions, jenkins]}
+apis:           {label: APIs, category: engineering, synonyms: [rest api, rest apis, restful, apis, grpc]}
+testing:        {label: Testing, category: engineering, synonyms: [unit testing, pytest, test-driven, tdd, automated testing]}
+data_pipelines: {label: Data Pipelines / ETL, category: engineering, synonyms: [data pipelines, data pipeline, etl, elt]}
+airflow:        {label: Airflow / orchestration, category: engineering, synonyms: [airflow, dagster, prefect, kedro]}
+dbt:            {label: dbt, category: engineering, synonyms: [dbt]}
+kafka:          {label: Kafka / streaming, category: engineering, synonyms: [kafka, kinesis, flink, streaming data]}
+mlflow:         {label: MLflow / experiment tracking, category: engineering, synonyms: [mlflow, weights & biases, wandb, experiment tracking]}
+linux:          {label: Linux, category: engineering, synonyms: [linux, unix]}
+software_engineering: {label: Software Engineering, category: engineering, synonyms: [software engineering, software development, object-oriented, design patterns, clean code]}
+
+# ── cloud and data platforms ─────────────────────────────────────────
+aws:        {label: AWS, category: cloud, synonyms: [aws, amazon web services, sagemaker, s3, ec2, lambda functions]}
+gcp:        {label: Google Cloud, category: cloud, synonyms: [gcp, google cloud, vertex ai]}
+azure:      {label: Azure, category: cloud, synonyms: [azure, azure ml]}
+databricks: {label: Databricks, category: cloud, synonyms: [databricks, delta lake]}
+snowflake:  {label: Snowflake, category: cloud, synonyms: [snowflake]}
+bigquery:   {label: BigQuery, category: cloud, synonyms: [bigquery]}
+
+# ── analysis and communication ───────────────────────────────────────
+data_visualization: {label: Data Visualisation, category: analysis, synonyms: [data visualization, data visualisation, visualisation, visualization, matplotlib, seaborn]}
+bi_tools:           {label: BI tools (Tableau / Power BI / Looker), category: analysis, synonyms: [tableau, power bi, powerbi, looker, qlik, metabase]}
+excel:              {label: Excel, category: analysis, case_sensitive: true, synonyms: ["Excel", "Microsoft Excel", "VBA"]}

@@ -24,3 +24,8 @@ dist/
 # scoring gets tuned), but it holds real people's public profile data — keep
 # this repository private, and see the guardrails section of README.md before
 # pushing it anywhere.
+
+# The job search's personal answers — work authorisation, skills. The tracked
+# *.example.yaml files are what loads until these exist.
+config/job_search.yaml
+config/my_skills.yaml

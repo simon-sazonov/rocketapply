@@ -1,0 +1,72 @@
+# The job search's employer list — §5 of job_search_assistant_engineering_spec.md.
+# NOT config/companies.csv: that one drives the LinkedIn people sweep.
+#
+#   name         canonical spelling; postings are matched on it and on aliases
+#   aliases      pipe-separated: "BMW|BMW AG". The lever for §5.2 matching.
+#   country      ISO code or name; cities pipe-separated
+#   priority     A strong target · B good target · C fallback — YOUR search
+#                priority, not a rating of the company. Worth up to 5 points.
+#   careers_url  shown as a link for employers without a public ATS board
+#   ats_kind / ats_token   filled by `make job-targets-ats` (discover_ats.py
+#                --targets); edit by hand to override
+#   sponsorship  yes | sometimes | no | unknown — your own note. It can only
+#                lift a silent posting to "likely"; what a posting says wins.
+#   tags         pipe-separated, free text
+#
+# A starter list: the priorities are a first guess from the spec's interests
+# (motorsport, optimisation / simulation, autonomy, applied AI). Re-rank them.
+name,aliases,country,cities,industry,priority,careers_url,ats_kind,ats_token,sponsorship,visa_notes,tags,active
+McLaren Racing,McLaren F1|McLaren Formula 1 Team,GB,Woking,Motorsport,A,,,,unknown,,motorsport|strategy|simulation,true
+Mercedes-AMG PETRONAS F1 Team,Mercedes AMG F1|Mercedes-AMG F1|Mercedes AMG High Performance Powertrains,GB,Brackley,Motorsport,A,,,,unknown,,motorsport|strategy|simulation,true
+Red Bull Racing,Oracle Red Bull Racing|Red Bull Technology|Red Bull Powertrains,GB,Milton Keynes,Motorsport,A,,,,unknown,,motorsport|strategy|simulation,true
+Williams Racing,Williams F1|Williams Grand Prix Engineering,GB,Grove,Motorsport,A,,,,unknown,,motorsport|strategy|simulation,true
+BWT Alpine F1 Team,Alpine F1 Team|Alpine Racing,GB,Enstone,Motorsport,A,,,,unknown,,motorsport|strategy|simulation,true
+Aston Martin Aramco F1 Team,Aston Martin F1|AMR Technology,GB,Silverstone,Motorsport,A,,,,unknown,,motorsport|strategy,true
+Scuderia Ferrari,Ferrari|Ferrari S.p.A.,IT,Maranello,Motorsport,A,,,,unknown,,motorsport|automotive,true
+Sauber Motorsport,Audi F1 Team|Stake F1 Team|Sauber Group,CH,Hinwil,Motorsport,A,,,,unknown,,motorsport,true
+Visa Cash App Racing Bulls,Racing Bulls|Scuderia AlphaTauri,IT,Faenza,Motorsport,B,,,,unknown,,motorsport,true
+BMW Group,BMW|BMW AG|BMW M,DE,Munich,Automotive,A,,,,unknown,,automotive|simulation|AI,true
+Mercedes-Benz,Mercedes-Benz Group|Mercedes-Benz AG|Mercedes-Benz Tech Innovation,DE,Stuttgart|Sindelfingen|Berlin,Automotive,B,,,,unknown,,automotive,true
+Porsche,Porsche AG|Dr. Ing. h.c. F. Porsche,DE,Stuttgart|Weissach,Automotive,B,,,,unknown,,automotive|motorsport,true
+Volkswagen Group,Volkswagen|VW|CARIAD,DE,Wolfsburg|Berlin|Munich,Automotive,C,,,,unknown,,automotive|software,true
+Bosch,Robert Bosch|Bosch Group|Bosch Center for Artificial Intelligence,DE,Stuttgart|Renningen,Automotive,B,,,,unknown,,automotive|AI,true
+Wayve,Wayve Technologies,GB,London,Autonomous driving,A,,greenhouse,wayve,unknown,,autonomy|ML,true
+Helsing,,DE,Munich|Berlin|London,Defence AI,A,,greenhouse,helsing,unknown,,AI|autonomy,true
+Isar Aerospace,,DE,Munich,Aerospace,B,,greenhouse,isaraerospace,unknown,,simulation|optimisation,true
+Google DeepMind,DeepMind,GB,London,AI research,A,,,,unknown,,AI|research,true
+Mistral AI,Mistral,FR,Paris,AI,A,,,,unknown,,AI|LLM,true
+Hugging Face,HuggingFace,FR,Paris,AI,B,,workable,huggingface,unknown,,AI|open source,true
+Aleph Alpha,,DE,Heidelberg,AI,B,,,,unknown,,AI|LLM,true
+DeepL,,DE,Cologne,AI,B,,ashby,deepl,unknown,,AI|NLP,true
+Black Forest Labs,,DE,Freiburg,AI,B,,,,unknown,,AI|generative,true
+Synthesia,,GB,London,AI,B,,ashby,synthesia,unknown,,AI|generative,true
+ElevenLabs,Eleven Labs,GB,London,AI,B,,ashby,elevenlabs,unknown,,AI|audio,true
+InstaDeep,,GB,London|Paris,AI,B,,,,unknown,,AI|optimisation|RL,true
+Isomorphic Labs,,GB,London,AI research,B,,greenhouse,isomorphiclabs,unknown,,AI|research,true
+PolyAI,,GB,London,AI,C,,greenhouse,polyai,unknown,,AI|NLP,true
+Bending Spoons,,IT,Milan,Consumer tech,A,,,,yes,"FAQ: sponsors work authorisation for Italy, Poland, Spain, UK for EU residents",data|decision,true
+Booking.com,Booking Holdings,NL,Amsterdam,Travel tech,B,,,,unknown,,data|ML|experimentation,true
+Adyen,,NL,Amsterdam,Fintech,B,,greenhouse,adyen,unknown,,data|ML,true
+Picnic,Picnic Technologies,NL,Amsterdam,Logistics,B,,,,unknown,,optimisation|forecasting,true
+ASML,,NL,Veldhoven,Semiconductors,C,,,,unknown,,simulation|data,true
+Zalando,Zalando SE,DE,Berlin,E-commerce,B,,,,unknown,,data|ML|forecasting,true
+Celonis,,DE,Munich,Process mining,B,,greenhouse,celonis,unknown,,data|ML,true
+Delivery Hero,,DE,Berlin,Logistics,C,,,,unknown,,data|optimisation,true
+N26,,DE,Berlin,Fintech,C,,greenhouse,n26,unknown,,data|risk,true
+Spotify,,SE,Stockholm,Consumer tech,B,,lever,spotify,unknown,,data|ML|experimentation,true
+Klarna,,SE,Stockholm,Fintech,C,,,,unknown,,data|risk,true
+Wolt,Wolt English|Wolt Enterprises,FI,Helsinki,Logistics,C,,greenhouse,wolt,unknown,,optimisation|data,true
+Novo Nordisk,,DK,Copenhagen,Pharma,C,,,,unknown,,data|statistics,true
+Ocado Technology,Ocado|Ocado Group,GB,Hatfield|London,Robotics & logistics,B,,greenhouse,ocadogroup,unknown,,optimisation|robotics|simulation,true
+Monzo,Monzo Bank,GB,London,Fintech,C,,greenhouse,monzo,unknown,,data|ML,true
+Revolut,,GB,London,Fintech,C,,,,unknown,,data|ML,true
+Stripe,,IE,Dublin,Fintech,C,,greenhouse,stripe,unknown,,data|ML,true
+Criteo,,FR,Paris,Ad tech,C,,,,unknown,,ML|experimentation,true
+Dataiku,,FR,Paris,AI platform,C,,greenhouse,dataiku,unknown,,data|ML,true
+Feedzai,,PT,Lisbon|Coimbra|Porto,Fintech,B,,greenhouse,feedzai,unknown,,ML|risk,true
+Sword Health,Sword,PT,Porto|Lisbon,Health tech,B,,greenhouse,swordhealth,unknown,,AI|data,true
+Unbabel,,PT,Lisbon,AI,C,,,,unknown,,AI|NLP,true
+Anthropic,,US,San Francisco,AI,B,,greenhouse,anthropic,unknown,,AI|LLM|research,true
+OpenAI,,US,San Francisco,AI,B,,ashby,openai,unknown,,AI|LLM|research,true
+Databricks,,US,San Francisco,Data platform,C,,greenhouse,databricks,unknown,,data|ML,true
+Waymo,,US,Mountain View,Autonomous driving,B,,greenhouse,waymo,unknown,,autonomy|simulation,true
