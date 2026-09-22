@@ -29,3 +29,4 @@ dist/
 # *.example.yaml files are what loads until these exist.
 config/job_search.yaml
 config/my_skills.yaml
+config/my_profile.md

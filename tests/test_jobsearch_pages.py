@@ -102,8 +102,8 @@ def test_the_setup_page_renders_every_tab(job_app):
     _populate()
     at = _run(SETUP_PAGE)
     _ok(at)
-    assert [t.label for t in at.tabs] == ["Profile", "Skills", "Target companies",
-                                          "Sources & health"]
+    assert [t.label for t in at.tabs] == ["Profile", "My CV (for the AI)", "Skills",
+                                          "Target companies", "Sources & health"]
     assert any("Countries I can already work in" in str(w.label) for w in at.multiselect)
 
 

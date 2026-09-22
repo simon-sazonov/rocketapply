@@ -29,10 +29,15 @@ from .schema import JOB_SCHEMA_HINT, job_response_format
 log = logging.getLogger(__name__)
 
 PROFILE_FILE = "profile.md"
+#: The owner's own CV-and-goals text. Gitignored, because it is a CV; the
+#: tracked `profile.md` stays the template and is read only if this is absent.
+PERSONAL_PROFILE_FILE = "my_profile.md"
+
 
 def profile_path(settings: Settings | None = None) -> Path:
     _ = settings
-    return config_dir() / PROFILE_FILE
+    personal = config_dir() / PERSONAL_PROFILE_FILE
+    return personal if personal.exists() else config_dir() / PROFILE_FILE
 
 
 def load_profile(settings: Settings | None = None) -> str | None:

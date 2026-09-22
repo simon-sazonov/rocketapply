@@ -210,6 +210,9 @@ class Sources(BaseModel):
 
     #: Poll the public ATS board of every target company that has one.
     target_ats: bool = True
+    #: …and of every company on the people-search list (config/companies.csv,
+    #: the motorsport teams) that has one, so "motorsport list only" has jobs.
+    people_list_ats: bool = True
     arbeitnow: ArbeitnowConfig = Field(default_factory=ArbeitnowConfig)
     adzuna: AdzunaConfig = Field(default_factory=AdzunaConfig)
     #: How long a fetched page is reused. A daily search wants hours, not the

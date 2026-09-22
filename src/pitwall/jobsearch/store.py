@@ -162,7 +162,7 @@ _INBOX_SQL = """
            j.languages_required,
            s.name AS source_name, s.kind AS source_kind,
            c.name AS networking_company,
-           t.name AS target_name, t.priority AS target_priority,
+           t.name AS target_name, t.priority AS target_priority, t.tags AS target_tags,
            m.passed, m.filter_reasons, m.score, m.label, m.components,
            m.reasons_plus, m.reasons_minus, m.matched_skills, m.missing_skills,
            m.visa_fit, m.ai_score, m.ai_reasons, m.config_hash
@@ -261,6 +261,11 @@ def load_inbox(conn: sqlite3.Connection) -> Inbox:
                   "url": m.get("url"), "status": m.get("status")} for m in members),
                 key=lambda m: source_rank(m["kind"]),
             ),
+            # Which of the owner's lists this vacancy belongs to — any source
+            # carrying it counts, not only the one chosen as the Apply link.
+            "on_target_list": any(m.get("target_company_id") for m in members),
+            "on_people_list": any(m.get("company_id") for m in members),
+            "target_tags": sorted({t for m in members for t in loads(m.get("target_tags"))}),
             "seen_at": seen,
             "changed_since_seen": bool(seen and changed and changed > seen),
             "dismissed_at": review.get("dismissed_at"),

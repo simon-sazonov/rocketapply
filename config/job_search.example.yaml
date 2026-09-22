@@ -127,6 +127,9 @@ weights:
 sources:
   # Every company in config/target_companies.csv with an ats_kind/ats_token.
   target_ats: true
+  # …and every people-search company (config/companies.csv — the motorsport
+  # teams) whose public board is known.
+  people_list_ats: true
   arbeitnow:
     enabled: true
     max_pages: 4          # x250 postings, newest first

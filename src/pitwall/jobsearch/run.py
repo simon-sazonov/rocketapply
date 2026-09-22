@@ -110,6 +110,25 @@ class JobSearch:
                     continue
                 source.target_company_id = int(row["id"])  # type: ignore[attr-defined]
                 out.append(source)
+        if src_cfg.people_list_ats:
+            # The people-search list's boards (the motorsport teams). Already
+            # linked to their company, so their postings also reach Openings.
+            taken = {(s.ats, s.token) for s in out if isinstance(s, ATSSource)}
+            for row in self.repos.companies.all(active_only=True):
+                kind, token = row.get("ats_kind"), row.get("ats_token")
+                if not kind or not token or (kind, token) in taken:
+                    continue
+                try:
+                    board = ATSSource(kind, token, company_id=int(row["id"]),
+                                      company_name=row["name"], settings=self.settings,
+                                      client=client)
+                except ValueError as exc:
+                    stats.notes.append(f"{row['name']}: {exc}")
+                    continue
+                target = index.match(normalize_company(row["name"]))
+                board.target_company_id = int(target["id"]) if target else None  # type: ignore[attr-defined]
+                taken.add((kind, token))
+                out.append(board)
         if src_cfg.arbeitnow.enabled:
             out.append(ArbeitnowSource(max_pages=src_cfg.arbeitnow.max_pages,
                                        settings=self.settings, client=client))
@@ -294,7 +313,8 @@ class JobSearch:
             return
         profile = load_profile(self.settings)
         if not profile:
-            stats.notes.append("AI fit skipped — write config/profile.md to enable it")
+            stats.notes.append("AI fit skipped — write your CV on 🧭 Job Setup → My CV "
+                               "(config/my_profile.md) to enable it")
             return
         rows = [dict(r) for r in self.conn.execute(
             """
