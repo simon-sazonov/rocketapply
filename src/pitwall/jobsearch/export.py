@@ -139,3 +139,91 @@ def applications_csv(conn: sqlite3.Connection) -> str:
             "history": history,
         })
     return _csv(rows, APPLICATION_COLUMNS)
+
+
+# ─────────────────────────── a RocketApply batch ───────────────────────────
+#
+# What you work through when applying: one row per application in an export
+# batch, in the order it was exported, with the link to apply at and the
+# ABSOLUTE path of every file to upload. The paths point at the files where they
+# already are in `output/` — nothing is copied — and `apply tidy` leaves those
+# folders in place, so the CSV stays true.
+
+BATCH_COLUMNS = (
+    "#", "company", "role", "location", "score", "why_matched", "concerns", "apply_link",
+    "cv_pdf", "letter_pdf", "letter_txt", "cv_docx", "letter_state", "folder", "status",
+    "application_id", "job_id",
+)
+
+
+def _reasons(raw: Any) -> str:
+    from ..db import loads
+
+    items = raw if isinstance(raw, list) else loads(raw)
+    return " | ".join(str(r).lstrip("+?- ").strip() for r in items or [])
+
+
+def batch_rows(conn: sqlite3.Connection, batch_id: int) -> list[dict[str, Any]]:
+    import pathlib
+
+    from ..apply.history import read
+    from .tracker import batch_items
+
+    rows = []
+    for item in batch_items(conn, batch_id):
+        match = conn.execute(
+            "SELECT m.score, m.reasons_plus, m.reasons_minus, j.url, j.location"
+            " FROM jobs j LEFT JOIN job_matches m ON m.job_id = j.id WHERE j.id = ?",
+            (item.get("job_id"),),
+        ).fetchone()
+        match = dict(match) if match else {}
+        folder = item.get("exported_dir") or item.get("generation_dir") or ""
+        generation = read(folder) if folder else None
+
+        def path(value: Any) -> str:
+            return str(pathlib.Path(value).resolve()) if value else ""
+
+        rows.append({
+            "#": item["position"],
+            "company": item.get("company_name") or "",
+            "role": item.get("title") or "",
+            "location": item.get("location") or match.get("location") or "",
+            "score": round(match["score"], 1) if match.get("score") is not None else "",
+            "why_matched": _reasons(match.get("reasons_plus")),
+            "concerns": _reasons(match.get("reasons_minus")),
+            "apply_link": item.get("application_url") or match.get("url") or "",
+            "cv_pdf": path(generation.cv_pdf) if generation else "",
+            "letter_pdf": path(generation.letter_pdf) if generation else "",
+            "letter_txt": path(generation.letter_path) if generation else "",
+            "cv_docx": path(generation.cv_docx) if generation else "",
+            "letter_state": (generation.state if generation else "") or "",
+            "folder": path(folder),
+            "status": item.get("status") or "",
+            "application_id": item["application_id"],
+            "job_id": item.get("job_id") or "",
+        })
+    return rows
+
+
+def batch_csv(conn: sqlite3.Connection, batch_id: int) -> str:
+    return _csv(batch_rows(conn, batch_id), BATCH_COLUMNS)
+
+
+def write_batch_csv(conn: sqlite3.Connection, batch_id: int,
+                    directory: str = "output/exports") -> Any:
+    """The batch's CSV on disk, UTF-8 with a BOM so Excel and Numbers read the
+    accents in company names correctly. Records the path on the batch."""
+    import pathlib
+
+    from ..apply.packager import slug
+    from .tracker import set_batch_csv
+
+    batch = conn.execute("SELECT name FROM export_batches WHERE id = ?", (batch_id,)).fetchone()
+    if batch is None:
+        raise ValueError(f"no export batch {batch_id}")
+    folder = pathlib.Path(directory)
+    folder.mkdir(parents=True, exist_ok=True)
+    target = (folder / f"{slug(str(batch['name']), limit=60)}.csv").resolve()
+    target.write_text(batch_csv(conn, batch_id), encoding="utf-8-sig")
+    set_batch_csv(conn, batch_id, str(target))
+    return target
