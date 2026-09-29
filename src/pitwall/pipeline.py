@@ -22,6 +22,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 from .config import Settings, get_settings
@@ -180,8 +181,13 @@ class Pipeline:
         repos: Repos | None = None,
         *,
         on_progress: ProgressFn | None = None,
+        inputs: tuple[Path | str, Path | str] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
+        #: (companies.csv, roles.csv) to read instead of config/. RocketApply's
+        #: employer people search passes its own pair, against its own database,
+        #: so a job's employer never lands in the motorsport list. None = config/.
+        self._inputs = inputs
         self.settings.ensure_dirs()
         self.repos = repos or open_repos(self.settings)
         self.conn: sqlite3.Connection = self.repos.conn
@@ -227,7 +233,11 @@ class Pipeline:
     # ─────────────────────── stage 0: inputs ────────────────────────
 
     def load_inputs(self, params: RunParams | None = None) -> tuple[list[Company], list[Role], Any]:
-        companies, roles, report = load_and_sync(self.conn)
+        if self._inputs is not None:
+            companies, roles, report = load_and_sync(
+                self.conn, companies_path=self._inputs[0], roles_path=self._inputs[1])
+        else:
+            companies, roles, report = load_and_sync(self.conn)
         if params:
             if params.companies:
                 wanted = {c.casefold() for c in params.companies}
