@@ -324,3 +324,383 @@ def filter_reason_counts(inbox: Inbox) -> dict[str, int]:
             code = str(reason.get("code") if isinstance(reason, dict) else reason)
             counts[code] = counts.get(code, 0) + 1
     return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+
+
+# ─────────────────────────── the fast search ─────────────────────────────
+#
+# RocketApply's search box. `load_inbox` reads every cluster with its full
+# description into Python (5 s for 27k vacancies), which is right for a page
+# that shows all of them and wrong for a box that should answer as you type.
+# This pushes every filter into one SQL statement and never reads a
+# description. The one thing SQL cannot do cheaply — pick each vacancy's
+# representative when several sources carry it — is done once per data version
+# in Python, with `pick_canonical` itself, over only the ~600 clusters that have
+# more than one member. Parity with the inbox is a test, not a hope.
+
+
+@dataclass(frozen=True)
+class JobQuery:
+    """What the search box and the Filters popover ask for. Empty = no filter."""
+
+    text: str = ""
+    countries: tuple[str, ...] = ()        # ISO-2, any of
+    roles: tuple[str, ...] = ()            # role labels, any of
+    experience: tuple[str, ...] = ()       # intern | entry | mid | senior | unknown
+    work_modes: tuple[str, ...] = ()       # remote | hybrid | onsite | unknown
+    visa: tuple[str, ...] = ()             # ok | explicit | likely | unknown | no
+    posted_within_days: int | None = None
+    min_score: float | None = None
+    min_salary: float | None = None
+    salary_currency: str | None = None     # the minimum applies within one currency
+    include_no_salary: bool = True
+    lists: tuple[str, ...] = ()            # "target" | "people" — either of
+    include_filtered: bool = False         # jobs your hard rules rejected
+    include_dismissed: bool = False
+    include_closed: bool = False
+    hide_tracked: bool = False             # already selected, generated or applied
+    sort: str = "score"                    # score | posted | company
+
+
+@dataclass
+class SearchPage:
+    rows: list[dict[str, Any]]
+    total: int
+
+
+@dataclass(frozen=True)
+class _Shadow:
+    """Cluster facts for the ~600 vacancies more than one source carries."""
+
+    hidden: tuple[int, ...]          # non-representative members: never listed
+    reopened: tuple[int, ...]        # representative closed, another member open
+    on_target: tuple[int, ...]       # representative not on the list, a member is
+    on_people: tuple[int, ...]
+
+
+_SHADOW: dict[str, Any] = {"key": None, "value": None}
+
+_BASE_FROM = """
+      FROM jobs j
+      JOIN job_matches m            ON m.job_id = j.id
+      LEFT JOIN target_companies t  ON t.id = j.target_company_id
+      LEFT JOIN companies c         ON c.id = j.company_id
+      LEFT JOIN job_review r        ON r.cluster_id = j.cluster_id
+"""
+
+_SEARCH_COLUMNS = """
+    j.id, j.cluster_id, j.title, j.url, j.location, j.country, j.countries, j.city,
+    j.cities, j.remote_status, j.remote_regions, j.role_labels, j.experience_level,
+    j.experience_min, j.salary_min, j.salary_max, j.salary_currency, j.salary_text,
+    j.visa_status, j.posted_at, j.first_seen_at, j.status, j.agency, j.target_company_id,
+    j.company_id, j.posting_company, j.description_truncated,
+    COALESCE(t.name, NULLIF(j.posting_company, ''), c.name, '') AS company,
+    t.priority AS target_priority, c.name AS networking_company,
+    m.passed, m.score, m.label, m.visa_fit, m.ai_score, m.reasons_plus, m.reasons_minus,
+    m.filter_reasons, r.dismissed_at, r.seen_at, r.feedback,
+    a.id AS application_id, a.status AS application_status
+"""
+
+_SORTS = {
+    "score": "m.score DESC, j.id",
+    "posted": "COALESCE(j.posted_at, j.first_seen_at) DESC, m.score DESC",
+    "company": "company COLLATE NOCASE, m.score DESC",
+}
+
+
+def _data_version(conn: sqlite3.Connection) -> str:
+    """Changes whenever clusters or scores can have. Only indexed reads: a
+    `MAX(last_seen_at)` here cost 0.15 s a search, because it walks every
+    posting's description to reach a column stored after it."""
+    a = conn.execute("SELECT COUNT(*), MAX(id), MAX(cluster_id) FROM jobs").fetchone()
+    b = conn.execute("SELECT COUNT(*), MAX(scored_at) FROM job_matches").fetchone()
+    c = conn.execute("SELECT id, status FROM runs WHERE command = 'job-search'"
+                     " ORDER BY id DESC LIMIT 1").fetchone()
+    return json.dumps([list(a), list(b), list(c) if c else None], default=str)
+
+
+def cluster_shadow(conn: sqlite3.Connection) -> _Shadow:
+    """Which rows stand for which vacancy, cached until the data changes."""
+    key = _data_version(conn)
+    if _SHADOW["key"] == key and _SHADOW["value"] is not None:
+        return _SHADOW["value"]
+    rows = [dict(r) for r in conn.execute(
+        """
+        SELECT j.id, j.cluster_id, s.kind AS source_kind, j.description_truncated,
+               CASE WHEN length(j.description) > 0 THEN 'x' ELSE '' END AS description,
+               j.status, j.last_seen_at, j.target_company_id, j.company_id
+          FROM jobs j
+          JOIN job_matches m ON m.job_id = j.id
+          LEFT JOIN job_sources s ON s.id = j.source_id
+         WHERE j.cluster_id IN (
+               SELECT j2.cluster_id FROM jobs j2 JOIN job_matches m2 ON m2.job_id = j2.id
+                WHERE j2.cluster_id IS NOT NULL
+                GROUP BY j2.cluster_id HAVING COUNT(*) > 1)
+        """
+    )]
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(int(row["cluster_id"]), []).append(row)
+    hidden: list[int] = []
+    reopened: list[int] = []
+    on_target: list[int] = []
+    on_people: list[int] = []
+    for members in grouped.values():
+        best = pick_canonical(members)
+        bid = int(best["id"])
+        hidden += [int(m["id"]) for m in members if int(m["id"]) != bid]
+        if best["status"] != "open" and any(m["status"] == "open" for m in members):
+            reopened.append(bid)
+        if not best.get("target_company_id") and any(m.get("target_company_id") for m in members):
+            on_target.append(bid)
+        if not best.get("company_id") and any(m.get("company_id") for m in members):
+            on_people.append(bid)
+    value = _Shadow(tuple(hidden), tuple(reopened), tuple(on_target), tuple(on_people))
+    _SHADOW.update(key=key, value=value)
+    return value
+
+
+def _like(token: str) -> str:
+    return "%" + token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _where(q: JobQuery, shadow: _Shadow, *, skip: str | None = None
+           ) -> tuple[str, dict[str, Any]]:
+    """The WHERE clause for `q`, leaving out one dimension for its own facet.
+
+    Lists are bound as JSON arrays and unpacked with `json_each`, so the SQL
+    text never depends on how many values were chosen.
+    """
+    # `m.job_id`, not `j.id`: the same value, but naming the matches table keeps
+    # SQLite starting from its small `passed` index instead of scanning `jobs`,
+    # whose rows carry every description — 0.13 s against 0.03 s.
+    clauses = ["j.cluster_id IS NOT NULL",
+               "m.job_id NOT IN (SELECT value FROM json_each(:hidden))"]
+    params: dict[str, Any] = {"hidden": json.dumps(shadow.hidden)}
+    if not q.include_closed:
+        # Unary `+` keeps SQLite off `ix_jobs_status`, for the same reason as above.
+        clauses.append("(+j.status = 'open' OR j.id IN (SELECT value FROM json_each(:reopened)))")
+        params["reopened"] = json.dumps(shadow.reopened)
+    if not q.include_filtered:
+        clauses.append("m.passed = 1")
+    if not q.include_dismissed:
+        clauses.append("r.dismissed_at IS NULL")
+    if q.hide_tracked:
+        clauses.append("NOT EXISTS (SELECT 1 FROM applications x WHERE x.cluster_id ="
+                       " j.cluster_id AND x.status != 'SKIPPED')")
+    tokens = [t for t in (q.text or "").lower().split() if t][:6]
+    for i, token in enumerate(tokens):
+        key = f"t{i}"
+        params[key] = _like(token)
+        clauses.append(
+            f"(lower(j.title) LIKE :{key} ESCAPE '\\' OR lower(j.posting_company) LIKE :{key}"
+            f" ESCAPE '\\' OR lower(t.name) LIKE :{key} ESCAPE '\\' OR lower(c.name) LIKE"
+            f" :{key} ESCAPE '\\' OR lower(j.location) LIKE :{key} ESCAPE '\\'"
+            f" OR lower(j.skills) LIKE :{key} ESCAPE '\\')"
+        )
+    if q.countries and skip != "countries":
+        params["countries"] = json.dumps(list(q.countries))
+        clauses.append("EXISTS (SELECT 1 FROM json_each(j.countries) jc WHERE jc.value IN"
+                       " (SELECT value FROM json_each(:countries)))")
+    if q.roles and skip != "roles":
+        params["roles"] = json.dumps(list(q.roles))
+        clauses.append("EXISTS (SELECT 1 FROM json_each(j.role_labels) jr WHERE jr.value IN"
+                       " (SELECT value FROM json_each(:roles)))")
+    if q.experience and skip != "experience":
+        params["experience"] = json.dumps(list(q.experience))
+        clauses.append("COALESCE(j.experience_level, 'unknown') IN"
+                       " (SELECT value FROM json_each(:experience))")
+    if q.work_modes and skip != "work_modes":
+        params["modes"] = json.dumps(list(q.work_modes))
+        clauses.append("COALESCE(j.remote_status, 'unknown') IN"
+                       " (SELECT value FROM json_each(:modes))")
+    if q.visa and skip != "visa":
+        params["visa"] = json.dumps(list(q.visa))
+        clauses.append("COALESCE(m.visa_fit, 'unknown') IN (SELECT value FROM json_each(:visa))")
+    if q.posted_within_days and skip != "posted":
+        params["window"] = f"-{int(q.posted_within_days)} days"
+        clauses.append("COALESCE(j.posted_at, j.first_seen_at) >= datetime('now', :window)")
+    if q.min_score is not None and skip != "score":
+        params["min_score"] = float(q.min_score)
+        clauses.append("m.score >= :min_score")
+    if q.min_salary is not None and skip != "salary":
+        params["min_salary"] = float(q.min_salary)
+        params["currency"] = (q.salary_currency or "").upper()
+        with_salary = "(j.salary_min >= :min_salary AND upper(j.salary_currency) = :currency)"
+        clauses.append(f"({with_salary} OR j.salary_min IS NULL)" if q.include_no_salary
+                       else with_salary)
+    if q.lists and skip != "lists":
+        either = []
+        if "target" in q.lists:
+            params["on_target"] = json.dumps(shadow.on_target)
+            either.append("j.target_company_id IS NOT NULL OR j.id IN"
+                          " (SELECT value FROM json_each(:on_target))")
+        if "people" in q.lists:
+            params["on_people"] = json.dumps(shadow.on_people)
+            either.append("j.company_id IS NOT NULL OR j.id IN"
+                          " (SELECT value FROM json_each(:on_people))")
+        if either:
+            clauses.append("(" + " OR ".join(either) + ")")
+    return " AND ".join(clauses), params
+
+
+def _search_row(row: sqlite3.Row, shadow: _Shadow) -> dict[str, Any]:
+    out = dict(row)
+    for key in ("countries", "cities", "role_labels", "remote_regions", "reasons_plus",
+                "reasons_minus", "filter_reasons"):
+        out[key] = loads(out.get(key))
+    out["on_target_list"] = bool(out.get("target_company_id")) or out["id"] in shadow.on_target
+    out["on_people_list"] = bool(out.get("company_id")) or out["id"] in shadow.on_people
+    if out["id"] in shadow.reopened:
+        out["status"] = "open"
+    return out
+
+
+def search_jobs(conn: sqlite3.Connection, q: JobQuery | None = None, *,
+                limit: int = 100, offset: int = 0) -> SearchPage:
+    """One page of vacancies — one row per cluster — best first, no descriptions."""
+    q = q or JobQuery()
+    shadow = cluster_shadow(conn)
+    where, params = _where(q, shadow)
+    total = int(conn.execute(f"SELECT COUNT(*) {_BASE_FROM} WHERE {where}", params
+                             ).fetchone()[0])
+    order = _SORTS.get(q.sort, _SORTS["score"])
+    sql = f"""
+        SELECT {_SEARCH_COLUMNS}
+          {_BASE_FROM}
+          LEFT JOIN applications a ON a.id = (
+               SELECT MAX(id) FROM applications WHERE cluster_id = j.cluster_id)
+         WHERE {where}
+         ORDER BY {order}
+         LIMIT :limit OFFSET :offset
+    """
+    params.update(limit=int(limit), offset=int(offset))
+    return SearchPage([_search_row(r, shadow) for r in conn.execute(sql, params)], total)
+
+
+def search_ids(conn: sqlite3.Connection, q: JobQuery, *, limit: int) -> list[int]:
+    """The top `limit` job ids for `q` — what "select the top N" selects."""
+    shadow = cluster_shadow(conn)
+    where, params = _where(q, shadow)
+    order = _SORTS.get(q.sort, _SORTS["score"])
+    params["limit"] = int(limit)
+    return [int(r[0]) for r in conn.execute(
+        f"SELECT j.id {_BASE_FROM} WHERE {where} ORDER BY {order} LIMIT :limit", params)]
+
+
+def search_facets(conn: sqlite3.Connection, q: JobQuery | None = None
+                  ) -> dict[str, dict[str, int]]:
+    """How many results each filter option would give, with the rest of the
+    query applied. Each dimension leaves its own filter out, so choosing
+    Germany does not make every other country read zero."""
+    q = q or JobQuery()
+    shadow = cluster_shadow(conn)
+    out: dict[str, dict[str, int]] = {}
+
+    def grouped(dim: str, expr: str, join: str = "") -> dict[str, int]:
+        where, params = _where(q, shadow, skip=dim)
+        sql = (f"SELECT {expr} AS v, COUNT(*) AS n {_BASE_FROM} {join} WHERE {where}"
+               " GROUP BY v ORDER BY n DESC")
+        return {str(r["v"]): int(r["n"]) for r in conn.execute(sql, params) if r["v"] is not None}
+
+    out["countries"] = grouped("countries", "jc2.value", ", json_each(j.countries) jc2")
+    out["roles"] = grouped("roles", "jr2.value", ", json_each(j.role_labels) jr2")
+    out["experience"] = grouped("experience", "COALESCE(j.experience_level, 'unknown')")
+    out["work_modes"] = grouped("work_modes", "COALESCE(j.remote_status, 'unknown')")
+    out["visa"] = grouped("visa", "COALESCE(m.visa_fit, 'unknown')")
+    out["label"] = grouped("score", "m.label")
+    where, params = _where(q, shadow, skip="posted")
+    windows = (1, 3, 7, 14, 30)
+    cases = ", ".join(
+        f"SUM(CASE WHEN COALESCE(j.posted_at, j.first_seen_at) >= datetime('now', '-{d} days')"
+        f" THEN 1 ELSE 0 END) AS d{d}" for d in windows)
+    r = conn.execute(f"SELECT {cases} {_BASE_FROM} WHERE {where}", params).fetchone()
+    out["posted"] = {str(d): int(r[f"d{d}"] or 0) for d in windows}
+    where, params = _where(q, shadow, skip="lists")
+    params.update(on_target=json.dumps(shadow.on_target), on_people=json.dumps(shadow.on_people))
+    r = conn.execute(
+        f"""SELECT SUM(CASE WHEN j.target_company_id IS NOT NULL OR j.id IN
+                   (SELECT value FROM json_each(:on_target)) THEN 1 ELSE 0 END) AS target,
+                   SUM(CASE WHEN j.company_id IS NOT NULL OR j.id IN
+                   (SELECT value FROM json_each(:on_people)) THEN 1 ELSE 0 END) AS people
+            {_BASE_FROM} WHERE {where}""", params).fetchone()
+    out["lists"] = {"target": int(r["target"] or 0), "people": int(r["people"] or 0)}
+    where, params = _where(q, shadow, skip="salary")
+    out["currencies"] = {
+        str(r["v"]): int(r["n"]) for r in conn.execute(
+            f"SELECT upper(j.salary_currency) AS v, COUNT(*) AS n {_BASE_FROM} WHERE {where}"
+            " AND j.salary_min IS NOT NULL AND j.salary_currency IS NOT NULL"
+            " AND j.salary_currency != '' GROUP BY v ORDER BY n DESC", params)
+    }
+    return out
+
+
+def stage_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """The process strip: found → selected → documents ready → in process → applied."""
+    found = search_jobs(conn, JobQuery(), limit=0).total
+    counts = {r["status"]: int(r["n"]) for r in conn.execute(
+        "SELECT status, COUNT(*) AS n FROM applications GROUP BY status")}
+    submitted = ("APPLIED", "ONLINE_ASSESSMENT", "INTERVIEW", "FINAL_INTERVIEW", "OFFER",
+                 "REJECTED", "WITHDRAWN")
+    return {
+        "found": found,
+        "selected": counts.get("SHORTLISTED", 0),
+        "docs_ready": counts.get("CV_READY", 0),
+        "in_process": counts.get("IN_PROCESS", 0),
+        "applied": sum(counts.get(s, 0) for s in submitted),
+    }
+
+
+def job_detail(conn: sqlite3.Connection, job_id: int) -> dict[str, Any] | None:
+    """Everything about one vacancy, description included — the detail panel."""
+    r = conn.execute(
+        """
+        SELECT j.*, s.name AS source_name, s.kind AS source_kind,
+               COALESCE(t.name, NULLIF(j.posting_company, ''), c.name, '') AS company,
+               t.priority AS target_priority, c.name AS networking_company,
+               m.passed, m.score, m.label, m.components, m.reasons_plus, m.reasons_minus,
+               m.filter_reasons, m.matched_skills, m.missing_skills, m.visa_fit,
+               m.ai_score, m.ai_reasons, m.scored_at
+          FROM jobs j
+          LEFT JOIN job_matches m ON m.job_id = j.id
+          LEFT JOIN job_sources s ON s.id = j.source_id
+          LEFT JOIN target_companies t ON t.id = j.target_company_id
+          LEFT JOIN companies c ON c.id = j.company_id
+         WHERE j.id = ?
+        """,
+        (job_id,),
+    ).fetchone()
+    if r is None:
+        return None
+    out = dict(r)
+    for key in ("countries", "cities", "role_labels", "remote_regions", "reasons_plus",
+                "reasons_minus", "filter_reasons", "matched_skills", "missing_skills",
+                "skills", "skills_nice", "employment_types", "ai_reasons", "languages_required"):
+        out[key] = loads(out.get(key))
+    try:
+        out["components"] = json.loads(out.get("components") or "{}")
+    except json.JSONDecodeError:
+        out["components"] = {}
+    try:
+        langs = conn.execute("SELECT missing_languages FROM job_matches WHERE job_id = ?",
+                             (job_id,)).fetchone()
+        out["missing_languages"] = loads(langs[0]) if langs else []
+    except sqlite3.OperationalError:     # a database from before v10
+        out["missing_languages"] = []
+    out["members"] = [dict(m) for m in conn.execute(
+        """
+        SELECT j.id, j.url, j.status, s.name AS source, s.kind
+          FROM jobs j LEFT JOIN job_sources s ON s.id = j.source_id
+         WHERE j.cluster_id = ? ORDER BY j.id
+        """,
+        (out.get("cluster_id"),),
+    )] if out.get("cluster_id") is not None else []
+    out["members"].sort(key=lambda m: source_rank(m.get("kind")))
+    app = conn.execute(
+        "SELECT * FROM applications WHERE cluster_id = ? ORDER BY id DESC LIMIT 1",
+        (out.get("cluster_id"),),
+    ).fetchone()
+    out["application"] = dict(app) if app else None
+    review = conn.execute("SELECT * FROM job_review WHERE cluster_id = ?",
+                          (out.get("cluster_id"),)).fetchone()
+    out["review"] = dict(review) if review else None
+    return out
