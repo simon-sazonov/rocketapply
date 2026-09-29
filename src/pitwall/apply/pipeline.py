@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import pathlib
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -58,6 +59,10 @@ class ApplicationResult:
     cv_pdf: pathlib.Path | None = None
     cv_docx: pathlib.Path | None = None
     letter_path: pathlib.Path | None = None
+    #: The letter on the CV's letterhead — rendered for a clean or a
+    #: needs-review letter, never for one marked DO_NOT_SEND.
+    letter_pdf: pathlib.Path | None = None
+    letter_docx: pathlib.Path | None = None
     provenance_path: pathlib.Path | None = None
     run_dir: pathlib.Path | None = None
     #: True when a CLAIM or POLICY violation survived every repair. The letter IS
@@ -101,14 +106,20 @@ def generate_application(
     dry_run: bool = False,
     router: Any = None,
     progress: Stage | None = None,
+    on_event: Any = None,
 ) -> ApplicationResult:
     """Read a posting, decide what is true, and write an application.
 
     Returns rather than raises for the ordinary refusals — a job id that is not
     there, a letter the gates rejected — because both front-ends want to show
     the reason rather than a traceback.
+
+    `on_event` receives a `StageEvent` as each stage starts and finishes, with a
+    summary of what it produced (see `events.py`) — the letter drafts included,
+    as they arrive. `progress` is unchanged and can be used alongside it.
     """
     from ..config import get_settings
+    from . import events as ev
     from .analyzer import analyze_job
     from .families import signal_for
     from .jobs import load_job
@@ -116,7 +127,7 @@ def generate_application(
     from .letter import PROMPT_VERSION, draft_and_check
     from .loader import load_profile
     from .matcher import build_signal, match
-    from .packager import Provenance, output_dir, write_provenance
+    from .packager import Provenance, output_dir, slug, write_provenance
     from .planner import plan_letter
     from .render_docx import assert_same_content, render_docx
     from .render_pdf import render_cv
@@ -126,14 +137,30 @@ def generate_application(
     from .truth import build_truth
 
     # Where we are, so a rate-limit message can name the stage it interrupted.
-    here: dict[str, Any] = {"key": STAGES[0][0], "fraction": 0.0}
+    here: dict[str, Any] = {"key": STAGES[0][0], "fraction": 0.0, "t0": time.monotonic()}
+    router_ref: dict[str, Any] = {"router": None}
+
+    def spent() -> int:
+        r = router_ref["router"]
+        return sum(r.tokens) if r is not None else 0
+
+    def emit(stage: str, status: str, message: str = "", **data: Any) -> None:
+        if on_event is None:
+            return
+        seconds = round(time.monotonic() - here["t0"], 2) if status == "done" else 0.0
+        ev.safe_call(on_event, ev.StageEvent(
+            job_id=job_id, stage=stage, status=status, message=message,
+            fraction=here["fraction"], seconds=seconds, tokens=spent(), data=data,
+        ))
 
     def step(key: str, message: str = "") -> None:
         index = next((i for i, (k, _) in enumerate(STAGES) if k == key), 0)
         label = next((v for k, v in STAGES if k == key), key)
         here["key"], here["fraction"] = key, (index + 1) / len(STAGES)
+        here["t0"] = time.monotonic()
         if progress is not None:
             progress(key, message or label, here["fraction"])
+        emit(key, "start", message or label)
 
     result = ApplicationResult()
     row = load_job(job_id)
@@ -154,17 +181,19 @@ def generate_application(
             settings=settings, cache_dir=pathlib.Path(settings.cache_dir) / "apply"
         )
 
-    if progress is not None and router.on_wait is None:
+    router_ref["router"] = router
+    if (progress is not None or on_event is not None) and router.on_wait is None:
         def waiting(provider: str, seconds: float, attempt: int) -> None:
             # Groq's free tier is 8,000 tokens a minute and the letter prompt is
             # about 5,000, so this fires routinely. Saying so is the difference
             # between "waiting" and "hung".
             current = next((v for k, v in STAGES if k == here["key"]), "working")
-            progress(
-                here["key"],
-                f"{current} · {provider} rate limit, waiting {seconds:.0f}s (attempt {attempt})",
-                here["fraction"],
-            )
+            message = (f"{current} · {provider} rate limit, waiting {seconds:.0f}s"
+                       f" (attempt {attempt})")
+            if progress is not None:
+                progress(here["key"], message, here["fraction"])
+            emit(here["key"], "wait", message, provider=provider, seconds=seconds,
+                 attempt=attempt)
         router.on_wait = waiting
 
     run_dir = pathlib.Path("run") / f"{pathlib.Path(out).name}_{job_id}"
@@ -181,15 +210,25 @@ def generate_application(
     # ── stages 1-3 ──
     if no_llm:
         step("analyse", "skipping the model — deterministic selection only")
+        emit("analyse", "skip", "no model: deterministic selection only")
+        emit("match", "skip", "nothing to match without an analysis")
         signal = signal_for("data_science")
+        step("truth")
         truth = build_truth(profile, job=row)
     else:
         step("analyse")
+        calls_before = len(router.calls)
         analysis = analyze_job(row, router)
         result.analysis = analysis
+        last = router.calls[-1] if len(router.calls) > calls_before else None
+        emit("analyse", "done", **ev.analysis_payload(
+            analysis, cached=bool(last and last.cached),
+            model=f"{last.provider}/{last.model}" if last else "",
+        ))
         step("match")
         matched = match(analysis, profile)
         result.match = matched
+        emit("match", "done", **ev.match_payload(matched))
         signal = build_signal(analysis, profile, row)
         step("truth")
         # Both opinions on what is missing: the analyzer's and the job search's
@@ -212,6 +251,7 @@ def generate_application(
             "overall": matched.overall,
         }
     result.truth = truth
+    emit("truth", "done", **ev.truth_payload(truth))
 
     # ── stage 4a: the CV slots ──
     step("select")
@@ -230,6 +270,7 @@ def generate_application(
     }
     provenance.overrides += config.overrides
     provenance.used_ids += config.used_ids
+    emit("select", "done", **ev.select_payload(config, profile))
 
     if dry_run:
         # Before anything is claimed: a dry run must not create a directory.
@@ -245,7 +286,10 @@ def generate_application(
     # write then failed on a directory that was never made.
     directory = output_dir(out, result.company, result.title, claim=True)
     result.directory = directory
-    stem = f"Simon_Sazonov_{directory.name}"
+    # The owner's name from the profile, so the app is not one person's. For
+    # "Simon Sazonov" this is byte-for-byte the stem it always was.
+    stem = f"{slug(profile.personal.name)}_{directory.name}"
+    divergences: list[str] = []
     if cv:
         pdf = render_cv(profile, frame, config, directory / f"{stem}_CV.pdf")
         docx = render_docx(profile, config, directory / f"{stem}_CV.docx")
@@ -265,6 +309,12 @@ def generate_application(
         provenance.warnings += pdf.warnings
         result.notes += pdf.notes
         result.warnings += pdf.warnings
+        emit("render", "done", **ev.render_payload(
+            directory=directory, cv_pdf=pdf.path, pages=pdf.page_count,
+            warnings=list(pdf.warnings), divergences=len(divergences),
+        ))
+    else:
+        emit("render", "skip", "no CV asked for", directory=str(directory))
 
     # ── stages 4b, 5b, 6: the letter ──
     #
@@ -299,6 +349,7 @@ def generate_application(
                 encoding="utf-8",
             )
             provenance.used_ids += plan.evidence_order
+            emit("plan", "done", **ev.plan_payload(plan))
 
             if not dry_run:
                 step("write")
@@ -313,10 +364,14 @@ def generate_application(
                         )
 
                 def keep_draft(round_index: int, attempt: int, text: str) -> None:
-                    """Every draft on disk the moment the model returns it."""
+                    """Every draft on disk the moment the model returns it — and on
+                    screen, for a watcher."""
                     (run_dir / f"05b_letter_r{round_index}a{attempt}.txt").write_text(
                         text, encoding="utf-8"
                     )
+                    emit("write", "draft", f"draft · round {round_index}, attempt {attempt}",
+                         round=round_index, attempt=attempt, text=text,
+                         words=len(text.split()))
 
                 result.letter, result.fact = draft_and_check(
                     profile, plan, blocks, truth, router, row, written_by="groq",
@@ -344,9 +399,17 @@ def generate_application(
                         ],
                     }
                     result.notes += result.fact.notes
+                emit("write", "done", **ev.write_payload(result.letter, result.fact),
+                     text=result.letter.text)
+        else:
+            reason = ("no letter asked for" if not letter else
+                      "no model: the letter needs one" if no_llm else "no posting analysis")
+            emit("plan", "skip", reason)
+            emit("write", "skip", reason)
     except Exception as exc:  # noqa: BLE001 - the CV is on disk; the note says why
         log.warning("the letter stage failed for job %s: %s", job_id, exc)
         result.warnings.append(f"the letter stage stopped: {exc}")
+        emit(here["key"], "error", f"the letter stage stopped: {exc}", error=str(exc))
 
 
     # ── stage 7: the tail, reached on EVERY path that claimed a directory ──
@@ -366,6 +429,23 @@ def generate_application(
             (run_dir / "REJECTED_letter.txt").write_text(
                 result.letter.text, encoding="utf-8"
             )
+        if result.letter_state in ("clean", "review"):
+            # Typeset for the upload field. Never for DO_NOT_SEND: a finished-
+            # looking PDF of an unsupported claim is the file sent by mistake.
+            # Never fatal either — the .txt is already written.
+            try:
+                from .render_letter import render_letter_files
+
+                typeset = render_letter_files(
+                    directory, stem, result.letter.text, profile=profile, frame=frame,
+                    company=result.company, title=result.title,
+                )
+                result.letter_pdf, result.letter_docx = typeset.pdf, typeset.docx
+                provenance.page_count["letter"] = typeset.page_count
+                result.warnings += typeset.warnings
+            except Exception as exc:  # noqa: BLE001 - see above
+                log.warning("could not typeset the letter for job %s: %s", job_id, exc)
+                result.warnings.append(f"the letter PDF was not made: {exc}")
 
     provenance.llm_calls = [
         {"stage": c.task, "provider": c.provider, "model": c.model,
@@ -421,11 +501,14 @@ def generate_application(
         root=out,
     )
     if filed != directory:
-        for field in ("directory", "cv_pdf", "cv_docx", "letter_path", "provenance_path"):
+        for field in ("directory", "cv_pdf", "cv_docx", "letter_path", "letter_pdf",
+                      "letter_docx", "provenance_path"):
             path = getattr(result, field)
             if path is not None:
                 setattr(result, field, filed / path.relative_to(directory)
                         if path != directory else filed)
+    # After filing, so every path in it is where the file now is.
+    emit("package", "done", **ev.package_payload(result))
     return result
 
 

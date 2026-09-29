@@ -16,6 +16,7 @@ import json
 import logging
 import pathlib
 from dataclasses import dataclass, field
+from typing import Any
 
 from .voice_eval import Rating, for_directory, load
 
@@ -36,7 +37,13 @@ class Generation:
     cv_pdf: pathlib.Path | None = None
     cv_docx: pathlib.Path | None = None
     letter_path: pathlib.Path | None = None
+    #: The letter typeset on the CV's letterhead (since 29 Sep 2026); absent
+    #: for older runs and for a letter marked DO_NOT_SEND.
+    letter_pdf: pathlib.Path | None = None
+    letter_docx: pathlib.Path | None = None
     needs_review: bool = False
+    #: Tokens the run spent on model calls that were not answered from cache.
+    tokens: int = 0
     #: clean | review | unsent | "". Read from provenance where it exists, else
     #: inferred from the letter's filename.
     state: str = ""
@@ -157,53 +164,68 @@ def scan(output_dir: pathlib.Path | str = "output") -> list[Generation]:
         return []
 
     ratings = load()
-    out: list[Generation] = []
-    for directory in _application_dirs(root):
-        manifest = directory / "provenance.json"
-        try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            log.info("skipping %s: %s", directory.name, exc)
-            continue
-
-        job = data.get("job") or {}
-        check = data.get("fact_check") or {}
-        # Three suffixes since 27 Sep 2026. `_file` is `str.endswith(tuple)`, so
-        # a `_DO_NOT_SEND.txt` letter matched none of them and the worst letter in
-        # a folder read as "there is no letter here at all".
-        letter = _file(
-            directory, "_Cover_Letter.txt", "_Cover_Letter_NEEDS_REVIEW.txt",
-            "_Cover_Letter_DO_NOT_SEND.txt",
-        )
-        # The state is recorded now, rather than inferred from a filename. The
-        # fallback is the filename, because every folder generated before this
-        # change has no `letter` block in its provenance.
-        state = str((data.get("letter") or {}).get("state") or "")
-        if not state and letter:
-            state = ("clean" if letter.name.endswith("_Cover_Letter.txt")
-                     else "unsent" if letter.name.endswith("_DO_NOT_SEND.txt") else "review")
-        out.append(Generation(
-            directory=directory,
-            generated_at=str(data.get("generated_at") or ""),
-            job_id=int(job.get("id") or 0),
-            company=str(job.get("company") or ""),
-            title=str(job.get("title") or "").strip(),
-            url=str(job.get("url") or ""),
-            prompt_version=str(job.get("prompt_version") or ""),
-            cv_pdf=_file(directory, "_CV.pdf"),
-            cv_docx=_file(directory, "_CV.docx"),
-            letter_path=letter,
-            state=state,
-            needs_review=bool(state and state != "clean"),
-            sentences=int(check.get("sentences") or 0),
-            supported=int(check.get("supported") or 0),
-            independent=bool(check.get("independent", True)),
-            coverage=float((data.get("coverage") or {}).get("overall") or 0.0),
-            used_ids=list(data.get("used_ids") or []),
-            rating=for_directory(ratings, directory.name),
-            flagged=[f for f in (check.get("flagged") or []) if isinstance(f, dict)],
-        ))
+    out = [g for g in (read(d, ratings=ratings) for d in _application_dirs(root)) if g]
     return sorted(out, key=lambda g: g.generated_at, reverse=True)
+
+
+def read(directory: pathlib.Path | str, *, ratings: Any = None) -> Generation | None:
+    """One application folder, or None when it has no readable manifest.
+
+    What `scan` does per folder, for a caller that already knows the folder —
+    the CSV export resolves an application's files through this, without
+    walking all of `output/`.
+    """
+    directory = pathlib.Path(directory)
+    manifest = directory / "provenance.json"
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        log.info("skipping %s: %s", directory.name, exc)
+        return None
+    if ratings is None:
+        ratings = load()
+    job = data.get("job") or {}
+    check = data.get("fact_check") or {}
+    # Three suffixes since 27 Sep 2026. `_file` is `str.endswith(tuple)`, so
+    # a `_DO_NOT_SEND.txt` letter matched none of them and the worst letter in
+    # a folder read as "there is no letter here at all".
+    letter = _file(
+        directory, "_Cover_Letter.txt", "_Cover_Letter_NEEDS_REVIEW.txt",
+        "_Cover_Letter_DO_NOT_SEND.txt",
+    )
+    # The state is recorded now, rather than inferred from a filename. The
+    # fallback is the filename, because every folder generated before this
+    # change has no `letter` block in its provenance.
+    state = str((data.get("letter") or {}).get("state") or "")
+    if not state and letter:
+        state = ("clean" if letter.name.endswith("_Cover_Letter.txt")
+                 else "unsent" if letter.name.endswith("_DO_NOT_SEND.txt") else "review")
+    calls = data.get("llm_calls") or []
+    return Generation(
+        directory=directory,
+        generated_at=str(data.get("generated_at") or ""),
+        job_id=int(job.get("id") or 0),
+        company=str(job.get("company") or ""),
+        title=str(job.get("title") or "").strip(),
+        url=str(job.get("url") or ""),
+        prompt_version=str(job.get("prompt_version") or ""),
+        cv_pdf=_file(directory, "_CV.pdf"),
+        cv_docx=_file(directory, "_CV.docx"),
+        letter_path=letter,
+        letter_pdf=_file(directory, "_Cover_Letter.pdf"),
+        letter_docx=_file(directory, "_Cover_Letter.docx"),
+        tokens=sum(int(c.get("prompt_tokens") or 0) + int(c.get("completion_tokens") or 0)
+                   for c in calls if isinstance(c, dict) and not c.get("cached")),
+        state=state,
+        needs_review=bool(state and state != "clean"),
+        sentences=int(check.get("sentences") or 0),
+        supported=int(check.get("supported") or 0),
+        independent=bool(check.get("independent", True)),
+        coverage=float((data.get("coverage") or {}).get("overall") or 0.0),
+        used_ids=list(data.get("used_ids") or []),
+        rating=for_directory(ratings, directory.name),
+        flagged=[f for f in (check.get("flagged") or []) if isinstance(f, dict)],
+    )
 
 
 def find(name: str, output_dir: pathlib.Path | str = "output") -> Generation | None:

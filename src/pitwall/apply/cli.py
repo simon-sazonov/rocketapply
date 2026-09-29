@@ -430,7 +430,7 @@ def batch(
     import datetime as dt
     import pathlib
 
-    from .batch import format_report, load_ledger, run_batch, split
+    from .batch import format_report, letter_texts, load_ledger, run_batch, split
 
     label = name or f"batch-{dt.date.today().isoformat()}"
     ids = list(job)
@@ -440,11 +440,9 @@ def batch(
 
     if report_only:
         rows = load_ledger(label)
-        letters = {}
-        for row in rows:
-            path = pathlib.Path(out) / row.directory / row.letter
-            if row.directory and row.letter and path.exists():
-                letters[row.directory] = path.read_text(encoding="utf-8")
+        # Wherever filing moved them: `out/<dir>/<letter>` found nothing once
+        # runs were filed into buckets, so the duplicate check read zero letters.
+        letters = letter_texts(rows, out)
         console.print(f"\n[bold]{label}[/]\n")
         console.print(format_report(rows, letters=letters))
         return
@@ -704,7 +702,10 @@ def tidy(
     )
 
     root = pathlib.Path(out)
-    plan = build_plan(root)
+    pinned = _exported_folders()
+    plan = build_plan(root, pinned=pinned)
+    if plan.pinned:
+        console.print(f"[dim]{len(plan.pinned)} run(s) an exported CSV points at stay put[/]")
     if not plan.keep and not plan.supersede:
         console.print(f"[dim]nothing in {root}/ yet[/]")
         raise typer.Exit(0)
@@ -735,5 +736,61 @@ def tidy(
     apply_plan(plan, root)
     # Rebuilt from disk AFTER the move, so the index describes what is there
     # rather than what was there.
-    (root / "README.md").write_text(index_markdown(build_plan(root)), encoding="utf-8")
+    (root / "README.md").write_text(index_markdown(build_plan(root, pinned=pinned)),
+                                    encoding="utf-8")
     console.print(f"  index: [bold]{root}/README.md[/]\n")
+
+
+@app.command()
+def letters(
+    out: str = typer.Option("output", "--out", "-o"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="list what would be typeset"),
+) -> None:
+    """Typeset the letters of runs made before letters had a PDF.
+
+    Every folder with a clean or needs-review letter and no
+    `_Cover_Letter.pdf` gets one (and a .docx), on the CV's letterhead. The
+    text is read from the `.txt` as it stands — edits you made there are kept.
+    A DO_NOT_SEND letter is skipped: it must not look finished.
+    """
+    import pathlib
+
+    from .history import scan
+    from .layout import Frame
+    from .loader import load_profile
+    from .render_letter import render_letter_files
+
+    profile, frame = load_profile(), Frame.load()
+    made = 0
+    for generation in scan(pathlib.Path(out)):
+        letter = generation.letter_path
+        if letter is None or generation.letter_pdf is not None:
+            continue
+        if generation.state not in ("clean", "review"):
+            console.print(f"  [dim]skip {generation.name} ({generation.state or 'no letter'})[/]")
+            continue
+        stem = generation.cv_pdf.name.removesuffix("_CV.pdf") if generation.cv_pdf else \
+            letter.name.split("_Cover_Letter")[0]
+        if dry_run:
+            console.print(f"  would typeset {generation.name}")
+            continue
+        text = letter.read_text(encoding="utf-8")
+        render_letter_files(generation.directory, stem, text, profile=profile, frame=frame,
+                            company=generation.company, title=generation.title)
+        made += 1
+        console.print(f"  [green]✓[/] {generation.name}")
+    console.print(f"\n  {made} letter(s) typeset\n")
+
+
+def _exported_folders() -> list[str]:
+    """Folders RocketApply's CSV exports point at, which `tidy` must not move.
+    Never fatal: no database, or one from before v10, means none are pinned."""
+    try:
+        from ..db import get_conn, init_schema
+        from ..jobsearch.tracker import exported_dirs
+
+        conn = get_conn()
+        init_schema(conn)
+        return sorted(exported_dirs(conn))
+    except Exception:  # noqa: BLE001 - see docstring
+        return []

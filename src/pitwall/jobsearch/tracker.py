@@ -400,9 +400,10 @@ def batch_of(conn: sqlite3.Connection, app_id: int) -> dict[str, Any] | None:
 
 
 def exported_dirs(conn: sqlite3.Connection) -> set[str]:
-    """Folder names a CSV has pointed at. `apply tidy` leaves these in place."""
+    """Application folders a CSV has pointed at, as stored (absolute paths).
+    `apply tidy` leaves these where they are."""
     return {
-        str(r[0]).rstrip("/").split("/")[-1]
+        str(r[0])
         for r in conn.execute(
             "SELECT generation_dir FROM export_batch_items WHERE generation_dir IS NOT NULL"
         )

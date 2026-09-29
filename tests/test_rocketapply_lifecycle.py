@@ -146,7 +146,7 @@ def test_export_then_mark_the_batch_applied_leaving_one_behind(jobs):
     assert (summary["size"], summary["applied"], summary["in_process"]) == (3, 2, 1)
     assert summary["applied_at"]
     assert tracker.batch_of(conn, apps[0])["id"] == batch_id
-    assert str(tracker.get(conn, apps[0])["job_id"]) in tracker.exported_dirs(conn)
+    assert f"output/1_ready_to_send/{tracker.get(conn, apps[0])['job_id']}" in tracker.exported_dirs(conn)
 
 
 def test_a_batch_needs_a_name_and_at_least_one_application(jobs):

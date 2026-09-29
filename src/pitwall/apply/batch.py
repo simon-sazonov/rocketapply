@@ -48,7 +48,7 @@ import pathlib
 import re
 import threading
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,7 +59,7 @@ _WRITE_LOCK = threading.Lock()
 
 __all__ = [
     "BatchRow", "LEDGER_DIR", "shard_of", "split", "load_ledger", "append_row",
-    "quality_checks", "duplicate_sentences", "run_batch", "format_report",
+    "quality_checks", "duplicate_sentences", "run_batch", "format_report", "letter_texts",
 ]
 
 LEDGER_DIR = pathlib.Path("run") / "batch"
@@ -95,6 +95,13 @@ class BatchRow:
     shard: int = 0
     prompt_version: str = ""
     finished_at: str = ""
+    #: The application folder after filing, absolute — where the files really
+    #: are. `directory` is only its name, which no longer says which bucket.
+    path: str = ""
+    #: clean | review | unsent | "" — the pipeline's verdict on the letter.
+    letter_state: str = ""
+    #: cv | cv_letter | cv_letter_audit
+    mode: str = ""
 
     @property
     def tokens(self) -> int:
@@ -281,6 +288,10 @@ def run_batch(
     generate: Callable[..., Any] | None = None,
     research: bool = True,
     on_research: Callable[..., None] | None = None,
+    letter: bool = True,
+    on_event: Callable[..., None] | None = None,
+    record: bool = False,
+    hints: Mapping[int, str] | None = None,
 ) -> list[BatchRow]:
     """This shard's jobs, one after another, never stopping for one failure.
 
@@ -299,11 +310,19 @@ def run_batch(
     three things were made safe for it first: output directories are claimed
     atomically, cache entries are written and renamed rather than written in
     place, and SQLite is in WAL mode with a thirty-second busy timeout.
+
+    For RocketApply: `letter=False` makes CVs only (one model call each, no
+    company research); `on_event` receives every job's `StageEvent`s, plus
+    `job/start` and `job/done` around each; `record=True` moves each job with a
+    CV to CV_READY in the tracker; `hints` steers individual letters.
     """
     from .batch import quality_checks as _checks  # re-imported for monkeypatching in tests
+    from .events import StageEvent, safe_call
     from .loader import load_profile
     from .pipeline import generate_application
     from .truth import severity
+
+    mode = ("cv_letter_audit" if audit else "cv_letter") if letter else "cv"
 
     generate = generate or generate_application
     mine = split(job_ids, shards, index)
@@ -317,7 +336,7 @@ def run_batch(
 
     profile = load_profile()
 
-    if research and todo:
+    if research and letter and todo:
         # A SERIAL pre-pass, outside the pool on purpose. The unit of work in a
         # batch is the job, but what a company builds does not depend on which of
         # its postings is being answered — so two workers on two jobs at one
@@ -330,23 +349,41 @@ def run_batch(
         try:
             from .research import prepass
 
-            done_research = prepass(todo, profile=profile, on_company=on_research)
+            def researched(*args: Any, **kwargs: Any) -> None:
+                if on_research is not None:
+                    on_research(*args, **kwargs)
+                safe_call(on_event, StageEvent(
+                    job_id=0, stage="research", status="done",
+                    message=" ".join(str(a) for a in args[:2]),
+                ))
+
+            done_research = prepass(todo, profile=profile, on_company=researched)
             log.info("researched %d compan(ies) before the batch", len(done_research))
         except Exception as exc:  # noqa: BLE001 - see above
             log.warning("company research pre-pass failed, continuing without it: %s", exc)
 
     def one(job_id: int) -> BatchRow:
         started = time.monotonic()
-        row = BatchRow(job_id=job_id, shard=index)
+        row = BatchRow(job_id=job_id, shard=index, mode=mode)
+        safe_call(on_event, StageEvent(job_id=job_id, stage="job", status="start"))
+        # Only what was asked for is passed on, so a stand-in `generate` in a
+        # test (or an older signature) is not handed arguments it never takes.
+        extra: dict[str, Any] = {}
+        if on_event is not None:
+            extra["on_event"] = on_event
+        if hints and hints.get(job_id):
+            extra["hint"] = hints[job_id]
         try:
-            result = generate(job_id, out=out, cv=cv, letter=True, audit=audit)
+            result = generate(job_id, out=out, cv=cv, letter=letter, audit=audit, **extra)
             row.company = result.company
             row.title = result.title
             row.prompt_tokens, row.completion_tokens = (
                 result.prompt_tokens, result.completion_tokens
             )
             row.directory = result.directory.name if result.directory else ""
+            row.path = str(pathlib.Path(result.directory).resolve()) if result.directory else ""
             row.letter = result.letter_path.name if result.letter_path else ""
+            row.letter_state = getattr(result, "letter_state", "") or ""
             if result.error:
                 row.status, row.reasons = "error", [result.error]
             elif result.blocked:
@@ -362,6 +399,11 @@ def run_batch(
                         result.letter.blocking if result.letter else []
                     )
                 ] or ["a claim the profile cannot support survived every repair"]
+            elif not letter:
+                # CVs only: nothing to judge but whether the CV exists.
+                has_cv = getattr(result, "cv_pdf", None) is not None or not cv
+                row.status = "ready" if has_cv else "error"
+                row.reasons = [] if has_cv else ["no CV was produced"]
             else:
                 text = result.letter.text if result.letter else ""
                 row.words = len(text.split())
@@ -384,6 +426,13 @@ def run_batch(
             log.exception("job %s failed", job_id)
             row.status, row.reasons = "error", [f"{type(exc).__name__}: {exc}"]
         row.seconds = round(time.monotonic() - started, 1)
+        if record and row.status != "error" and row.path:
+            _record(row)
+        safe_call(on_event, StageEvent(
+            job_id=job_id, stage="job", status="done" if row.status != "error" else "error",
+            message=row.status, seconds=row.seconds, tokens=row.tokens,
+            data=dataclasses.asdict(row),
+        ))
         with _WRITE_LOCK:
             # The ledger is one file per shard; concurrent threads inside a shard
             # would interleave their lines without this.
@@ -396,6 +445,53 @@ def run_batch(
         return [one(job_id) for job_id in todo]
     with cf.ThreadPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(one, todo))
+
+
+def _record(row: BatchRow) -> None:
+    """Tell the tracker this job has documents (CV_READY). Never fatal: the
+    files are on disk and the ledger has the row either way."""
+    try:
+        from ..db import get_conn, init_schema, writing
+        from ..jobsearch.tracker import record_generation
+
+        conn = get_conn()
+        init_schema(conn)
+        with writing():
+            record_generation(
+                conn, job_id=row.job_id, directory=row.path,
+                cv_version=_cv_name(row.path), letter_version=row.letter or None,
+                letter_state=row.letter_state, mode=row.mode or "cv_letter",
+            )
+    except Exception:  # noqa: BLE001 - see docstring
+        log.exception("could not record job %s in the tracker", row.job_id)
+
+
+def _cv_name(directory: str) -> str | None:
+    folder = pathlib.Path(directory)
+    found = sorted(folder.glob("*_CV.pdf")) if folder.is_dir() else []
+    return found[0].name if found else None
+
+
+def letter_texts(rows: Sequence[BatchRow], out: str | pathlib.Path = "output") -> dict[str, str]:
+    """Each row's letter text, wherever filing moved it.
+
+    `duplicate_sentences` used to read `output/<directory>/<letter>`, and since
+    runs are filed into `1_ready_to_send/` or `2_needs_changes/` that path held
+    nothing — so the cross-letter check silently compared zero letters.
+    """
+    root = pathlib.Path(out)
+    texts: dict[str, str] = {}
+    for row in rows:
+        if not row.letter:
+            continue
+        candidates = [pathlib.Path(row.path) / row.letter] if row.path else []
+        candidates += [root / bucket / row.directory / row.letter
+                       for bucket in ("", "1_ready_to_send", "2_needs_changes", "3_archive")]
+        for path in candidates:
+            if path.is_file():
+                texts[row.directory] = path.read_text(encoding="utf-8")
+                break
+    return texts
 
 
 def format_report(rows: Sequence[BatchRow], *, letters: dict[str, str] | None = None) -> str:

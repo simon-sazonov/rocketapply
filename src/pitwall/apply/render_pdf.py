@@ -93,7 +93,6 @@ class _Canvas:
         self.c = rl_canvas.Canvas(
             str(path), pagesize=(frame.page_width, frame.page_height), invariant=True
         )
-        self.c.setTitle("Simon Sazonov — CV")
         self.y = frame.margin_top
         self.lines = 0
 
@@ -166,25 +165,16 @@ def _gutter(canvas: _Canvas, label: str, y_top: float) -> None:
     canvas.text(label, canvas.frame.gutter, canvas.frame.margin_left, y_top)
 
 
-def render_cv(
-    profile: Profile,
-    frame: Frame,
-    config: CvConfig,
-    path: pathlib.Path | str,
-) -> RenderResult:
-    """Write the one-page CV. Raises nothing on overflow — it reports it, and
-    the caller decides, because a two-page CV is a calibration bug worth seeing."""
-    register_fonts()
-    path = pathlib.Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    canvas = _Canvas(path, frame)
-    result = RenderResult(path=path)
+def draw_header(canvas: _Canvas, profile: Profile, frame: Frame) -> float:
+    """The name, the title and the CONTACT block, exactly as the CV draws them.
 
+    Shared with the cover letter (`render_letter.py`), so the two documents a
+    recruiter opens side by side carry one identical letterhead. Returns the y
+    where the next section starts.
+    """
     f = frame
     geom = f.raw.get("geometry") or {}
     header_gap = float(geom.get("header_gap", 19))
-    section_gap = float(geom.get("section_gap", 3.5))
-    gap = float(geom.get("rule_gap", 5.3))
     content_right = f.page_width - f.margin_right
     y = f.margin_top
 
@@ -209,6 +199,33 @@ def render_cv(
         canvas.text(value, f.body, f.content_x + offset, y)
         canvas.lines += 1
         y += f.body.line_height()
+    return y
+
+
+def render_cv(
+    profile: Profile,
+    frame: Frame,
+    config: CvConfig,
+    path: pathlib.Path | str,
+) -> RenderResult:
+    """Write the one-page CV. Raises nothing on overflow — it reports it, and
+    the caller decides, because a two-page CV is a calibration bug worth seeing."""
+    register_fonts()
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas = _Canvas(path, frame)
+    # The profile's name, not a constant: the same bytes for its owner, and a
+    # correct title for anyone else's profile.
+    canvas.c.setTitle(f"{profile.personal.name} — CV")
+    result = RenderResult(path=path)
+
+    f = frame
+    geom = f.raw.get("geometry") or {}
+    section_gap = float(geom.get("section_gap", 3.5))
+    gap = float(geom.get("rule_gap", 5.3))
+    content_right = f.page_width - f.margin_right
+
+    y = draw_header(canvas, profile, f)
 
     # ── SKILLS: SLOT B ──
     y += section_gap

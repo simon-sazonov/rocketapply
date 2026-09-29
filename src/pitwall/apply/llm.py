@@ -197,6 +197,11 @@ class TaskRouter:
     #: Called as (provider, key_fingerprint, kind) when a key is swapped out, so
     #: the Studio can show which key is working.
     on_key_switch: Any = None
+    #: Tasks whose cached answer is NOT read (a fresh one is still written).
+    #: The cache is keyed on the exact prompt, so "regenerate" with unchanged
+    #: inputs used to hand back the very same letter at zero cost. RocketApply's
+    #: Regenerate sets this to the letter's tasks.
+    fresh_tasks: frozenset[str] = frozenset()
     #: One OpenAI client per (provider, key). Keyed on the key so three keys do
     #: not share one connection pool, and built once rather than per call.
     _clients_by_key: dict[tuple[str, str], Any] = field(default_factory=dict, repr=False)
@@ -377,7 +382,9 @@ class TaskRouter:
             ).encode()
         ).hexdigest()[:32]
 
-        if (hit := self._cached(digest, task, providers)) is not None:
+        if task not in self.fresh_tasks and (
+            hit := self._cached(digest, task, providers)
+        ) is not None:
             self._trace(Call(task, hit.get("provider", "?"), hit.get("model", "?"),
                              cached=True, prompt_sha=digest))
             return hit["result"]

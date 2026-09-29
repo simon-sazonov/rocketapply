@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import pathlib
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .history import Generation, scan
@@ -62,7 +63,7 @@ BUCKETS = (READY_DIR, CHANGES_DIR, ARCHIVE_DIR)
 #: and leftovers from development runs. They have no `provenance.json`, so
 #: `history.scan` already ignores them; they are listed so the index can say
 #: what they are instead of leaving them looking like abandoned applications.
-NOT_APPLICATIONS = ("preview",)
+NOT_APPLICATIONS = ("preview", "exports")
 
 
 def _version(generation: Generation) -> int:
@@ -116,18 +117,28 @@ class TidyPlan:
     supersede: list[Generation] = field(default_factory=list)
     #: Directories with no `provenance.json` — not applications.
     other: list[pathlib.Path] = field(default_factory=list)
+    #: Runs an exported CSV points at. Left exactly where they are: the CSV
+    #: holds their absolute paths, and "upload the file in column J" must still
+    #: find it after a tidy.
+    pinned: list[Generation] = field(default_factory=list)
 
     @property
     def jobs(self) -> int:
         return len(self.keep)
 
 
-def build_plan(output_dir: pathlib.Path | str = "output") -> TidyPlan:
-    """What would move, without moving anything."""
+def build_plan(output_dir: pathlib.Path | str = "output", *,
+               pinned: Iterable[str] = ()) -> TidyPlan:
+    """What would move, without moving anything.
+
+    `pinned` are application folders (paths) an exported CSV refers to; they
+    are reported but never moved or archived.
+    """
     root = pathlib.Path(output_dir)
     plan = TidyPlan()
     if not root.exists():
         return plan
+    held = {str(pathlib.Path(p).resolve()) for p in pinned if p}
 
     archive = (root / ARCHIVE_DIR).resolve()
 
@@ -138,6 +149,9 @@ def build_plan(output_dir: pathlib.Path | str = "output") -> TidyPlan:
         # already in the archive — and without this an archived run could win
         # its group and be promoted back out.
         if archive in generation.directory.resolve().parents:
+            continue
+        if str(generation.directory.resolve()) in held:
+            plan.pinned.append(generation)
             continue
         # A run whose provenance carries no job id cannot be grouped with
         # anything, so it is its own group and always kept.
@@ -151,7 +165,7 @@ def build_plan(output_dir: pathlib.Path | str = "output") -> TidyPlan:
     plan.keep.sort(key=lambda g: (g.company.lower(), g.title.lower()))
     plan.supersede.sort(key=lambda g: g.generated_at)
 
-    known = {g.directory.name for g in plan.keep} | {g.directory.name for g in plan.supersede}
+    known = {g.directory.name for g in plan.keep + plan.supersede + plan.pinned}
     for directory in sorted(root.iterdir()):
         if not directory.is_dir() or directory.name in BUCKETS or directory.name in known:
             continue
