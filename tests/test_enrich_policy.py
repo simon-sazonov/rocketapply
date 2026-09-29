@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 #: Everything that ships. `tests/` is excluded deliberately — this very file
 #: has to name the forbidden things in order to forbid them.
-SOURCE_DIRS = ("src", "app", "scripts")
+SOURCE_DIRS = ("src", "apps", "scripts")
 
 
 def source_files() -> list[Path]:

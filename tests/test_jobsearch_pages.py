@@ -15,12 +15,14 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from .paths import PITWALL_APP, PITWALL_PAGES, on_path  # noqa: TID252
+
 ROOT = Path(__file__).resolve().parents[1]
-PAGES = ROOT / "app" / "pages"
+PAGES = PITWALL_PAGES
 SEARCH_PAGE = PAGES / "7_🎯_Job_Search.py"
 APPS_PAGE = PAGES / "8_📨_Applications.py"
 SETUP_PAGE = PAGES / "9_🧭_Job_Setup.py"
-HOME = ROOT / "app" / "Home.py"
+HOME = PITWALL_APP / "Home.py"
 
 
 @pytest.fixture()
@@ -150,6 +152,7 @@ def test_the_inbox_names_what_is_still_missing(job_app):
 
 
 def test_quick_add_puts_a_company_on_the_list(job_app):
+    on_path(PITWALL_APP)  # not left behind by whichever test ran first
     import _jobs
 
     _populate()
@@ -161,6 +164,7 @@ def test_quick_add_puts_a_company_on_the_list(job_app):
 
 
 def test_quick_add_says_so_when_a_skill_is_not_in_the_vocabulary(job_app):
+    on_path(PITWALL_APP)  # not left behind by whichever test ran first
     import _jobs
 
     assert any("vocabulary" in line for line in _jobs.quick_add("Underwater Basket Weaving", ""))

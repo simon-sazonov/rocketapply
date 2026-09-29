@@ -205,13 +205,14 @@ def test_triage_never_touches_a_candidate_that_already_has_a_verdict(pipe, repos
 def test_the_ui_has_a_label_for_every_verdict_the_pipeline_can_emit():
     """A verdict with no UI entry is a person the People page silently hides.
 
-    The vocabulary lives in `app/_explain.py` (it used to be inline in
+    The vocabulary lives in `apps/pitwall/_explain.py` (it used to be inline in
     `_shared.py`); this checks the guarantee, not the file it happens to be in.
     """
     import sys
-    from pathlib import Path
 
-    app_dir = Path(__file__).resolve().parents[1] / "app"
+    from .paths import PITWALL_APP  # noqa: TID252
+
+    app_dir = PITWALL_APP
     sys.path.insert(0, str(app_dir))
     try:
         import _explain

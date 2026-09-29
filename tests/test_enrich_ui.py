@@ -12,14 +12,14 @@ import that moved, a column that no longer exists in the frame.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
+from .paths import PITWALL_APP, PITWALL_PAGES, on_path  # noqa: TID252
+
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT / "app") not in sys.path:
-    sys.path.insert(0, str(ROOT / "app"))
+on_path(PITWALL_APP)
 
 from _explain import (  # noqa: E402
     CONTACT_ORDER,
@@ -31,7 +31,7 @@ from _explain import (  # noqa: E402
     evidence_line,
 )
 
-PEOPLE_PAGE = ROOT / "app" / "pages" / "3_👤_People.py"
+PEOPLE_PAGE = PITWALL_PAGES / "3_👤_People.py"
 
 
 # ───────────────────────────── the vocabulary ────────────────────────────

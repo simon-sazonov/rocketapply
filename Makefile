@@ -11,7 +11,7 @@ SXNG_URL := http://localhost:8888
 
 .DEFAULT_GOAL := help
 .PHONY: help venv test lint typecheck searxng searxng-env searxng-check \
-        searxng-stop searxng-logs searxng-pull groq-check app cli \
+        searxng-stop searxng-logs searxng-pull groq-check app pitwall rocketapply cli \
         coverage sweep relabel domains domains-apply domains-show \
         job-search job-rerank job-calibrate job-targets-ats fonts validate-profile calibrate
 
@@ -133,10 +133,18 @@ job-calibrate:  ## how well the score agrees with your ratings (proposes weights
 job-targets-ats:  ## find the public ATS board of each target company
 	$(PY) scripts/discover_ats.py --targets
 
-# ──────────────────────────────── app ──────────────────────────────────
+# ──────────────────────────────── apps ─────────────────────────────────
+# Two apps, one engine, one database. Both launch from the repo root so the
+# engine's relative output/, run/ and data/ paths resolve; each app's theme is
+# in apps/<app>/.streamlit/config.toml. They can run side by side.
 
-app:  ## launch the Streamlit dashboard
-	$(PY) -m streamlit run app/Home.py
+pitwall:  ## PitWall — the motorsport people finder (dark), on :8501
+	$(PY) -m streamlit run apps/pitwall/Home.py --server.port 8501
+
+rocketapply:  ## RocketApply — search, generate, apply, connect (light), on :8502
+	$(PY) -m streamlit run apps/rocketapply/app.py --server.port 8502
+
+app: pitwall  ## same as `make pitwall`
 
 cli:  ## show the CLI help
 	$(PY) scripts/run_pipeline.py --help

@@ -24,7 +24,8 @@ make venv                       # .venv + dependencies (Python 3.11+)
 make searxng                    # local search that supports operators (needs Docker)
 .venv/bin/pitwall validate      # check your two CSVs
 .venv/bin/pitwall run --max-queries 50
-.venv/bin/streamlit run app/Home.py
+make pitwall                    # the people finder   → http://localhost:8501
+make rocketapply                # the job application app → http://localhost:8502
 ```
 
 That is the whole thing. Everything below explains a piece of it.
@@ -226,7 +227,7 @@ make groq-check
 .venv/bin/pitwall openings
 
 # 8. Look at your leads
-.venv/bin/streamlit run app/Home.py
+make pitwall
 ```
 
 Skip step 4 entirely and everything still works — you get heuristic scores
@@ -289,7 +290,9 @@ is why it is a CSV column and not code.
 
 ## The dashboard
 
-`streamlit run app/Home.py`
+`make pitwall` (`streamlit run apps/pitwall/Home.py`). The job side is moving to its own
+app, RocketApply (`make rocketapply`, `apps/rocketapply/`); until it covers everything, the
+job pages below stay in PitWall too.
 
 | page | what it is for |
 |---|---|
@@ -501,7 +504,7 @@ legitimately supply. The same letter says "I co-founded BeeSurfing" where
 `experience.yaml` records a University team project, so `co-founded` and
 `founded` are now gated verbs.
 
-**The studio is the better place to do this.** `streamlit run app/Home.py` →
+**The studio is the better place to do this.** `make pitwall` →
 **✍️ Applications Studio**: pick a posting, read the advert without leaving the
 page, generate, then read the CV and the letter side by side with the evidence
 behind them, and score it there.
@@ -834,7 +837,8 @@ src/pitwall/     config · profiles · models · db · inputs · query_builder �
   sources/jobs/  base · ats · aggregator · career_page
   enrich/        base · domains · harvest · patterns · corroborate · checks
                  hunter · github · cache   (finding an email address)
-app/             Home.py + pages/ (Setup · Run Search · Leads · Pipeline · Analytics · Openings)
+apps/pitwall/     Home.py + pages/ — the people finder (dark theme in .streamlit/ beside it)
+apps/rocketapply/ app.py + views/ + ui/ — the job application app (light theme beside it)
 scripts/         run_pipeline · seed · purge_stale · eval_scoring · setup_ollama
                  setup_groq · check_searxng · discover_ats · sanitise_eval_set
                  resolve_domains (fills companies.domain from search)

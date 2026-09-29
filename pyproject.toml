@@ -18,7 +18,7 @@ license = { text = "Proprietary" }
 # Between them, `pip install -e .` on the system Anaconda 3.13 interpreter now
 # fails while naming its own cause instead of blowing up later on an import.
 dependencies = [
-  "streamlit>=1.40",
+  "streamlit>=1.62,<2",
   "pandas>=2.2",
   "pydantic>=2.9",
   "pydantic-settings>=2.7",
@@ -70,7 +70,7 @@ pitwall = ["scoring/prompts/*.txt", "scoring/prompts/*.j2", "apply/prompts/*.md"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "app", "scripts", "tests"]
+src = ["src", "apps/pitwall", "apps/rocketapply", "scripts", "tests"]
 exclude = [".venv", "data"]
 
 [tool.ruff.lint]
@@ -78,7 +78,7 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
 ignore = ["E501", "B008", "SIM108"]
 
 [tool.ruff.lint.per-file-ignores]
-"app/**" = ["E402"]
+"apps/**" = ["E402"]
 "scripts/**" = ["E402"]
 "tests/**" = ["E402"]
 

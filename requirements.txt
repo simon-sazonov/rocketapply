@@ -1,5 +1,5 @@
 # ─── Core ─────────────────────────────────────────────────────────────
-streamlit>=1.40
+streamlit>=1.62,<2  # verified: top navigation + a .streamlit/config.toml beside each app
 pandas>=2.2
 pydantic>=2.9
 # 2.7.0 is the first release that ships `NoDecode`, which src/pitwall/config.py

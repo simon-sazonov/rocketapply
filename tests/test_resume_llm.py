@@ -15,14 +15,14 @@ started specifically to catch up on the deferred ones.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
+from .paths import PITWALL_APP, PITWALL_PAGES, on_path  # noqa: TID252
+
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT / "app") not in sys.path:
-    sys.path.insert(0, str(ROOT / "app"))
+on_path(PITWALL_APP)
 
 from pitwall.inputs import sync_to_db  # noqa: E402
 from pitwall.pipeline import Pipeline, RunParams  # noqa: E402
@@ -30,7 +30,7 @@ from pitwall.pipeline import Pipeline, RunParams  # noqa: E402
 from .test_scoring_pipeline import seed_pending  # noqa: E402, TID252
 from .test_triage import answering_client, spread  # noqa: E402, TID252
 
-FIND_PAGE = ROOT / "app" / "pages" / "2_🔎_Find_People.py"
+FIND_PAGE = PITWALL_PAGES / "2_🔎_Find_People.py"
 
 
 @pytest.fixture()
@@ -354,7 +354,7 @@ def test_the_page_says_so_when_there_is_nothing_to_resume(app_root):
     assert "Nothing is waiting" in text
 
 
-PEOPLE_PAGE = ROOT / "app" / "pages" / "3_👤_People.py"
+PEOPLE_PAGE = PITWALL_PAGES / "3_👤_People.py"
 
 
 def _run_people_page():

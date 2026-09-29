@@ -12,7 +12,7 @@ resumable::
 Entry points:
 
 * ``python scripts/run_pipeline.py run`` — the CLI
-* ``streamlit run app/Home.py`` — the dashboard
+* ``make pitwall`` / ``make rocketapply`` — the two dashboards
 * :class:`pitwall.pipeline.Pipeline` — the orchestrator, if you want to embed it
 
 Search-engine metadata only: PitWall never fetches LinkedIn profile pages, never

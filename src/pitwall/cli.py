@@ -201,7 +201,7 @@ def init(
         "  2. pitwall validate            # check them\n"
         "  3. pitwall preview             # what a run would cost, before it runs\n"
         "  4. pitwall run --max-queries 100\n"
-        "  5. streamlit run app/Home.py"
+        "  5. make pitwall   (or: streamlit run apps/pitwall/Home.py)"
     )
 
 

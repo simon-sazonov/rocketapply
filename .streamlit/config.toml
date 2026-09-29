@@ -1,25 +1,10 @@
+# Shared by both apps, which are launched from the repo root so the engine's
+# relative output/, run/ and data/ paths resolve. Each app's look lives in
+# apps/<app>/.streamlit/config.toml — never add a [theme] here.
+
 [server]
 headless = true
 fileWatcherType = "auto"
 
 [browser]
 gatherUsageStats = false
-
-# Tactical telemetry substrate. These are the same tokens as `app/_theme.py`,
-# declared here as well so Streamlit's own internally-rendered widgets (the
-# ones no stylesheet can reach) are built in the palette rather than corrected
-# into it afterwards. Change a colour here and there; they must not drift.
-[theme]
-base = "dark"
-primaryColor = "#FF8000"            # hazard orange — the only accent
-backgroundColor = "#0A0A0A"         # deactivated CRT, never pure black
-secondaryBackgroundColor = "#111111"
-textColor = "#EAEAEA"               # white phosphor
-linkColor = "#FF8000"
-borderColor = "#2A2A2A"
-dataframeBorderColor = "#2A2A2A"
-baseRadius = "none"                 # 90° corners, enforced at the source
-font = "JetBrains Mono, monospace"
-headingFont = "JetBrains Mono, monospace"
-codeFont = "JetBrains Mono, monospace"
-showWidgetBorder = true
