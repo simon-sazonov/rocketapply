@@ -87,9 +87,20 @@ def jobs_payload():
 # ──────────────────────── off until there is a profile ───────────────────
 
 
-def test_the_shipped_profile_is_a_template_and_reads_as_absent():
-    """Nothing runs until the owner replaces the template — §2.6 is optional."""
-    assert profile_path().exists(), "the template ships so there is something to edit"
+def test_the_shipped_profile_is_a_template_and_reads_as_absent(project):
+    """Nothing runs until the owner replaces the template — §2.6 is optional.
+
+    Isolated to the throwaway project root, like every other test here.
+    It used to read the real `config/`, so it asserted the owner had NOT written
+    `config/my_profile.md` — which `profile_path()` prefers when it exists, and
+    which is exactly what the template asks them to do. Writing one turned this
+    test permanently red while the behaviour it describes was still correct.
+    """
+    shipped = ROOT / "config" / "profile.md"
+    assert shipped.exists(), "the template ships so there is something to edit"
+    (project / "config" / "profile.md").write_text(
+        shipped.read_text(encoding="utf-8"), encoding="utf-8")
+    assert profile_path().exists()
     assert load_profile() is None
 
 

@@ -1,0 +1,126 @@
+{
+ "numberRecords": 3,
+ "jvs": [
+  {
+   "title": "Data Scientist - Produktionsdaten & Machine Learning (w/m/d) (Data Scientist)",
+   "description": "Ihre Aufgaben<br><br>Sie suchen ein Unternehmen, das Sie optimal in Ihrer persönlichen und fachlichen Entwicklung unterstützt- Wir bieten Leistungsträger mit Potential abwechslungsreiche Aufgabengebiete. Dann unterstützen Sie ab sofort unser Team mit Ihrer Kompetenz.<br><br>- Sie führen eigenständig anspruchsvolle Datenanalysen durch und nutzen dafür statistische sowie wissenschaftliche Methoden.<br>- Sie entwickeln datenbasierte Modelle und Algorithmen, mit denen sich Produktionsprozesse kontinuierlich überwachen und relevante Entwicklungen frühzeitig erkennen lassen.<br>- Mithilfe von Machin",
+   "id": "MTIzNjItVFItMzAwNzQwXzYyMjQ1MkxTLVMgMQ",
+   "creationDate": 1788901524555,
+   "lastModificationDate": 1790541485114,
+   "numberOfPosts": 1,
+   "locationMap": {
+    "DE": [
+     "DE126"
+    ]
+   },
+   "euresFlag": false,
+   "jobCategoriesCodes": [
+    "http://data.europa.eu/esco/occupation/258e46f9-0075-4a2e-adae-1ff0477e0f30",
+    "http://data.europa.eu/esco/occupation/d3edb8f8-3a06-47a0-8fb9-9b212c006aa2"
+   ],
+   "positionScheduleCodes": [
+    "fulltime"
+   ],
+   "positionOfferingCode": "directhire",
+   "employer": {
+    "name": "Brunel GmbH NL Mannheim",
+    "legalID": null,
+    "organisationSizeCode": null,
+    "organisationOwnershipTypeCode": null,
+    "website": "http://www.brunel.de",
+    "sectorCodes": [],
+    "description": null
+   },
+   "availableLanguages": [
+    "de"
+   ],
+   "score": null,
+   "translationType": "FIRST_LANGUAGE",
+   "translations": {
+    "de": {
+     "title": "Data Scientist - Produktionsdaten & Machine Learning (w/m/d) (Data Scientist)",
+     "description": "Ihre Aufgaben<br><br>Sie suchen ein Unternehmen, das Sie optimal in Ihrer persönlichen und fachlichen Entwicklung unterstützt- Wir bieten Leistungsträger mit Potential abwechslungsreiche Aufgabengebie"
+    }
+   }
+  },
+  {
+   "title": "Data Context Engineer (f/m/d) (Data Engineer)",
+   "description": "What if your work could not only influence but also significantly accelerate corporate management and decision-making? If you lay the crucial foundations so that our agentic systems can scale reliably and thus become a real productivity booster for our company?<br>That is precisely your mission. We are already well advanced in the field of AI and agentic systems. But to make the leap from intelligent prototypes to autonomously acting, productive systems, we must solve the decisive challenge: **scaling the data context.**As a Data Context Engineer (f/m/d), you are the key player to master this ",
+   "id": "MTI0NjUtMTYzNjQyNC0xLVMgMQ",
+   "creationDate": 1790368082546,
+   "lastModificationDate": 1790368082546,
+   "numberOfPosts": 2,
+   "locationMap": {
+    "DE": [
+     "DE252"
+    ],
+    "PT": [
+     null
+    ]
+   },
+   "euresFlag": false,
+   "jobCategoriesCodes": [
+    "http://data.europa.eu/esco/occupation/d3edb8f8-3a06-47a0-8fb9-9b212c006aa2",
+    "http://data.europa.eu/esco/occupation/1562c7a3-c7d9-419d-b9b6-db26610bcf84"
+   ],
+   "positionScheduleCodes": [
+    "fulltime"
+   ],
+   "positionOfferingCode": null,
+   "employer": {
+    "name": "Siemens AG",
+    "legalID": null,
+    "organisationSizeCode": null,
+    "organisationOwnershipTypeCode": null,
+    "website": null,
+    "sectorCodes": [],
+    "description": null
+   },
+   "availableLanguages": [
+    "de"
+   ],
+   "score": null,
+   "translationType": "FIRST_LANGUAGE",
+   "translations": {
+    "de": {
+     "title": "Data Context Engineer (f/m/d) (Data Engineer)",
+     "description": "What if your work could not only influence but also significantly accelerate corporate management and decision-making? If you lay the crucial foundations so that our agentic systems can scale reliably"
+    }
+   }
+  },
+  {
+   "title": "COZINHEIRO",
+   "description": "Responsável pela preparação e confecção das refeições servidas na unidade<br>Coordena o trabalho da sua equipa<br>Responsável pela adequação do número estimado de refeições às necessidades do estabelecimento e ao número de<br>clientes previstos<br>Garante o cumprimento das normas de Higiene e Segurança Alimentar na preparação dos produtos<br>Procede aos registos exigidos no âmbito da Qualidade<br>Retira amostras e controla as temperaturas dos alimentos<br>Controla, regista e verifica a validade dos produtos abertos para consumo (DLU - Data Limite Utilização)<br>Faz a higienização dos equipamen",
+   "id": "NTg5NDI4NTAyIDE0MQ",
+   "creationDate": 1778898600173,
+   "lastModificationDate": 1781557200959,
+   "numberOfPosts": 5,
+   "locationMap": {
+    "PT": [
+     "PT1C2"
+    ]
+   },
+   "euresFlag": false,
+   "jobCategoriesCodes": [
+    "http://data.europa.eu/esco/occupation/90f75f67-495d-49fa-ab57-2f320e251d7e"
+   ],
+   "positionScheduleCodes": [
+    "fulltime"
+   ],
+   "positionOfferingCode": "temporary",
+   "employer": null,
+   "availableLanguages": [
+    "pt"
+   ],
+   "score": null,
+   "translationType": "FIRST_LANGUAGE",
+   "translations": {
+    "pt": {
+     "title": "COZINHEIRO",
+     "description": "Responsável pela preparação e confecção das refeições servidas na unidade<br>Coordena o trabalho da sua equipa<br>Responsável pela adequação do número estimado de refeições às necessidades do estabele"
+    }
+   }
+  }
+ ],
+ "facets": {}
+}

@@ -1,0 +1,37 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pitwall",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": [
+        "-m",
+        "streamlit",
+        "run",
+        "app/Home.py",
+        "--server.port",
+        "8503",
+        "--server.headless",
+        "true",
+        "--server.runOnSave",
+        "true"
+      ],
+      "port": 8503
+    },
+    {
+      "name": "pitwall-verify",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": [
+        "-m",
+        "streamlit",
+        "run",
+        "app/Home.py",
+        "--server.port",
+        "8511",
+        "--server.headless",
+        "true"
+      ],
+      "port": 8511
+    }
+  ]
+}

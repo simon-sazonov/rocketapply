@@ -16,6 +16,7 @@ import csv
 import re
 import sqlite3
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,13 @@ def normalize_company(name: str | None) -> str:
     while len(words) > 1 and words[0] == "the":
         words.pop(0)
     return " ".join(words)
+
+
+def company_norms(name: str | None, aliases: Iterable[str] = ()) -> set[str]:
+    """Every normalised spelling that identifies one employer: its name and aliases."""
+    out = {normalize_company(name)}
+    out.update(normalize_company(a) for a in aliases)
+    return {n for n in out if n}
 
 
 #: "(m/w/d)", "(f/m/x)", "(all genders)", "(H/F)", "m/f/d", "(Mensch)" …
@@ -135,9 +143,7 @@ class TargetCompany:
     @property
     def norms(self) -> set[str]:
         """Every normalised spelling that identifies this employer."""
-        out = {normalize_company(self.name)}
-        out.update(normalize_company(a) for a in self.aliases)
-        return {n for n in out if n}
+        return company_norms(self.name, self.aliases)
 
     def as_row(self) -> dict[str, str]:
         return {
@@ -157,8 +163,13 @@ class TargetCompany:
         }
 
 
-def verify_board(target: TargetCompany, token: str, postings: list[Any]) -> tuple[bool, str]:
-    """Is this ATS board really this company's? `(ok, reason)`. Pure.
+def verify_board(name: str, aliases: Iterable[str], token: str, postings: list[Any],
+                 *, alias_tokens: bool = True) -> tuple[bool, str]:
+    """Is this ATS board really the company's? `(ok, reason)`. Pure.
+
+    It takes a name and aliases rather than a row so that both company lists
+    can use it: the job search's `TargetCompany` and the people search's
+    `companies` rows, which `scripts/discover_ats.py` probes the same way.
 
     "It answered with postings" is not enough, and the first live discovery
     run showed why: `recruitee:google` is an empty account whose one posting is
@@ -170,22 +181,33 @@ def verify_board(target: TargetCompany, token: str, postings: list[Any]) -> tupl
     SmartRecruiters and Recruitee put a company name on every posting), or —
     for boards that name nobody (Lever, Ashby) — sit at a token that is the
     company's whole name, not a fragment of it.
+
+    `alias_tokens=False` lets only the name itself vouch for a board that
+    names nobody; aliases still count when the postings name the company. The
+    people-search list needs that, because its aliases are the short forms
+    people type on LinkedIn, chosen for recall ("Genesis", "Carlin", "VAR").
+    Its first live run adopted `lever:genesis` for Genesis Magma Racing, and
+    that board belongs to Genesis Global, a capital-markets software firm.
     """
     if not postings:
         return False, "no postings"
     titles = [str(getattr(p, "title", "")) for p in postings]
     if all("(sample)" in t.lower() for t in titles):
         return False, "a placeholder board (only sample postings)"
+    norms = company_norms(name, aliases)
     names = {normalize_company(getattr(p, "company_name", None)) for p in postings}
     names.discard("")
     if names:
-        if names & target.norms:
+        if names & norms:
             return True, "the postings name this company"
         return False, "the postings name " + ", ".join(sorted(names)[:3])
-    whole = {re.sub(r"[^a-z0-9]", "", n) for n in target.norms}
-    if token.lower() in whole:
+    def whole(spellings: set[str]) -> set[str]:
+        return {re.sub(r"[^a-z0-9]", "", n) for n in spellings}
+
+    if token.lower() in whole(norms if alias_tokens else company_norms(name)):
         return True, "the board is at the company's own name"
-    return False, (f"the board names no company and {token!r} is only part of the name — "
+    what = "only an alias" if token.lower() in whole(norms) else "only part of the name"
+    return False, (f"the board names no company and {token!r} is {what} — "
                    "add it by hand if it really is theirs")
 
 

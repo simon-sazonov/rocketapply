@@ -26,15 +26,20 @@ from typing import Any
 from rapidfuzz import fuzz
 
 from .companies import normalize_title
-from .filters import remote_open_to_you
+from .filters import regions_of, remote_open_to_you
 from .locations import canonical_city, country_name
 from .settings import JobSearchConfig
 from .skills import OwnedSkill, Vocabulary
 from .visa import LIKELY_SUPPORTED, NO_SPONSORSHIP, SPONSORSHIP_EXPLICIT
 
 LANGUAGE_NAMES = {"de": "German", "fr": "French", "nl": "Dutch", "it": "Italian",
-                  "es": "Spanish", "sv": "Swedish", "pt": "Portuguese", "en": "English"}
+                  "es": "Spanish", "sv": "Swedish", "pt": "Portuguese", "en": "English",
+                  "da": "Danish", "fi": "Finnish", "no": "Norwegian", "ru": "Russian",
+                  "uk": "Ukrainian", "pl": "Polish"}
 LANGUAGE_PENALTY = 8.0      # points per spoken language asked for that you do not list
+#: How much of that a posting costs by the level you listed. B1 gets you
+#: through a Portuguese-language office, not a Portuguese-language client call.
+LEVEL_SHARE = {None: 1.0, "A1": 1.0, "A2": 1.0, "B1": 0.5}
 SKILLS_FOR_CONFIDENCE = 5   # below this many named skills, skill fit is shrunk to neutral
 
 
@@ -142,15 +147,27 @@ def experience_component(job: dict[str, Any], cfg: JobSearchConfig,
     return Component(0.5, "unknown", "not stated")
 
 
+#: What a skill named only as a wish ("a plus") counts for, against 1 for a
+#: requirement. Missing one should cost a graduate little: it is the list an
+#: employer expects a junior hire not to have covered yet.
+NICE_TO_HAVE_WEIGHT = 1 / 3
+
+
 def skills_component(job: dict[str, Any], owned: dict[str, OwnedSkill], vocab: Vocabulary,
                      plus: list[str], minus: list[str]) -> tuple[Component, list[str], list[str]]:
     wanted = [str(s) for s in _list(job.get("skills"))]
     if not wanted:
         minus.append("? No recognisable skills in the posting")
         return Component(0.5, "unknown", "none named"), [], []
+    nice = {str(s) for s in _list(job.get("skills_nice"))}
+
+    def weight(skill: str) -> float:
+        return NICE_TO_HAVE_WEIGHT if skill in nice else 1.0
+
     matched = [s for s in wanted if s in owned]
     missing = [s for s in wanted if s not in owned]
-    coverage = min(1.0, sum(owned[s].weight for s in matched) / len(wanted) * 1.15)
+    total = sum(weight(s) for s in wanted) or 1.0
+    coverage = min(1.0, sum(owned[s].weight * weight(s) for s in matched) / total * 1.15)
     # Three skills named and three matched says less than eight of ten: with
     # few skills named, the value is pulled toward the neutral middle.
     certainty = min(1.0, len(wanted) / SKILLS_FOR_CONFIDENCE)
@@ -161,9 +178,14 @@ def skills_component(job: dict[str, Any], owned: dict[str, OwnedSkill], vocab: V
         (plus if value >= 0.55 else minus).append(
             f"{'+' if value >= 0.55 else '-'} Skills: {head} ({len(matched)} of {len(wanted)})"
         )
-    if missing:
-        gap = ", ".join(vocab.label(s) for s in missing[:4]) + ("…" if len(missing) > 4 else "")
+    gaps = [s for s in missing if s not in nice]
+    wishes = [s for s in missing if s in nice]
+    if gaps:
+        gap = ", ".join(vocab.label(s) for s in gaps[:4]) + ("…" if len(gaps) > 4 else "")
         minus.append(f"- Not in your profile: {gap}")
+    if wishes:
+        wish = ", ".join(vocab.label(s) for s in wishes[:4]) + ("…" if len(wishes) > 4 else "")
+        minus.append(f"? Nice to have, not in your profile: {wish}")
     return Component(value, _grade(value, 0.7, 0.45), f"{len(matched)}/{len(wanted)}"), \
         matched, missing
 
@@ -178,8 +200,9 @@ def location_component(job: dict[str, Any], cfg: JobSearchConfig,
         plus.append(f"+ {liked[0]} is a preferred city")
         return Component(1.0, "strong", liked[0])
     if job.get("remote_status") == "remote" and not cities:
-        open_ = remote_open_to_you(job.get("remote_region"), cfg)
-        region = job.get("remote_region") or "unspecified region"
+        regions = regions_of(job)
+        open_ = remote_open_to_you(regions, cfg)
+        region = ", ".join(regions) or "region not stated"
         if open_:
             plus.append(f"+ Remote ({region}) — open to you")
             return Component(0.9, "strong", f"remote {region}")
@@ -197,7 +220,8 @@ def location_component(job: dict[str, Any], cfg: JobSearchConfig,
 
 
 def visa_component(job: dict[str, Any], cfg: JobSearchConfig,
-                   plus: list[str], minus: list[str]) -> tuple[Component, str]:
+                   plus: list[str], minus: list[str],
+                   sponsors: Any = None) -> tuple[Component, str]:
     status = job.get("visa_status") or "UNKNOWN"
     evidence = job.get("visa_evidence") or ""
     countries = list(_list(job.get("countries")))
@@ -205,7 +229,7 @@ def visa_component(job: dict[str, Any], cfg: JobSearchConfig,
     if not cfg.work_authorization.needs_sponsorship:
         return Component(1.0, "strong", "not needed"), "ok"
     authorized = [c for c in countries if cfg.is_authorized(c)]
-    if authorized or (remote_only and remote_open_to_you(job.get("remote_region"), cfg)):
+    if authorized or (remote_only and remote_open_to_you(regions_of(job), cfg)):
         where = country_name(authorized[0]) if authorized else "the remote region"
         plus.append(f"+ No sponsorship needed in {where}")
         return Component(1.0, "strong", "not needed"), "ok"
@@ -218,6 +242,13 @@ def visa_component(job: dict[str, Any], cfg: JobSearchConfig,
     if status == NO_SPONSORSHIP:
         minus.append(f"- Says no sponsorship: \"{evidence}\"")
         return Component(0.2, "weak", "not offered"), "no"
+    # The posting says nothing; a government register may. Never for an
+    # agency posting, whose "company" is the agency, not the employer.
+    if sponsors and not job.get("agency") and countries:
+        hit = sponsors.lookup(job.get("posting_company"), countries)
+        if hit:
+            plus.append(f"+ Licensed visa sponsor — {hit}")
+            return Component(0.8, "ok", "licensed sponsor"), "likely"
     if evidence.startswith("mixed signals"):
         minus.append(f"? Sponsorship: {evidence}")
     else:
@@ -262,11 +293,33 @@ def company_component(target: dict[str, Any] | None,
     return Component(value, _grade(value, 0.9, 0.6), f"priority {priority}")
 
 
+def fit_component(job: dict[str, Any], plus: list[str], minus: list[str]) -> Component:
+    """The CV-similarity percentile, when a CV was there to compare with."""
+    rank = job.get("cv_similarity")
+    if rank is None:
+        return Component(0.5, "unknown", "no CV to compare")
+    rank = float(rank)
+    if rank >= 0.9:
+        plus.append(f"+ Reads like your CV — closer than {rank:.0%} of open postings")
+    elif rank < 0.25:
+        minus.append("- Little in common with your CV's wording")
+    return Component(rank, _grade(rank, 0.8, 0.5), f"top {1 - rank:.0%}")
+
+
 # ─────────────────────────────── the score ───────────────────────────────
 
 
+#: Points off for a title naming a topic you avoid (`avoid_topics`).
+AVOID_PENALTY = 10.0
+
+#: A recruitment agency's posting hides the employer: the target list, the
+#: sponsor registers and dedupe cannot see who it is. Marked, never filtered.
+AGENCY_PENALTY = 3.0
+
+
 def score(job: dict[str, Any], cfg: JobSearchConfig, owned: dict[str, OwnedSkill],
-          vocab: Vocabulary, target: dict[str, Any] | None = None) -> Match:
+          vocab: Vocabulary, target: dict[str, Any] | None = None,
+          sponsors: Any = None) -> Match:
     """One posting against the owner's profile. Pure."""
     plus: list[str] = []
     minus: list[str] = []
@@ -275,19 +328,29 @@ def score(job: dict[str, Any], cfg: JobSearchConfig, owned: dict[str, OwnedSkill
     components["experience"] = experience_component(job, cfg, plus, minus)
     components["skills"], matched, missing = skills_component(job, owned, vocab, plus, minus)
     components["location"] = location_component(job, cfg, plus, minus)
-    components["visa"], visa_fit = visa_component(job, cfg, plus, minus)
+    components["visa"], visa_fit = visa_component(job, cfg, plus, minus, sponsors)
     components["career"] = career_component(job, cfg, plus, minus)
     components["company"] = company_component(target, plus, minus)
+    components["fit"] = fit_component(job, plus, minus)
 
     weights = cfg.weights.model_dump()
-    total = sum(weights.values()) or 1.0
+    total = sum(weights[name] for name in components) or 1.0
     value = sum(weights[name] * comp.value for name, comp in components.items()) / total * 100
 
-    spoken = set(cfg.languages_spoken)
-    asked = [lang for lang in _list(job.get("languages_required")) if lang not in spoken]
-    if asked:
-        value -= min(2, len(asked)) * LANGUAGE_PENALTY
-        minus.append("- Asks for " + " and ".join(LANGUAGE_NAMES.get(a, a) for a in asked))
+    cost = 0.0
+    missing: list[str] = []
+    for lang in _list(job.get("languages_required")):
+        level = cfg.language_level(lang)
+        share = LEVEL_SHARE.get(level, 0.0)
+        name = LANGUAGE_NAMES.get(lang, lang)
+        if share >= 1.0:
+            missing.append(f"{name} (you have {level})" if level else name)
+        elif share > 0:
+            minus.append(f"? Asks for {name} — you have {level}")
+        cost += share
+    if missing:
+        minus.append("- Asks for " + " and ".join(missing))
+    value -= min(2.0, cost) * LANGUAGE_PENALTY
     masters = "masters" in (job.get("education_required"), job.get("education_preferred"))
     if masters and cfg.degree in ("masters", "phd"):
         plus.append("+ Master's level asked for")
@@ -295,6 +358,13 @@ def score(job: dict[str, Any], cfg: JobSearchConfig, owned: dict[str, OwnedSkill
         minus.append("? PhD preferred")
     if job.get("relocation"):
         plus.append("+ Relocation support mentioned (not the same as a visa)")
+    avoided = [t for t in cfg.avoid_topics if _interest_re(t).search(job.get("title") or "")]
+    if avoided:
+        value -= AVOID_PENALTY
+        minus.append("- A topic you avoid: " + ", ".join(avoided[:3]))
+    if job.get("agency"):
+        value -= AGENCY_PENALTY
+        minus.append("? Posted by a recruitment agency — the employer is not named")
     if job.get("description_truncated"):
         minus.append("? Only a snippet of the posting is available — details may be missing")
     elif not job.get("description"):

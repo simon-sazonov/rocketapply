@@ -1,0 +1,67 @@
+{
+ "title": "Workable",
+ "totalSize": 2,
+ "jobs": [
+  {
+   "department": "Business Intelligence",
+   "id": "0fa5dd2d-4781-4a78-a4e0-d34f0bb7a982",
+   "title": "Senior Data Scientist",
+   "state": "published",
+   "description": "<p>SHAPE THE FUTURE OF PRIVACY WITH USERCENTRICS </p><p>1-year fixed term contract   </p><p>Usercentrics is a global leader in the field of consent management platforms (CMP). We follow our company vision to build a world where user privacy enables a thriving digital ecosystem. Our mission is to provide privacy solutions that empower organizations to embrace data privacy while building trust with ",
+   "employmentType": "Full-time",
+   "benefitsSection": "<p>WHY JOIN USERCENTRICS?</p><ul><li>Joining Usercentrics means becoming part of a fast-growing, diverse and international team of tech enthusiasts and entrepreneurially-minded who build our success story together</li><li>Company culture is important to us - we strive to continuously develop a positive, vibrant and inspiring environment that enables everyone to thrive both personally and professio",
+   "requirementsSection": "<p>YOU BRING</p><ul><li>Bachelor's or Master's degree in a quantitative field (Mathematics, Economics, Statistics, Computer Science, Engineering, etc.) </li><li>6–10+ years of experience in data science / advanced analytics, preferably with a track record of cross-functional impact across areas such as marketing, revenue operations, finance, and product</li><li>Background in strategy consulting an",
+   "url": "https://jobs.workable.com/view/2W5a6xJcV5T4eZxTFHvnF1/hybrid-senior-data-scientist-in-lisbon-at-usercentrics",
+   "language": "en",
+   "locations": [
+    "Lisbon, Lisbon, Portugal"
+   ],
+   "location": {
+    "city": "Lisbon",
+    "subregion": "Lisbon",
+    "countryName": "Portugal"
+   },
+   "created": "2026-09-24T08:53:58.850Z",
+   "updated": "2026-09-24T08:53:58.850Z",
+   "company": {
+    "id": "25a92913-3935-4e4e-9f88-f347f2b4240c",
+    "title": "Usercentrics",
+    "website": "https://usercentrics.com/",
+    "url": "https://jobs.workable.com/company/5DJk6yeEFogCK8sUpnswQU/jobs-at-usercentrics"
+   },
+   "isFeatured": false,
+   "workplace": "hybrid"
+  },
+  {
+   "department": "Data",
+   "id": "264e0722-c642-4682-8d35-8182cfefbe23",
+   "title": "Machine Learning Engineer",
+   "state": "published",
+   "description": "<h3><strong>Learn about knok</strong></h3><p>At knok, we dare to lead and humanise the digital transformation of healthcare. We envision a world where everyone has timely access to quality healthcare through digital technology, creating a more equal society. We genuinely believe in it, and you can recognise it in every person who embraces this mission.</p><p>Through a Digital Front Door strategy, ",
+   "employmentType": "Full-time",
+   "benefitsSection": "",
+   "requirementsSection": "",
+   "url": "https://jobs.workable.com/view/5JkRtKSRxyacaorvRndNai/hybrid-machine-learning-engineer-in-matosinhos-at-knok",
+   "language": "en",
+   "locations": [
+    "Matosinhos, Porto District, Portugal"
+   ],
+   "location": {
+    "city": "Matosinhos",
+    "subregion": "Porto District",
+    "countryName": "Portugal"
+   },
+   "created": "2026-08-18T17:00:00.215Z",
+   "updated": "2026-08-18T17:00:00.215Z",
+   "company": {
+    "id": "5cd012f9-7728-4660-8a71-838c9d8cd6c4",
+    "title": "knok",
+    "website": "https://knok.pt/",
+    "url": "https://jobs.workable.com/company/csJwPgbKstqPfNoAsATesU/jobs-at-knok"
+   },
+   "isFeatured": false,
+   "workplace": "hybrid"
+  }
+ ],
+ "autoAppliedFilters": {}
+}

@@ -1,0 +1,193 @@
+{
+ "comments": "",
+ "offset": 0,
+ "limit": 20,
+ "totalCount": 3,
+ "nextCursor": null,
+ "jobs": [
+  {
+   "title": "Senior React Native Developer",
+   "excerpt": "Are you a talented Senior Developer looking for a remote job that lets you show your skills and get decent compensation?",
+   "companyName": "lemon.io",
+   "companySlug": "lemon-io",
+   "employmentType": "Contractor",
+   "minSalary": null,
+   "maxSalary": null,
+   "salaryPeriod": "annual",
+   "seniority": [
+    "Senior"
+   ],
+   "currency": "USD",
+   "locationRestrictions": [
+    "Albania",
+    "Andorra",
+    "Australia",
+    "Austria",
+    "Belgium",
+    "Belize",
+    "Bolivia",
+    "Bosnia and Herzegovina",
+    "Brazil",
+    "Bulgaria",
+    "Canada",
+    "Chile",
+    "Colombia",
+    "Costa Rica",
+    "Croatia",
+    "Cyprus",
+    "Czechia",
+    "Denmark",
+    "Dominican Republic",
+    "Ecuador",
+    "El Salvador",
+    "Estonia",
+    "Finland",
+    "France",
+    "Germany",
+    "Greece",
+    "Guatemala",
+    "Haiti",
+    "Honduras",
+    "Hungary",
+    "Indonesia",
+    "Ireland",
+    "Israel",
+    "Italy",
+    "Jamaica",
+    "Japan",
+    "Latvia",
+    "Lithuania",
+    "Luxembourg",
+    "Malaysia",
+    "Malta",
+    "Mexico",
+    "Moldova",
+    "Montenegro",
+    "Morocco",
+    "Netherlands",
+    "New Zealand",
+    "North Macedonia",
+    "Norway",
+    "Panama",
+    "Papua New Guinea",
+    "Paraguay",
+    "Peru",
+    "Philippines",
+    "Poland",
+    "Portugal",
+    "Puerto Rico",
+    "Romania",
+    "Singapore",
+    "Slovakia",
+    "Slovenia",
+    "South Africa",
+    "South Korea",
+    "Spain",
+    "Sweden",
+    "Switzerland",
+    "Thailand",
+    "Turkey",
+    "Ukraine",
+    "United Kingdom",
+    "United States",
+    "Uruguay",
+    "Vietnam"
+   ],
+   "timezoneRestrictions": [
+    -11,
+    -10,
+    -9.5
+   ],
+   "categories": [
+    "React-Native-Developer",
+    "Senior-React-Native-Mobile-Developer",
+    "Senior-React-Native-Engineer"
+   ],
+   "parentCategories": [
+    "Developer"
+   ],
+   "description": "<p>Are you a talented Senior Developer looking for a remote job that lets you show your skills and get decent compensation? Look no further than Lemon.io — the marketplace that connects you with hand-picked startups in the US and Europe.</p><p><strong>What we offer:</strong></p><ul class=\"list-disc list-outside leading-3 -mt-2\">\n<li class=\"leading-normal -mb-2\"><p>The rate depends on your seniorit",
+   "pubDate": 1789127040,
+   "expiryDate": 1791719039,
+   "applicationLink": "https://himalayas.app/companies/lemon-io/jobs/senior-react-native-developer-5236230554",
+   "guid": "https://himalayas.app/companies/lemon-io/jobs/senior-react-native-developer-5236230554"
+  },
+  {
+   "title": "Machine Learning Engineer",
+   "excerpt": "Role Title: Machine Learning EngineerRole Type: ContractorLocation: Remotemicro1 is engaging Machine Learning Engineers to contribute expertise to a dynamic customer project.",
+   "companyName": "micro1",
+   "companySlug": "micro1",
+   "employmentType": "Contractor",
+   "minSalary": null,
+   "maxSalary": null,
+   "salaryPeriod": "hourly",
+   "seniority": [
+    "Mid-level"
+   ],
+   "currency": "USD",
+   "locationRestrictions": [],
+   "timezoneRestrictions": [
+    -11,
+    -10,
+    -9.5
+   ],
+   "categories": [
+    "Machine-Learning-Engineer",
+    "AI-ML-Engineer",
+    "Machine-Learning-Engineer-Jobs",
+    "Machine-Learning-Engineering-Jobs",
+    "Applied-Machine-Learning-Engineer"
+   ],
+   "parentCategories": [
+    "Data Science"
+   ],
+   "description": "<h3>Role Title: Machine Learning Engineer</h3><h3>Role Type: Contractor</h3><h3>Location: Remote</h3><p><a href=\"https://himalayas.app/companies/micro1\">micro1</a> is engaging Machine Learning Engineers to contribute expertise to a dynamic customer project. In this role, you'll apply your expertise to help train next-generation AI systems. Your work will shape how models learn, reason, and perform",
+   "pubDate": 1788211404,
+   "expiryDate": 1793395403,
+   "applicationLink": "https://himalayas.app/companies/micro1/jobs/machine-learning-engineer-7037967333",
+   "guid": "https://himalayas.app/companies/micro1/jobs/machine-learning-engineer-7037967333"
+  },
+  {
+   "title": "Machine Learning Engineer",
+   "excerpt": "Estamos a contratar: Machine Learning EngineerLocalização: Portugal Regime: Remoto Estamos à procura de um(a) Machine Learning Engineer para integrar uma equipa tecnológica focada no desenvolvimento e",
+   "companyName": "Elevus",
+   "companySlug": "elevus",
+   "employmentType": "Full Time",
+   "minSalary": null,
+   "maxSalary": null,
+   "salaryPeriod": "annual",
+   "seniority": [
+    "Senior"
+   ],
+   "currency": null,
+   "locationRestrictions": [
+    "Portugal"
+   ],
+   "timezoneRestrictions": [
+    -1,
+    0
+   ],
+   "categories": [
+    "Machine-Learning-Engineering",
+    "MLOps",
+    "Data-Engineering",
+    "Cloud-Engineer",
+    "Software-Engineer",
+    "Machine-Learning-Engineer",
+    "AI-ML-Engineer",
+    "Machine-Learning-Engineer-Jobs",
+    "Machine-Learning-Engineering-Jobs",
+    "Applied-Machine-Learning-Engineer"
+   ],
+   "parentCategories": [
+    "Developer",
+    "Data Science"
+   ],
+   "description": "<h3>Estamos a contratar: Machine Learning Engineer</h3><p><strong>Localização:</strong> Portugal<br><strong>Regime:</strong> Remoto</p><p>Estamos à procura de um(a) <strong>Machine Learning Engineer</strong> para integrar uma equipa tecnológica focada no desenvolvimento e operacionalização de soluções de Machine Learning em ambientes cloud-native.</p><p>Esta função terá um papel central na constru",
+   "pubDate": 1788602615,
+   "expiryDate": 1793786615,
+   "applicationLink": "https://himalayas.app/companies/elevus/jobs/machine-learning-engineer",
+   "guid": "https://himalayas.app/companies/elevus/jobs/machine-learning-engineer"
+  }
+ ]
+}

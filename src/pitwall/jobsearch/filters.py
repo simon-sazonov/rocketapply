@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .locations import canonical_city, country_name, region_contains
+from .locations import canonical_city, country_name, is_country_code, region_contains
 from .settings import JobSearchConfig
 from .visa import NO_SPONSORSHIP
 
@@ -74,14 +74,32 @@ def _word_re(words: list[str]) -> re.Pattern[str] | None:
     return re.compile(rf"(?<![\w-])(?:{body})\.?(?![\w-])", re.I)
 
 
-def remote_open_to_you(region: str | None, cfg: JobSearchConfig) -> bool | None:
-    """Can the owner take a remote job restricted to `region`?
+def regions_of(job: dict[str, Any]) -> list[str]:
+    """A job's remote regions: the list when stored (v7), else the single one."""
+    regions = [str(r) for r in _list(job.get("remote_regions")) if r]
+    if not regions and job.get("remote_region"):
+        regions = [str(job["remote_region"])]
+    return regions
 
-    True / False when the profile says enough to know; None when it does not
-    (no home country and no authorised countries) — which the filter treats as
-    unknown, and therefore passes.
+
+def remote_open_to_you(region: str | list[str] | tuple[str, ...] | None,
+                       cfg: JobSearchConfig) -> bool | None:
+    """Can the owner take a remote job open in `region` (one, or alternatives)?
+
+    True / False when the posting and the profile say enough to know. None when
+    they do not: the posting names no region, or the profile names no place
+    the owner can work from. The filter passes None; scoring shows it as a
+    question.
+
+    A bare "Remote" used to count as open everywhere. It is not: most remote
+    jobs are remote within the employer's country, and reading silence as
+    "worldwide" told the owner no sponsorship was needed for jobs he cannot
+    legally take.
     """
-    if not region or region == "WORLD":
+    regions = [region] if isinstance(region, str) else [r for r in (region or []) if r]
+    if not regions:
+        return None
+    if "WORLD" in regions:
         return True
     wa = cfg.work_authorization
     home = cfg.locations.home_country
@@ -90,9 +108,10 @@ def remote_open_to_you(region: str | None, cfg: JobSearchConfig) -> bool | None:
         places |= set(cfg.locations.countries)
     if not places:
         return None
-    if len(region) == 2:
-        return region in places
-    return any(region_contains(region, place) for place in places)
+    return any(
+        (r in places) if is_country_code(r) else any(region_contains(r, p) for p in places)
+        for r in regions
+    )
 
 
 def hard_filter(job: dict[str, Any], cfg: JobSearchConfig) -> list[Rejection]:
@@ -100,7 +119,7 @@ def hard_filter(job: dict[str, Any], cfg: JobSearchConfig) -> list[Rejection]:
     out: list[Rejection] = []
     countries = _list(job.get("countries"))
     remote = job.get("remote_status") or "unknown"
-    region = job.get("remote_region")
+    regions = regions_of(job)
     allowed = cfg.locations.countries
 
     cities = [c.lower() for c in _list(job.get("cities"))]
@@ -109,16 +128,17 @@ def hard_filter(job: dict[str, Any], cfg: JobSearchConfig) -> list[Rejection]:
     # §59 applies to a job that is ONLY remote. "Hamburg, München, remote" is
     # an office job with a remote option, and judging it as remote-in-Germany
     # would drop an on-site role that sponsorship could still open.
-    if remote == "remote" and region and not cities:
-        verdict = remote_open_to_you(region, cfg)
+    if remote == "remote" and regions and not cities:
+        verdict = remote_open_to_you(regions, cfg)
+        where = " or ".join(country_name(r) if is_country_code(r) else r for r in regions)
         if verdict is False:
-            where = country_name(region) if len(region) == 2 else region
             out.append(Rejection(
                 "remote", f"remote, but only for people in {where} (§59) — you are not "
                           f"authorised to work there",
             ))
-        elif len(region) == 2 and allowed and region not in allowed:
-            out.append(Rejection("country", f"remote within {country_name(region)}, "
+        elif (allowed and all(is_country_code(r) for r in regions)
+              and not set(regions) & set(allowed)):
+            out.append(Rejection("country", f"remote within {where}, "
                                             f"which is not on your country list"))
     elif countries and allowed and not set(countries) & set(allowed):
         out.append(Rejection("country", f"located in {_names(countries)}"))
@@ -161,9 +181,12 @@ def hard_filter(job: dict[str, Any], cfg: JobSearchConfig) -> list[Rejection]:
     if job.get("visa_status") == NO_SPONSORSHIP and cfg.work_authorization.needs_sponsorship:
         scope = job.get("visa_scope")
         authorized = set(cfg.work_authorization.authorized_countries)
-        if scope and len(scope) == 2:
+        if is_country_code(scope):
             blocked = scope not in authorized
         elif countries:
+            # A region ("the right to work in the EU") about a job in a country
+            # you can work in is met; the same words about a job anywhere else
+            # are not, since a permit for one EU country is not one for all.
             # "…without sponsorship" about the job's own country (or a region
             # containing it): blocked unless you can work there already.
             blocked = not set(countries) & authorized

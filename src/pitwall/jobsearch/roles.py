@@ -40,6 +40,11 @@ _TITLE_DOMAIN: dict[str, tuple[str, ...]] = {
     ),
     "AI": (
         r"\b(?-i:AI)\b", r"\b(?-i:A\.I\.)", r"artificial intelligence", r"\bgen ?ai\b",
+        # "Ai Engineer", "Principal Ai Engineer", "Ai Integration Engineer": title
+        # case from Jooble and Adzuna US. Only right before a role noun, since
+        # "ai" is also a word in French and Italian.
+        r"\b(?-i:Ai)\b(?=[\s/-]+(?:[A-Za-z]+\s+)?(?:engineer|scientist|researcher|developer|"
+        r"architect|specialist))",
         r"\b(?-i:KI)\b", r"künstliche intelligenz", r"\b(?-i:IA)\b",
         r"intelligence artificielle", r"\bllms?\b",
     ),
@@ -86,7 +91,11 @@ _TECH_ROLE = re.compile(
 #: (AI Evaluation)") — an intern's discipline is whatever else the title says.
 _TRAINEE_ROLE = re.compile(
     r"\b(?:intern\w*|werkstudent\w*|working student|praktikant\w*|praktikum|stagiaire|"
-    r"trainee|apprentice\w*|phd|postdoc\w*|fellow\w*|thesis|masterarbeit|student)\b",
+    r"trainee|apprentice\w*|phd|postdoc\w*|fellow\w*|thesis|masterarbeit|student|"
+    r"co-?op|placement|estágio|estagiário\w*|becari[oa])\b"
+    # A French internship title opens with "Stage": "Stage - IA Machine Learning…".
+    # Anywhere else "stage" is English ("early-stage start-up").
+    r"|^\s*stage\b",
     re.I,
 )
 
@@ -102,6 +111,17 @@ _BUSINESS_ROLE = re.compile(
     r"teacher|tutor|annotator|labell?er|rater|evaluator|engagement)\b",
     re.I,
 )
+
+_CUSTOMER_FACING = re.compile(
+    r"\b(?:value\s+engineer|forward[- ]deployed|solutions?\s+(?:architect|engineer|consultant)|"
+    r"sales\s+engineer|pre-?sales|customer\s+engineer|ai\s+architect|technical\s+account|"
+    r"implementation\s+(?:engineer|consultant)|field\s+engineer)\b", re.I)
+
+_OPT_BUSINESS = re.compile(
+    r"\b(?:marketing|campaigns?|conversion|seo|search engine|adwords|ppc|resource|process|tax|"
+    r"fiscal|revenue|cash|claims|digital|cro|crm|budget|workforce|inventory)\b", re.I)
+_OPT_TECHNICAL = re.compile(r"\b(?:engineer|scientist|research|developer|mathematician|"
+                            r"modell?er|algorithm)\w*", re.I)
 
 #: Titles that say nothing about the discipline, for which the body decides.
 _GENERIC_TITLE = re.compile(
@@ -172,6 +192,18 @@ def classify(title: str | None, description: str | None = None) -> RoleClass:
         labels = [lbl for lbl in labels if lbl in self_naming]
     if labels and business and not tech:
         labels = []
+    # Customer-facing roles named like engineering ones: "Associate Applied (AI)
+    # Value Engineer", "Forward Deployed Machine Learning Engineer", "Applied AI
+    # Architect, Enterprise". Pre-sales and account work, whatever the noun
+    # (Simon's rating, and three more in the 28 Sep 2026 sample).
+    if labels and _CUSTOMER_FACING.search(clean):
+        return RoleClass(("OTHER",), 0.5, f"customer-facing: {title}")
+    # "Marketing Optimisation Specialist", "Resource Optimization Specialist":
+    # optimising campaigns, rosters or spend, not mathematical optimisation.
+    # Only when no engineering or science noun says otherwise.
+    if set(labels) <= {"OPTIMIZATION"} and labels and _OPT_BUSINESS.search(clean) \
+            and not _OPT_TECHNICAL.search(clean):
+        return RoleClass(("OTHER",), 0.4, f"business optimisation: {title}")
 
     # "Research Scientist, Quantum Chemistry" is applied science — just not
     # ours. With no domain word in the title, the body has to mention one.

@@ -1,0 +1,190 @@
+{
+ "total": {
+  "value": 2
+ },
+ "hits": [
+  {
+   "id": "31235524",
+   "headline": "Data Scientist",
+   "webpage_url": "https://arbetsformedlingen.se/platsbanken/annonser/31235524",
+   "publication_date": "2026-07-01T11:51:42",
+   "application_deadline": "2026-12-28T23:59:59",
+   "employer": {
+    "phone_number": null,
+    "email": null,
+    "url": "https://jobb.softhouse.se",
+    "organization_number": "5565355681",
+    "name": "Softhouse Nordic AB",
+    "workplace": "Softhouse "
+   },
+   "workplace_address": {
+    "municipality": "Malmö",
+    "municipality_code": "1280",
+    "municipality_concept_id": "oYPt_yRA_Smm",
+    "region": "Skåne län",
+    "region_code": "12",
+    "region_concept_id": "CaRE_1nn_cSU",
+    "country": "Sverige",
+    "country_code": "199",
+    "country_concept_id": "i46j_HmG_v64",
+    "street_address": "Carlsgatan 12A",
+    "postcode": "21120",
+    "city": "Malmö",
+    "coordinates": [
+     13.0017253250125,
+     55.6113412647633
+    ]
+   },
+   "workplace_addresses": [
+    {
+     "municipality": "Malmö",
+     "municipality_code": "1280",
+     "municipality_concept_id": "oYPt_yRA_Smm",
+     "region": "Skåne län",
+     "region_code": "12",
+     "region_concept_id": "CaRE_1nn_cSU",
+     "country": "Sverige",
+     "country_code": "199",
+     "country_concept_id": "i46j_HmG_v64",
+     "street_address": "Carlsgatan 12A",
+     "postcode": "21120",
+     "city": "Malmö",
+     "coordinates": [
+      13.0017253250125,
+      55.6113412647633
+     ]
+    }
+   ],
+   "description": {
+    "text": "Är du en erfaren Data Scientist som vill lösa affärskritiska utmaningar? Är du prestigelös och vill jobba med likasinnade kollegor som värdesätter kunskapsdelning? Då kommer du gilla oss på Softhouse!\nVad vi kommer att göra tillsammans 🤝\nPå Softhouse blir du en del av ett framåtsträvande bolag, där allt börjar med oss människor. Vi är prestigelösa teamspelare som drivs av att leverera produkter, tjänster och mjukvara av högsta kvalitet.\nVi har jobbat med AI och maskininlärning i flera år och hjä",
+    "text_formatted": "<p><em>Är du en erfaren Data Scientist som vill lösa affärskritiska utmaningar? Är du prestigelös och vill jobba med likasinnade kollegor som värdesätter kunskapsdelning? Då kommer du gilla oss på Softhouse!</em></p><p><strong>Vad vi kommer att göra tillsammans 🤝</strong></p><p>På Softhouse blir du en del av ett framåtsträvande bolag, där allt börjar med oss människor. Vi är prestigelösa teamspelare som drivs av att leverera produkter, tjänster och mjukvara av högsta kvalitet.</p><p>Vi har jobba"
+   },
+   "employment_type": {
+    "concept_id": "PFZr_Syz_cUq",
+    "label": "Vanlig anställning",
+    "legacy_ams_taxonomy_id": "1"
+   },
+   "working_hours_type": {
+    "concept_id": "6YE1_gAC_R2G",
+    "label": "Heltid",
+    "legacy_ams_taxonomy_id": "1"
+   },
+   "experience_required": true,
+   "must_have": {
+    "skills": [],
+    "languages": [],
+    "work_experiences": [],
+    "education": [],
+    "education_level": []
+   },
+   "application_details": {
+    "information": null,
+    "reference": "teamtailor-8000393-2080091",
+    "email": null,
+    "via_af": false,
+    "url": "https://jobb.softhouse.se/jobs/8000393-data-scientist/applications/new?promotion=2080091-arbetsformedlingen",
+    "other": null
+   },
+   "workplace_model": {
+    "concept_id": null,
+    "label": null
+   },
+   "removed": false
+  },
+  {
+   "id": "31422442",
+   "headline": "Data Scientist",
+   "webpage_url": "https://arbetsformedlingen.se/platsbanken/annonser/31422442",
+   "publication_date": "2026-09-01T10:57:35",
+   "application_deadline": "2026-10-01T23:59:59",
+   "employer": {
+    "phone_number": null,
+    "email": null,
+    "url": null,
+    "organization_number": "5567840912",
+    "name": "True Software Scandinavia AB",
+    "workplace": "True Software Scandinavia AB"
+   },
+   "workplace_address": {
+    "municipality": "Stockholm",
+    "municipality_code": "0180",
+    "municipality_concept_id": "AvNB_uwa_6n6",
+    "region": "Stockholms län",
+    "region_code": "01",
+    "region_concept_id": "CifL_Rzy_Mku",
+    "country": "Sverige",
+    "country_code": "199",
+    "country_concept_id": "i46j_HmG_v64",
+    "street_address": "Mäster Samuelsgatan 56 6TR",
+    "postcode": "11121",
+    "city": "Stockholm",
+    "coordinates": [
+     18.060549740437583,
+     59.33232197947752
+    ]
+   },
+   "workplace_addresses": [
+    {
+     "municipality": "Stockholm",
+     "municipality_code": "0180",
+     "municipality_concept_id": "AvNB_uwa_6n6",
+     "region": "Stockholms län",
+     "region_code": "01",
+     "region_concept_id": "CifL_Rzy_Mku",
+     "country": "Sverige",
+     "country_code": "199",
+     "country_concept_id": "i46j_HmG_v64",
+     "street_address": "Mäster Samuelsgatan 56 6TR",
+     "postcode": "11121",
+     "city": "Stockholm",
+     "coordinates": [
+      18.060549740437583,
+      59.33232197947752
+     ]
+    }
+   ],
+   "description": {
+    "text": "Join Truecaller – The place where innovation meets impact!\nTruecaller's mission is to build trust in communication by making it safer, smarter, and more efficient. Born in Sweden, trusted by the world, and here’s why we stand out:\nWe are trusted by over 500 million active users every month across 190+ countries\nWe identify over 15 billion calls daily, helping users avoid spam and scams\nWe are powered by a team of 400+ employees from 45+ nationalities\n\nWe always look for people who take initiativ",
+    "text_formatted": "<p><strong>Join Truecaller – The place where innovation meets impact!</strong></p><p>Truecaller's mission is to build trust in communication by making it safer, smarter, and more efficient. Born in Sweden, trusted by the world, and here’s why we stand out:</p><ul><li>We are trusted by over 500 million active users every month across 190+ countries</li><li>We identify over 15 billion calls daily, helping users avoid spam and scams</li><li>We are powered by a team of 400+ employees from 45+ nation"
+   },
+   "employment_type": {
+    "concept_id": "kpPX_CNN_gDU",
+    "label": "Tillsvidareanställning (inkl. eventuell provanställning)",
+    "legacy_ams_taxonomy_id": null
+   },
+   "working_hours_type": {
+    "concept_id": "6YE1_gAC_R2G",
+    "label": "Heltid",
+    "legacy_ams_taxonomy_id": "1"
+   },
+   "experience_required": true,
+   "must_have": {
+    "skills": [],
+    "languages": [],
+    "work_experiences": [
+     {
+      "weight": 10,
+      "concept_id": "ziUj_67V_Yk4",
+      "label": "Data scientist",
+      "legacy_ams_taxonomy_id": null
+     }
+    ],
+    "education": [],
+    "education_level": []
+   },
+   "application_details": {
+    "information": null,
+    "reference": null,
+    "email": null,
+    "via_af": false,
+    "url": "https://www.truecaller.com/career",
+    "other": null
+   },
+   "workplace_model": {
+    "concept_id": "ZxwM_gtz_n61",
+    "label": "Arbete på plats"
+   },
+   "removed": false
+  }
+ ]
+}

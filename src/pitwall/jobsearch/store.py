@@ -17,7 +17,8 @@ from .dedupe import pick_canonical, source_rank
 from .normalize import NORMALIZER_VERSION
 
 _WRITABLE = {name for name, _ in JOB_SEARCH_COLUMNS} | {
-    "salary_min", "salary_max", "salary_currency", "salary_text",
+    "salary_min", "salary_max", "salary_currency", "salary_text", "remote_regions",
+    "skills_nice", "agency",
 }
 
 #: What the owner has done with a vacancy, for the inbox tabs.
@@ -137,9 +138,27 @@ def set_note(conn: sqlite3.Connection, cluster_id: int, note: str | None) -> Non
     _review(conn, int(cluster_id), note=(note or "").strip() or None)
 
 
+#: Why a job is a bad match. Kept apart from DISMISS_REASONS: a rating says
+#: the ranking was wrong, a dismissal only that you are done with the job.
+FEEDBACK_REASONS = (
+    "Too senior", "Wrong kind of role", "Skills don't match", "Wrong country or city",
+    "Needs sponsorship they won't give", "Language requirement", "Company or domain",
+    "Salary", "Agency or unclear employer", "Other",
+)
+
+
 def set_feedback(conn: sqlite3.Connection, cluster_id: int, feedback: str | None) -> None:
-    """§91: good_match / bad_match, for measuring whether ranking improves."""
-    _review(conn, int(cluster_id), feedback=feedback)
+    """§91: good_match / bad_match, for measuring whether ranking improves.
+    Changing or clearing the rating clears the reason given for the old one."""
+    _review(conn, int(cluster_id), feedback=feedback, feedback_reason=None,
+            feedback_note=None)
+
+
+def set_feedback_reason(conn: sqlite3.Connection, cluster_id: int, reason: str | None,
+                        note: str | None = None) -> None:
+    """Why a job was rated a bad match, in the owner's words."""
+    _review(conn, int(cluster_id), feedback_reason=reason or None,
+            feedback_note=(note or "").strip() or None)
 
 
 def _now(conn: sqlite3.Connection) -> str:
@@ -151,12 +170,14 @@ def _now(conn: sqlite3.Connection) -> str:
 _INBOX_SQL = """
     SELECT j.id, j.cluster_id, j.title, j.posting_company, j.company_id, j.target_company_id,
            j.company_norm, j.url, j.canonical_url, j.location, j.country, j.countries,
-           j.city, j.cities, j.remote_status, j.remote_region, j.employment_types,
+           j.city, j.cities, j.remote_status, j.remote_region, j.remote_regions,
+           j.employment_types,
            j.experience_min, j.experience_max, j.experience_level, j.experience_required,
            j.experience_evidence, j.education_required, j.education_preferred,
            j.salary_min, j.salary_max, j.salary_currency, j.salary_text,
            j.visa_status, j.visa_evidence, j.visa_scope, j.relocation, j.role_labels,
-           j.skills, j.description, j.description_truncated, j.posted_at,
+           j.skills, j.skills_nice, j.agency,
+           j.description, j.description_truncated, j.posted_at,
            j.first_seen_at, j.last_seen_at, j.status, j.content_changed_at,
            j.previous_description, j.possible_duplicate_of, j.language,
            j.languages_required,
@@ -272,6 +293,8 @@ def load_inbox(conn: sqlite3.Connection) -> Inbox:
             "dismissed_reason": review.get("dismissed_reason"),
             "note": review.get("note"),
             "feedback": review.get("feedback"),
+            "feedback_reason": review.get("feedback_reason"),
+            "feedback_note": review.get("feedback_note"),
             "application": apps.get(cluster_id),
             "company_applications": [
                 a for a in by_company.get(str(best.get("company_norm") or ""), [])
@@ -280,6 +303,7 @@ def load_inbox(conn: sqlite3.Connection) -> Inbox:
         })
         for key in ("filter_reasons", "reasons_plus", "reasons_minus", "matched_skills",
                     "missing_skills", "role_labels", "skills", "countries", "cities",
+                    "remote_regions", "skills_nice",
                     "employment_types", "ai_reasons", "languages_required"):
             best[key] = loads(best.get(key))
         try:

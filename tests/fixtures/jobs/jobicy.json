@@ -1,0 +1,47 @@
+{
+ "apiVersion": "2.2.16",
+ "friendlyNotice": "Thanks for using Jobicy API! Please ensure Jobicy is clearly credited with a direct link to the source, and all application buttons redirect to the original job URL provided in this feed. That’s all! You might be building something amazing, we wish you the best of luck!",
+ "jobCount": 2,
+ "jobs": [
+  {
+   "id": 154127,
+   "url": "https://jobicy.com/jobs/154127-senior-data-scientist-full-stack",
+   "jobSlug": "154127-senior-data-scientist-full-stack",
+   "jobTitle": "Senior Data Scientist, Full Stack",
+   "companyName": "TRM Labs",
+   "jobIndustry": [
+    "Data Science & Analytics"
+   ],
+   "jobType": [
+    "Full-Time"
+   ],
+   "jobGeo": "Canada,  USA",
+   "jobLevel": "Senior",
+   "jobExcerpt": "Build a Safer World. TRM Labs provides AI-powered intelligence solutions that help public and private sector agencies investigate and disrupt crime. TRM's platforms enable investigators to trace illic",
+   "jobDescription": "<h3>Build a Safer World.</h3>\r\n<p><a href=\"https://jobicy.com/company/trm-labs\" target=\"_blank\" rel=\"noopener\">TRM Labs</a> provides AI-powered intelligence solutions that help public and private sector agencies investigate and disrupt crime. TRM's platforms enable investigators to trace illicit activity, build cases, and construct operating pictures of threat networks. Leading agencies and busine",
+   "pubDate": "2026-09-28T08:52:08+00:00",
+   "salaryMin": 180000,
+   "salaryMax": 210000,
+   "salaryCurrency": "USD",
+   "salaryPeriod": "yearly"
+  },
+  {
+   "id": 151940,
+   "url": "https://jobicy.com/jobs/151940-delivery-solutions-architect",
+   "jobSlug": "151940-delivery-solutions-architect",
+   "jobTitle": "Delivery Solutions Architect",
+   "companyName": "Databricks",
+   "jobIndustry": [
+    "Data Science & Analytics"
+   ],
+   "jobType": [
+    "Full-Time"
+   ],
+   "jobGeo": "Denmark,  Finland,  Sweden",
+   "jobLevel": "Director",
+   "jobExcerpt": "CSQ227R121 Locations - Sweden, Denmark, Finland (Hybrid/Remote) At Databricks, we are on a mission to empower our customers to solve the world's toughest data problems with the Databricks Data Intelli",
+   "jobDescription": "<p>CSQ227R121</p>\n<p>Locations - Sweden, Denmark, Finland (Hybrid/Remote)</p>\n<p>At <a href=\"https://jobicy.com/company/databricks\" target=\"_blank\" rel=\"noopener\">Databricks</a>, we are on a mission to empower our customers to solve the world's toughest data problems with the Databricks Data Intelligence Platform. As a Delivery Solutions Architect (DSA), you are a trusted technical advisor to key ",
+   "pubDate": "2026-09-28T05:20:11+00:00"
+  }
+ ]
+}

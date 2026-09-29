@@ -1,0 +1,253 @@
+{
+ "total": 2,
+ "results": [
+  {
+   "uuid": "b4c3abc9fa180cfed2af5ab3629d1721",
+   "title": "Data Scientist / Senior Data Scientist",
+   "description": "<ul><li>Work closely with stakeholders from supply chain, finance and customer experience team</li><li>Cloud exposure – GCP/ AWS / AZURE</li><li>Expertise in <strong>Predictive /Time Series modelling </strong>(demonstrated with actual/historical data)</li></ul><p><strong>about the company</strong><br />We are looking for a <strong>Data Scientist / Senior Data Scientist</strong> with <strong>2–3 years of experience</strong> to act as a crucial technical bridge. You will partner closely with three",
+   "postedCompany": {
+    "name": "RANDSTAD PTE. LIMITED",
+    "uen": "199304055W"
+   },
+   "hiringCompany": null,
+   "salary": {
+    "maximum": 8500,
+    "minimum": 7500,
+    "type": {
+     "id": 4,
+     "salaryType": "Monthly"
+    }
+   },
+   "address": {
+    "overseasCountry": null,
+    "foreignAddress1": null,
+    "foreignAddress2": null,
+    "block": "8",
+    "street": "CROSS STREET",
+    "floor": null,
+    "unit": null,
+    "building": "MANULIFE TOWER",
+    "postalCode": "048424",
+    "isOverseas": false,
+    "districts": [
+     {
+      "id": 1,
+      "location": "D01 Marina, Raffles Place, People's Park, Cecil",
+      "region": "Central",
+      "sectors": [
+       "01",
+       "02",
+       "03",
+       "04",
+       "05",
+       "06"
+      ],
+      "regionId": "Central"
+     }
+    ],
+    "lat": 1.28240747185501,
+    "lng": 103.849023808747
+   },
+   "positionLevels": [
+    {
+     "id": 8,
+     "position": "Senior Executive"
+    }
+   ],
+   "minimumYearsExperience": 2,
+   "employmentTypes": [
+    {
+     "id": 8,
+     "employmentType": "Full Time"
+    }
+   ],
+   "metadata": {
+    "jobPostId": "MCF-2026-1688006",
+    "deletedAt": null,
+    "createdBy": "29f0c313-10eb-4da9-9e6b-989e46722f8c",
+    "createdAt": "2026-09-24T03:07:54.000Z",
+    "updatedAt": "2026-09-24T03:07:54.000Z",
+    "emailRecipient": "29f0c313-10eb-4da9-9e6b-989e46722f8c",
+    "editCount": 0,
+    "repostCount": 0,
+    "totalNumberOfView": 69,
+    "newPostingDate": "2026-09-24",
+    "originalPostingDate": "2026-09-24",
+    "expiryDate": "2026-10-24",
+    "totalNumberJobApplication": 6,
+    "isJdEnhanced": false,
+    "isPostedOnBehalf": false,
+    "isHideSalary": false,
+    "isHideCompanyAddress": false,
+    "isHideHiringEmployerName": false,
+    "isHideEmployerName": false,
+    "jobDetailsUrl": "https://www.mycareersfuture.gov.sg/job/information-technology/data-scientist-senior-data-scientist-randstad-b4c3abc9fa180cfed2af5ab3629d1721",
+    "matchedSkillsScore": null
+   },
+   "skills": [
+    {
+     "skill": "Zumba",
+     "uuid": "0260bfdcca22e1d1d9505e8be68c8a35",
+     "confidence": null,
+     "isKeySkill": false
+    },
+    {
+     "skill": "Machine Learning",
+     "uuid": "091fa9121c047db1dd48c3e2ab5f3c91",
+     "confidence": null,
+     "isKeySkill": false
+    },
+    {
+     "skill": "Time Series Analysis",
+     "uuid": "1c5b15a61a662f1a6ea986753c8cd5b3",
+     "confidence": null,
+     "isKeySkill": false
+    },
+    {
+     "skill": "Natural Language Processing",
+     "uuid": "49f53d4e41fb1f785aeb36bddad58488",
+     "confidence": null,
+     "isKeySkill": false
+    },
+    {
+     "skill": "XGBoost",
+     "uuid": "64292903922bb4728890de21f0e54d28",
+     "confidence": null,
+     "isKeySkill": false
+    }
+   ],
+   "status": {
+    "id": 102,
+    "jobStatus": "Open"
+   },
+   "flexibleWorkArrangements": [],
+   "schemes": []
+  },
+  {
+   "uuid": "af19bdfa18193861be63a68ebc683158",
+   "title": "Data Scientist/Senior Data Scientist – Digital Health & AI",
+   "description": "<p>We are seeking a talented and experienced Data Scientist to join our team. The ideal candidate will be passionate about utilizing data science methodologies to derive insights from digital device sensor data coming from clinical studies and contribute to the development and implementation of algorithms in this area. As a Data Scientist, you will work closely with customers to analyze data and build models and tools that enhance understanding of clinical outcomes and solve their business probl",
+   "postedCompany": {
+    "name": "INNOCELLENCE SYSTEMS PTE. LTD.",
+    "uen": "200900434K"
+   },
+   "hiringCompany": null,
+   "salary": {
+    "maximum": 10000,
+    "minimum": 8000,
+    "type": {
+     "id": 4,
+     "salaryType": "Monthly"
+    }
+   },
+   "address": {
+    "overseasCountry": null,
+    "foreignAddress1": null,
+    "foreignAddress2": null,
+    "block": "138",
+    "street": "CECIL STREET",
+    "floor": null,
+    "unit": null,
+    "building": "CECIL COURT",
+    "postalCode": "069538",
+    "isOverseas": false,
+    "districts": [
+     {
+      "id": 1,
+      "location": "D01 Marina, Raffles Place, People's Park, Cecil",
+      "region": "Central",
+      "sectors": [
+       "01",
+       "02",
+       "03",
+       "04",
+       "05",
+       "06"
+      ],
+      "regionId": "Central"
+     }
+    ],
+    "lat": 1.28080508033848,
+    "lng": 103.848667723317
+   },
+   "positionLevels": [
+    {
+     "id": 7,
+     "position": "Professional"
+    }
+   ],
+   "minimumYearsExperience": 5,
+   "employmentTypes": [
+    {
+     "id": 7,
+     "employmentType": "Permanent"
+    },
+    {
+     "id": 8,
+     "employmentType": "Full Time"
+    }
+   ],
+   "metadata": {
+    "jobPostId": "MCF-2026-0946510",
+    "deletedAt": "2026-09-13T17:15:04.000Z",
+    "createdBy": "0a26659c-eccc-48fb-ade4-eddf688da568",
+    "createdAt": "2026-06-04T07:38:47.000Z",
+    "updatedAt": "2026-09-23T06:43:17.000Z",
+    "emailRecipient": "0a26659c-eccc-48fb-ade4-eddf688da568",
+    "editCount": 1,
+    "repostCount": 2,
+    "totalNumberOfView": 651,
+    "newPostingDate": "2026-09-23",
+    "originalPostingDate": "2026-06-04",
+    "expiryDate": "2026-10-23",
+    "totalNumberJobApplication": 46,
+    "isJdEnhanced": false,
+    "isPostedOnBehalf": false,
+    "isHideSalary": false,
+    "isHideCompanyAddress": false,
+    "isHideHiringEmployerName": false,
+    "isHideEmployerName": false,
+    "jobDetailsUrl": "https://www.mycareersfuture.gov.sg/job/healthcare/data-scientistsenior-data-scientist-%E2%80%93-digital-health-ai-innocellence-systems-af19bdfa18193861be63a68ebc683158",
+    "matchedSkillsScore": null
+   },
+   "skills": [
+    {
+     "skill": "TensorFlow",
+     "uuid": "074dd699710da0ec1eb45f13b31788e3",
+     "confidence": null,
+     "isKeySkill": false
+    },
+    {
+     "skill": "Machine Learning",
+     "uuid": "091fa9121c047db1dd48c3e2ab5f3c91",
+     "confidence": null,
+     "isKeySkill": false
+    },
+    {
+     "skill": "Pharmaceutical Industry",
+     "uuid": "09cd89833d5ea85570bfc41030d454a8",
+     "confidence": null,
+     "isKeySkill": false
+    },
+    {
+     "skill": "Data Analysis",
+     "uuid": "323d6a1348df47d3174f578e1eff00eb",
+     "confidence": null,
+     "isKeySkill": false
+    },
+    {
+     "skill": "R Programming",
+     "uuid": "32c964a075d20e2b8835680b82bae403",
+     "confidence": null,
+     "isKeySkill": false
+    }
+   ],
+   "status": {
+    "id": 103,
+    "jobStatus": "Re-open"
+   },
+   "flexibleWorkArrangements": [],
+   "schemes": []
+  }
+ ]
+}

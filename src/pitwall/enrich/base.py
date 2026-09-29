@@ -372,6 +372,7 @@ class SerpSearcher:
         cache: Any | None = None,
         max_results: int = 10,
         use_cache: bool = True,
+        operators_only: bool = True,
     ) -> None:
         from ..search import build_chain
         from ..search.cache import SerpCache
@@ -390,14 +391,32 @@ class SerpSearcher:
             except Exception as exc:  # noqa: BLE001 - no provider is a state, not a crash
                 log.warning("enrichment has no search provider: %s", exc)
                 providers = []
-        self.providers = [p for p in providers if p.supports_operators()]
-        self.dropped = [p.name for p in providers if not p.supports_operators()]
+        #: Enrichment's queries ARE `site:`/quoted phrases, so a provider that
+        #: drops them answers something else and the default filters it out.
+        #: Cover-letter company research asks plain keyword questions, where that
+        #: filter is actively harmful: SearXNG is not running on this machine, so
+        #: the chain that actually answers is ddgs, and ddgs reports
+        #: `supports_operators() -> False`. Filtering it out left the searcher
+        #: with no providers at all and every research run silently empty.
+        self.operators_only = operators_only
+        self.providers = [
+            p for p in providers if p.supports_operators() or not operators_only
+        ]
+        self.dropped = [
+            p.name for p in providers if operators_only and not p.supports_operators()
+        ]
         self.cache = cache if cache is not None else SerpCache(settings=self.settings)
         self.max_results = max_results
         self.queries_run = 0
 
     def supports_operators(self) -> bool:
-        return bool(self.providers)
+        """Do the queries this searcher sends keep their operators upstream?
+
+        With `operators_only=False` the chain may contain a provider that drops
+        them, so this asks the providers rather than assuming a non-empty chain
+        means yes.
+        """
+        return bool(self.providers) and all(p.supports_operators() for p in self.providers)
 
     def search(self, query: str, *, max_results: int | None = None) -> list[SearchHit]:
         """First provider that answers wins. A cached answer costs nothing."""

@@ -46,3 +46,16 @@ pytest>=8.3
 pytest-cov>=5.0
 ruff>=0.7
 mypy>=1.13
+
+# ── tailored CV + cover letter (CV_COVER_LETTER_ENGINEERING_SPEC.md) ──
+# Pure-Python wheels only. reportlab renders the frozen frame and, via
+# pdfmetrics.stringWidth, measures line costs instead of estimating them.
+reportlab>=4.2
+python-docx>=1.1
+pypdf>=5.0
+# Only scripts/fetch_fonts.py needs this — static instances from variable fonts.
+fonttools>=4.50
+# Renders the generated CV to an image for the Applications Studio preview.
+# `st.pdf` would be the obvious choice but its component does not work on
+# Streamlit 1.62; the page degrades to a download button without this.
+pypdfium2>=4.30

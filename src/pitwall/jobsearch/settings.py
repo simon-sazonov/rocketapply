@@ -165,6 +165,9 @@ class Weights(BaseModel):
     visa: float = Field(default=10, ge=0)
     career: float = Field(default=10, ge=0)
     company: float = Field(default=5, ge=0)
+    #: How closely the posting's text reads like your CV (similarity.py). Small
+    #: until your ratings show whether it separates good jobs from bad.
+    fit: float = Field(default=5, ge=0)
 
     @model_validator(mode="after")
     def _not_all_zero(self) -> Weights:
@@ -185,24 +188,94 @@ class AdzunaConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
-    #: Searched against job TITLES in each country (`title_only`).
-    queries: list[str] = Field(default_factory=lambda: [
-        "data scientist", "machine learning", "AI engineer", "applied scientist",
-        "research engineer", "decision scientist", "optimisation", "simulation engineer",
-    ])
+    #: Searched against job TITLES in each country (`title_only`). The searches
+    #: themselves are shared by every source: `sources.queries` plus the ones
+    #: built from your roles and titles.
     #: Empty = your `locations.countries` that Adzuna covers.
     countries: list[str] = Field(default_factory=list)
-    max_requests_per_run: int = Field(default=40, ge=0, le=500)
-    #: A ceiling across a whole day, across runs — well inside the free tier.
-    daily_request_cap: int = Field(default=200, ge=0)
+    #: A free key's limits, from developer.adzuna.com (checked 28 Sep 2026).
+    #: Counted over rolling windows, so no choice of week start can break them.
+    per_day: int = Field(default=250, ge=0)
+    per_week: int = Field(default=1000, ge=0)
+    per_month: int = Field(default=2500, ge=0)
+    #: auto: up to the limits until every search has been read back
+    #: `backfill_days`, then about per_month / 31 a day. burst: always up to
+    #: the limits (the week's 1,000 goes in four days, then it pauses).
+    #: even: always the steady rate.
+    pace: Literal["auto", "burst", "even"] = "auto"
+    backfill_days: int = Field(default=30, ge=1, le=90)
+    #: Pages read from one search in one visit (×`results_per_page`).
+    max_pages_per_search: int = Field(default=20, ge=1, le=100)
     results_per_page: int = Field(default=50, ge=1, le=50)
-    max_days_old: int = Field(default=14, ge=1, le=90)
     title_only: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy(cls, data: Any) -> Any:
+        """Profiles saved before the quota ledger carry a per-run count, a
+        daily cap and a fixed age. The ledger and the rotation replace all
+        three; the keys are dropped rather than refused."""
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items()
+                    if k not in {"max_requests_per_run", "daily_request_cap", "max_days_old",
+                                 "queries"}}
+        return data
 
     @field_validator("countries", mode="before")
     @classmethod
     def _countries(cls, v: Any) -> Any:
         return _codes(v, "sources.adzuna.countries")
+
+
+class _Switch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+
+
+class EuresConfig(_Switch):
+    #: Pages per search in relevance order; reading stops at the first page
+    #: with no title containing every word, so this is rarely reached.
+    max_pages_per_search: int = Field(default=4, ge=1, le=20)
+
+
+class JoobleConfig(_Switch):
+    #: Jooble publishes no limit, so the ledger holds it to this. Only the
+    #: US: the key belongs to jooble.org.
+    per_day: int = Field(default=60, ge=0)
+    max_pages_per_search: int = Field(default=3, ge=1, le=20)
+
+
+class ITJobsConfig(_Switch):
+    max_pages_per_search: int = Field(default=3, ge=1, le=20)
+
+
+class ArbeitnowUKConfig(_Switch):
+    max_pages: int = Field(default=4, ge=1, le=20)     # x100, newest first
+
+
+class HimalayasConfig(_Switch):
+    #: Cursor pages per search. Offset paging is refused by robots.txt.
+    max_pages_per_search: int = Field(default=2, ge=1, le=10)
+
+
+class JobicyConfig(_Switch):
+    #: One request per run, at most one an hour: Jobicy's terms.
+    industry: str = "data-science"
+
+
+class RemoteOKConfig(_Switch):
+    tags: list[str] = Field(default_factory=lambda: ["machine-learning", "data-science", "ai"])
+
+
+class FindworkConfig(_Switch):
+    per_day: int = Field(default=40, ge=0)
+
+
+class DiscoveredConfig(_Switch):
+    #: Candidate boards read and verified per run. Each is one request; the
+    #: rest wait for the next run, in the order they were found.
+    max_checks_per_run: int = Field(default=40, ge=0, le=500)
 
 
 class Sources(BaseModel):
@@ -213,11 +286,42 @@ class Sources(BaseModel):
     #: …and of every company on the people-search list (config/companies.csv,
     #: the motorsport teams) that has one, so "motorsport list only" has jobs.
     people_list_ats: bool = True
+    #: Searches added to the ones built from your roles and titles
+    #: (`jobsearch/queries.py`). Every keyword source runs them.
+    queries: list[str] = Field(default_factory=list)
     arbeitnow: ArbeitnowConfig = Field(default_factory=ArbeitnowConfig)
+    arbeitnow_uk: ArbeitnowUKConfig = Field(default_factory=ArbeitnowUKConfig)
     adzuna: AdzunaConfig = Field(default_factory=AdzunaConfig)
+    eures: EuresConfig = Field(default_factory=EuresConfig)
+    workable_search: _Switch = Field(default_factory=_Switch)
+    jooble: JoobleConfig = Field(default_factory=JoobleConfig)
+    itjobs: ITJobsConfig = Field(default_factory=ITJobsConfig)
+    jobtech: _Switch = Field(default_factory=_Switch)
+    devjobs: _Switch = Field(default_factory=_Switch)
+    mycareersfuture: _Switch = Field(default_factory=_Switch)
+    himalayas: HimalayasConfig = Field(default_factory=HimalayasConfig)
+    jobicy: JobicyConfig = Field(default_factory=JobicyConfig)
+    remoteok: RemoteOKConfig = Field(default_factory=RemoteOKConfig)
+    findwork: FindworkConfig = Field(default_factory=FindworkConfig)
+    #: Company boards found from the links inside postings (Phase 2).
+    discovered: DiscoveredConfig = Field(default_factory=DiscoveredConfig)
     #: How long a fetched page is reused. A daily search wants hours, not the
     #: week the Openings cache keeps.
     cache_hours: float = Field(default=6.0, ge=0, le=168)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_queries(cls, data: Any) -> Any:
+        """Adzuna used to carry its own search list. Every keyword source now
+        shares one, so an old `adzuna.queries` becomes extra searches here."""
+        if isinstance(data, dict) and isinstance(data.get("adzuna"), dict) \
+                and "queries" in data["adzuna"]:
+            data = dict(data)
+            adzuna = dict(data["adzuna"])
+            old = [q for q in adzuna.pop("queries") or [] if q]
+            data["adzuna"] = adzuna
+            data["queries"] = list(dict.fromkeys([*(data.get("queries") or []), *old]))
+        return data
 
 
 class JobSearchConfig(BaseModel):
@@ -235,9 +339,14 @@ class JobSearchConfig(BaseModel):
     degree: Literal["bachelors", "masters", "phd"] = "masters"
     #: §23 — concepts that pull a job up the list without being required.
     career_interests: list[str] = Field(default_factory=list)
-    #: Spoken languages (ISO 639-1). A posting that asks for one you do not
-    #: list is marked down and says so — never filtered, since "German is a
-    #: plus" and "German required" are hard to tell apart reliably.
+    #: The opposite: a job whose TITLE names one of these is marked down and
+    #: says why. Never filtered — a topic you avoid can still be a job you want.
+    avoid_topics: list[str] = Field(default_factory=list)
+    #: Spoken languages, ISO 639-1 with an optional CEFR level: `en`, `pt:B1`,
+    #: `it:A2`, `uk:native`. A bare code means fluent. A posting that asks for
+    #: a language is marked down by how well you speak it (`language_level`);
+    #: never filtered, since "German is a plus" and "German required" are
+    #: hard to tell apart reliably.
     languages_spoken: list[str] = Field(default_factory=lambda: ["en"])
     weights: Weights = Field(default_factory=Weights)
     sources: Sources = Field(default_factory=Sources)
@@ -247,7 +356,24 @@ class JobSearchConfig(BaseModel):
     @field_validator("languages_spoken", mode="before")
     @classmethod
     def _langs(cls, v: Any) -> Any:
-        return [str(x).strip().lower()[:2] for x in v or [] if str(x).strip()]
+        out: list[str] = []
+        for item in v or []:
+            if not str(item).strip():
+                continue
+            code, level = parse_language(str(item))
+            entry = f"{code}:{level}" if level else code
+            if all(e.split(":")[0] != code for e in out):
+                out.append(entry)
+        return out
+
+    def language_level(self, code: str) -> str | None:
+        """How well you speak `code`: a CEFR level, `native`, `fluent` for a
+        code listed without one, or None when it is not listed."""
+        for entry in self.languages_spoken:
+            listed, _, level = entry.partition(":")
+            if listed == code:
+                return level or "fluent"
+        return None
 
     @field_validator("employment_types")
     @classmethod
@@ -266,6 +392,36 @@ class JobSearchConfig(BaseModel):
     def is_authorized(self, country: str | None) -> bool:
         wa = self.work_authorization
         return bool(country) and (not wa.needs_sponsorship or country in wa.authorized_countries)
+
+
+#: CEFR, lowest first, then native.
+LANGUAGE_LEVELS = ("A1", "A2", "B1", "B2", "C1", "C2", "native")
+
+#: What people type for a language, to ISO 639-1.
+LANGUAGE_CODES = {
+    "english": "en", "portuguese": "pt", "italian": "it", "russian": "ru",
+    "ukrainian": "uk", "german": "de", "french": "fr", "spanish": "es", "dutch": "nl",
+    "swedish": "sv", "danish": "da", "finnish": "fi", "norwegian": "no", "polish": "pl",
+}
+
+
+def parse_language(text: str) -> tuple[str, str | None]:
+    """`"pt:B1"`, `"pt B1"`, `"Portuguese B1"`, `"uk native"`, `"en"` ->
+    `(code, level or None)`. Raises ValueError on anything else."""
+    import re
+
+    match = re.fullmatch(r"\s*([A-Za-z]+)\s*[:\-_ ]?\s*([A-Ca-c][12]|native|Native|NATIVE)?\s*",
+                         text)
+    if not match:
+        raise ValueError(f"languages_spoken: {text!r} — use a code and an optional level, "
+                         "like en, pt:B1, uk:native")
+    word, level = match.group(1).lower(), match.group(2)
+    code = word if len(word) == 2 else LANGUAGE_CODES.get(word)
+    if not code:
+        raise ValueError(f"languages_spoken: {text!r} is not a language this app knows")
+    if level:
+        level = "native" if level.lower() == "native" else level.upper()
+    return code, level
 
 
 def config_path(*, personal_only: bool = False) -> Path:

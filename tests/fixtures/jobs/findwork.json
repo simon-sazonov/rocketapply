@@ -1,0 +1,59 @@
+{
+ "count": 2,
+ "next": null,
+ "previous": null,
+ "results": [
+  {
+   "id": "XkBRYPM",
+   "role": "Senior Data Engineer – AWS Data Lake &amp; Pipeline Architecture ",
+   "company_name": "Toptal",
+   "company_num_employees": "1001-5000",
+   "employment_type": null,
+   "location": null,
+   "remote": true,
+   "url": "https://findwork.dev/XkBRYPM/senior-data-engineer-aws-data-lake-amp-pipeline-architecture-at-toptal",
+   "text": "<p>Summary<br>We are seeking a Data Engineer to support the development of a Data Intelligence Platform. This role focuses on data modeling, data services, data pipelines, and cloud-based data infrastructure for reporting, analytics, and data science.</p><p>General information<br>This Data Engineer will support data-related operations across a broader Data Intelligence Platform team. The work incl",
+   "date_posted": "2026-09-15T16:53:09Z",
+   "keywords": [
+    "etl",
+    "kafka",
+    "nosql",
+    "scala",
+    "python",
+    "jenkins",
+    "sql",
+    "aws",
+    "terraform",
+    "spark",
+    "ml",
+    "apache",
+    "ecs"
+   ],
+   "source": "Weworkremotely"
+  },
+  {
+   "id": "nY7PZAM",
+   "role": "Data Scientist II, ML Infrastructure",
+   "company_name": "Pinterest",
+   "company_num_employees": null,
+   "employment_type": null,
+   "location": null,
+   "remote": true,
+   "url": "https://findwork.dev/nY7PZAM/data-scientist-ii-ml-infrastructure-at-pinterest",
+   "text": "<div class=\"content-intro\"><p><strong>About Pinterest:</strong></p><p>Millions of people around the world come to our platform to find creative ideas, dream about new possibilities and plan for memories that will last a lifetime. At Pinterest, we’re on a mission to bring everyone the inspiration to create a life they love, and that starts with the people behind the product.</p><p>Discover a career",
+   "date_posted": "2026-09-13T11:31:12Z",
+   "keywords": [
+    "prefect",
+    "spark",
+    "ai",
+    "inference",
+    "pytorch",
+    "ml",
+    "jenkins",
+    "ancestry",
+    "python"
+   ],
+   "source": "Weworkremotely"
+  }
+ ]
+}

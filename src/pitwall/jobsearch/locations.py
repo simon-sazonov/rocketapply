@@ -60,6 +60,8 @@ COUNTRIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "IL": ("Israel", ()),
     "IN": ("India", ()),
     "JP": ("Japan", ()),
+    "HK": ("Hong Kong", ("hongkong", "hong kong sar")),
+    "CN": ("China", ("mainland china", "prc")),
     "SG": ("Singapore", ()),
     "AE": ("United Arab Emirates", ("uae", "dubai")),
 }
@@ -289,6 +291,16 @@ def city_country(city: str | None) -> str | None:
     return CITIES.get(_fold(city)) if city else None
 
 
+#: Remote-region codes that are not countries. "EU" and "NA" are two letters
+#: long, and code that took "two letters" to mean "a country" read every
+#: "Remote (EU)" job as remote-within-a-country-called-EU: closed to everyone.
+REGION_CODES = frozenset({"EU", "EUROPE", "EMEA", "NA", "WORLD"})
+
+
+def is_country_code(code: str | None) -> bool:
+    return bool(code) and len(str(code)) == 2 and str(code).upper() not in REGION_CODES
+
+
 def region_contains(region: str | None, country: str | None) -> bool:
     """Is `country` inside a remote region like EU / EUROPE / EMEA / WORLD / NA?"""
     if not region or not country:
@@ -311,6 +323,10 @@ class Location:
     cities: tuple[str, ...] = ()
     remote_status: str = "unknown"          # remote | hybrid | onsite | unknown
     remote_region: str | None = None        # ISO2, EU, EUROPE, EMEA, NA, WORLD
+    #: Every region a remote job names, as alternatives: "Remote — US or
+    #: Canada" is (US, CA), and someone in either can take it. Empty when the
+    #: posting names none, which is "unknown", never "anywhere".
+    remote_regions: tuple[str, ...] = ()
 
     @property
     def country(self) -> str | None:
@@ -429,18 +445,24 @@ def parse_location(
     elif remote_flag is False and found.countries or _ONSITE_RE.search(mode_text):
         status = "onsite"
 
-    region = None
+    regions: list[str] = []
     if status == "remote":
         for pattern, name in _REMOTE_REGIONS:
-            if pattern.search(mode_text):
-                region = name
-                break
-        if region is None and len(found.countries) == 1:
-            # "Remote - UK", "Remote (Germany)": remote within that country.
-            region = found.countries[0]
+            if pattern.search(mode_text) and name not in regions:
+                regions.append(name)
+        if "WORLD" in regions:
+            regions = ["WORLD"]
+        else:
+            # Countries named beside the work mode are where it is open:
+            # "Remote - UK", "Remote (US, Canada)", "Remote EU or UK". One the
+            # named region already contains adds nothing.
+            for code in found.countries:
+                if code not in regions and not any(region_contains(r, code) for r in regions):
+                    regions.append(code)
     return Location(
         countries=tuple(found.countries),
         cities=tuple(cities),
         remote_status=status,
-        remote_region=region,
+        remote_region=regions[0] if regions else None,
+        remote_regions=tuple(regions),
     )

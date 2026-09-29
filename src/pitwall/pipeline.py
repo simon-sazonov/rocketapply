@@ -1251,68 +1251,89 @@ class Pipeline:
         total = len(sources)
         self.progress(stage, f"{total} job source(s) to poll", 0, total)
         seen_all: list[int] = []
-        for i, source in enumerate(sources, start=1):
-            if self.cancelled():
-                stats.notes.append("cancelled during job polling")
-                break
-            source_id = self.repos.job_sources.upsert(
+        # Rows first, on this thread: workers never touch the database.
+        source_ids = [
+            self.repos.job_sources.upsert(
                 source.name, source.kind,
                 base_url=getattr(source, "url", None) or getattr(source, "base_url", None),
                 company_id=getattr(source, "company_id", None),
                 target_company_id=getattr(source, "target_company_id", None),
             )
+            for source in sources
+        ]
+
+        def fetch(index: int) -> tuple[int, list[Any] | None, BaseException | None, int]:
+            source = sources[index]
             started = time.monotonic()
             try:
                 postings = source.fetch(no_cache=no_cache)
             except Exception as exc:  # noqa: BLE001 - an adapter must never end the run
-                if isinstance(exc, SourceError):
-                    log.warning("job source %s failed: %s", source.name, exc)
-                    message = str(exc)
-                else:
-                    log.exception("job source %s raised", source.name)
-                    message = f"{type(exc).__name__}: {exc}"
-                stats.job_sources_failed += 1
-                stats.notes.append(f"{source.name}: {message}")
-                with self.repos.writing():
-                    self.repos.job_sources.record_poll(
-                        source_id, ok=False, error=message,
-                        duration_ms=int((time.monotonic() - started) * 1000),
-                    )
-                self.progress(stage, f"{i}/{total} · {source.name}: failed", i, total)
-                continue
+                return index, None, exc, int((time.monotonic() - started) * 1000)
+            return index, postings, None, int((time.monotonic() - started) * 1000)
 
-            seen: list[int] = []
-            new = updated = 0
-            with self.repos.writing():
-                for posting in postings:
-                    company_id, target_id = link(source, posting)
-                    result = self.repos.jobs.upsert(
-                        source_id, posting, company_id, target_company_id=target_id,
+        # Network I/O on the workers; every write on this thread, in the order
+        # fetches finish (§1.1). Politeness is the client's job, per host.
+        workers = max(1, min(int(self.settings.jobs_parallel_sources), total or 1))
+        done = 0
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="jobsrc") as pool:
+            futures = [pool.submit(fetch, i) for i in range(total)]
+            for future in as_completed(futures):
+                if self.cancelled():
+                    stats.notes.append("cancelled during job polling")
+                    for pending in futures:
+                        pending.cancel()
+                    break
+                index, postings, exc, duration_ms = future.result()
+                source, source_id = sources[index], source_ids[index]
+                done += 1
+                if exc is not None or postings is None:
+                    if isinstance(exc, SourceError):
+                        log.warning("job source %s failed: %s", source.name, exc)
+                        message = str(exc)
+                    else:
+                        log.error("job source %s raised", source.name, exc_info=exc)
+                        message = f"{type(exc).__name__}: {exc}"
+                    stats.job_sources_failed += 1
+                    stats.notes.append(f"{source.name}: {message}")
+                    with self.repos.writing():
+                        self.repos.job_sources.record_poll(
+                            source_id, ok=False, error=message, duration_ms=duration_ms,
+                        )
+                    self.progress(stage, f"{done}/{total} · {source.name}: failed", done, total)
+                    continue
+
+                seen: list[int] = []
+                new = updated = 0
+                with self.repos.writing():
+                    for posting in postings:
+                        company_id, target_id = link(source, posting)
+                        result = self.repos.jobs.upsert(
+                            source_id, posting, company_id, target_company_id=target_id,
+                        )
+                        seen.append(result.job_id)
+                        new += int(result.is_new)
+                        updated += int(result.changed)
+                    if returns_complete_listing(source):
+                        closed = self.repos.jobs.close_missing(source_id, seen)
+                    else:
+                        closed = self.repos.jobs.close_stale(
+                            source_id, self.settings.jobs_close_after_days
+                        )
+                    self.repos.job_sources.record_poll(
+                        source_id, ok=True, found=len(postings), new=new, updated=updated,
+                        duration_ms=duration_ms,
                     )
-                    seen.append(result.job_id)
-                    new += int(result.is_new)
-                    updated += int(result.changed)
-                if returns_complete_listing(source):
-                    closed = self.repos.jobs.close_missing(source_id, seen)
-                else:
-                    closed = self.repos.jobs.close_stale(
-                        source_id, self.settings.jobs_close_after_days
-                    )
-                self.repos.job_sources.record_poll(
-                    source_id, ok=True, found=len(postings), new=new, updated=updated,
-                    duration_ms=int((time.monotonic() - started) * 1000),
+                stats.jobs_seen += len(postings)
+                stats.jobs_new += new
+                stats.jobs_updated += updated
+                stats.jobs_closed += closed
+                seen_all.extend(seen)
+                self.progress(
+                    stage,
+                    f"{done}/{total} · {source.name}: {len(postings)} posting(s), "
+                    f"{new} new, {closed} closed",
+                    done, total,
                 )
-            stats.jobs_seen += len(postings)
-            stats.jobs_new += new
-            stats.jobs_updated += updated
-            stats.jobs_closed += closed
-            seen_all.extend(seen)
-            self.progress(
-                stage,
-                f"{i}/{total} · {source.name}: {len(postings)} posting(s), "
-                f"{new} new, {closed} closed",
-                i, total,
-            )
 
         self.progress(
             stage,

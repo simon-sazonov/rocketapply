@@ -127,6 +127,7 @@ YAML_MAP: dict[str, str] = {
     "jobs.timeout_seconds": "jobs_timeout_seconds",
     "jobs.max_detail_fetches": "jobs_max_detail_fetches",
     "jobs.close_after_days": "jobs_close_after_days",
+    "jobs.parallel_sources": "jobs_parallel_sources",
     "enrich.min_samples_for_probable": "enrich_min_samples_for_probable",
     "enrich.max_samples": "enrich_max_samples",
     "enrich.harvest_queries": "enrich_harvest_queries",
@@ -137,6 +138,14 @@ YAML_MAP: dict[str, str] = {
     "enrich.hunter.domain_search_threshold": "hunter_domain_search_threshold",
     "enrich.hunter.timeout_seconds": "hunter_timeout_seconds",
     "enrich.hunter.account_ttl_seconds": "hunter_account_ttl_seconds",
+    "apply.research.ttl_days": "apply_research_ttl_days",
+    "apply.research.queries": "apply_research_queries",
+    "apply.research.min_sources": "apply_research_min_sources",
+    "apply.research.min_snippet_chars": "apply_research_min_snippet_chars",
+    "apply.research.max_pages": "apply_research_max_pages",
+    "apply.research.max_ungrounded_terms": "apply_research_max_ungrounded_terms",
+    "apply.research.require_independent": "apply_research_require_independent",
+    "apply.research.max_notes": "apply_research_max_notes",
 }
 
 
@@ -255,6 +264,22 @@ class Settings(BaseSettings):
     #: `make groq-check` to list what your key can actually reach today.
     llm_model: str = ""
     groq_api_key: str = ""
+    #: Extra keys for the same provider, used in parallel. Groq's free tier caps
+    #: one key at 8,000 tokens a minute and 200,000 a day, which is about twenty
+    #: letters; N keys is N times both. Set them in `.env` as GROQ_API_KEY_2,
+    #: GROQ_API_KEY_3, … Blank ones and duplicates are ignored, so a machine with
+    #: one key behaves exactly as before.
+    #:
+    #: DECLARED UP TO 5, DISCOVERED BEYOND THAT. `provider_keys` reads the
+    #: environment directly for anything past the declared fields, so adding a
+    #: sixth key needs no code change. The fields still exist because
+    #: pydantic-settings is the documented way to see a value in `.env`, and
+    #: because a typo'd GROQ_API_KEY_2 should surface as an empty field rather
+    #: than as silence. Two keys were silently ignored for exactly that reason.
+    groq_api_key_2: str = ""
+    groq_api_key_3: str = ""
+    groq_api_key_4: str = ""
+    groq_api_key_5: str = ""
     groq_base_url: str = "https://api.groq.com/openai/v1"
     #: Verified against console.groq.com/docs/models on 29 Aug 2026: a free-plan
     #: production model, the fastest in the catalogue (~1,000 tok/s), and one of
@@ -328,6 +353,9 @@ class Settings(BaseSettings):
     #: wins when the site asks for more.
     jobs_crawl_delay: float = Field(default=1.0, ge=0)
     jobs_timeout_seconds: float = Field(default=20.0, ge=1)
+    #: Sources fetched at once. Politeness is per host (one request in flight
+    #: each, see `PoliteClient`), so this bounds threads, not load on any site.
+    jobs_parallel_sources: int = Field(default=6, ge=1, le=16)
     jobs_max_detail_fetches: int = Field(default=40, ge=0)
     #: Days a posting can go unseen before `status` becomes `closed`.
     jobs_close_after_days: int = Field(default=7, ge=1)
@@ -335,6 +363,10 @@ class Settings(BaseSettings):
     #: = the source is skipped and Sources & health says why.
     adzuna_app_id: str = ""
     adzuna_app_key: str = ""
+    #: Keyed job sources (Sep 2026). Each is skipped, with a note, when blank.
+    jooble_api_key_us: str = ""
+    itjobs_api_key: str = ""
+    findwork_api_key: str = ""
 
     # ── contact enrichment (PITWALL_V3_EMAIL_ENRICHMENT.md) ──
     #: Hunter is the ONLY paid step, it is never automatic, and it is never
@@ -378,6 +410,46 @@ class Settings(BaseSettings):
     #: Hard ceiling on how many people one "find emails for selected" click may
     #: process. §0.2: enrichment never runs in bulk over the whole table.
     enrich_max_selection: int = Field(default=25, ge=1, le=200)
+
+    # ── company research for cover letters ──
+    #
+    # Fills the COMPANY NOTES slot that `profile/companies.yaml` leaves empty.
+    # Nothing here ever writes to `profile/`, and nothing here runs on the letter
+    # path: generation reads a cache and makes no request.
+
+    #: Days a company's research is trusted. Long, because what a company builds
+    #: does not change monthly and each refresh costs three searches and two
+    #: model calls. 0 disables the cache and re-researches every time.
+    apply_research_ttl_days: int = Field(default=90, ge=0)
+    #: Searches per company. Three, for the same reason `enrich_harvest_queries`
+    #: is three: the fourth query returns the pages the first three did.
+    apply_research_queries: int = Field(default=3, ge=0, le=6)
+    #: HOW MANY SNIPPETS MUST NAME THE COMPANY BEFORE THE MODEL SEES ANY OF THEM.
+    #: This is the number that prevents fabrication. On a real run for a small
+    #: employer the SERP came back as ResearchGate, academia.edu and a listicle;
+    #: the model read them and invented a research programme, cited ResearchGate,
+    #: and reported `confidence: "high"`. Below this count nothing is sent and the
+    #: answer is an honest blank.
+    apply_research_min_sources: int = Field(default=3, ge=1)
+    #: Below this much surviving snippet text, two pages are read from the
+    #: company's OWN domain to fill the gap.
+    apply_research_min_snippet_chars: int = Field(default=600, ge=0)
+    #: Pages read per company, and only from a domain already tied to it.
+    apply_research_max_pages: int = Field(default=2, ge=0, le=5)
+    #: Terms a sentence may assert that appear in no source. Zero: a sentence
+    #: naming something none of the sources name IS the fabrication.
+    apply_research_max_ungrounded_terms: int = Field(default=0, ge=0, le=3)
+    #: Refuse notes that only the drafting model vouched for. Default False,
+    #: matching `factcheck`: with one provider configured this would mean the
+    #: feature never produces anything, and the deterministic filters in front of
+    #: it are the real defence. Every record says which it got.
+    apply_research_require_independent: bool = False
+    #: How many researched sentences reach the letter. Sorted best-first —
+    #: engineering before business — and the rest are kept in the record but not
+    #: joined into the notes. Two rather than one: `name_the_employer` rewrites the
+    #: first sentence to carry the company name, and one specific fact plus one of
+    #: context is what the planner's `company_angle` needs to work with.
+    apply_research_max_notes: int = Field(default=2, ge=1, le=4)
 
     # ── query budget ──
     max_queries_per_run: int = Field(default=200, ge=1)
@@ -549,6 +621,47 @@ class Settings(BaseSettings):
             "serpapi": self.serper_queries_per_second,
             "searxng": self.searxng_queries_per_second,
         }.get(provider, 1.0)
+
+    def provider_keys(self, provider: str | None = None) -> list[str]:
+        """Every key configured for a provider, best-known first.
+
+        `GROQ_API_KEY` in the environment still overrides the configured one for
+        that process, which is how a single shard is pinned to a single key. This
+        list is for the other arrangement: one process using all of them.
+
+        COUNTED, NOT HARDCODED. This used to read exactly three fields while
+        `.env` held five, so two keys — 400,000 tokens a day — were silently
+        dead. Walking `GROQ_API_KEY_<n>` until a gap means the ceiling follows
+        the file, and a sixth key is a line in `.env` rather than a patch here.
+        The walk stops at the first missing number rather than scanning to
+        infinity, so a stray GROQ_API_KEY_9 is ignored rather than quietly
+        changing the pool.
+        """
+        provider = provider or self.llm_provider
+        if provider != "groq":
+            key = str(self.llm_config(provider).get("api_key") or "")
+            return [key] if key else []
+
+        ordered = [self.groq_api_key]
+        index = 2
+        while True:
+            # The declared field first, so `.env` and a real environment
+            # variable behave the same; os.environ is the overflow for keys
+            # past the declared ones.
+            value = getattr(self, f"groq_api_key_{index}", None)
+            if value is None:
+                value = os.environ.get(f"GROQ_API_KEY_{index}")
+            if not str(value or "").strip():
+                break
+            ordered.append(str(value))
+            index += 1
+
+        out: list[str] = []
+        for key in ordered:
+            cleaned = str(key or "").strip()
+            if cleaned and cleaned not in out:
+                out.append(cleaned)
+        return out
 
     def llm_config(self, provider: str | None = None) -> dict[str, Any]:
         """base_url / model / api_key for an OpenAI-compatible provider (§5)."""

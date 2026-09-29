@@ -20,10 +20,15 @@ from typing import Any
 
 from ..db import transaction
 from ..pipeline import Pipeline, RunParams, RunStats
+from . import sponsors
+from .ats_harvest import Candidate, boards_to_poll, harvest, judge, pending, record
 from .companies import TargetIndex, load_targets, normalize_company, sync_targets, target_rows
 from .dedupe import assign_clusters
 from .filters import hard_filter
+from .market import Context as MarketContext
+from .market import cursors_with_yield, market_sources
 from .normalize import normalize
+from .queries import query_texts
 from .scoring import score
 from .settings import JobSearchConfig, load_config
 from .skills import load_my_skills, vocabulary
@@ -46,6 +51,8 @@ class JobSearchStats:
     clustered: int = 0
     merged: int = 0
     possible_duplicates: int = 0
+    boards_found: int = 0
+    boards_verified: int = 0
     scored: int = 0
     passed: int = 0
     ai_scored: int = 0
@@ -54,6 +61,24 @@ class JobSearchStats:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+#: Groq's free tier refuses any single request over 8,000 tokens (HTTP 413) —
+#: separate from the per-minute pause. The first live AI-fit run sent eight
+#: postings of 3,000 characters plus the CV and was refused. So a request is
+#: sized to this budget, in tokens, prompt and answer together.
+AI_FIT_REQUEST_TOKENS = 5000
+AI_FIT_DESCRIPTION_CHARS = 1800
+_CHARS_PER_TOKEN = 4
+_ANSWER_TOKENS_PER_JOB = 150
+
+
+def fit_batch_size(profile: str, configured: int) -> int:
+    """How many postings fit in one AI-fit request beside the CV."""
+    fixed = len(profile) // _CHARS_PER_TOKEN + 800          # the CV and the instructions
+    per_job = (AI_FIT_DESCRIPTION_CHARS + 300) // _CHARS_PER_TOKEN + _ANSWER_TOKENS_PER_JOB
+    room = max(1, (AI_FIT_REQUEST_TOKENS - fixed) // per_job)
+    return max(1, min(int(configured), room))
 
 
 class JobSearch:
@@ -66,6 +91,19 @@ class JobSearch:
         self.repos = self.pipe.repos
         self.conn = self.repos.conn
         self.cfg = cfg or load_config()
+        self._client: Any = None
+
+    def client(self) -> Any:
+        """One client per run: its per-host pacing and its cache are shared by
+        every source, and by the board checks after polling."""
+        if self._client is None:
+            from ..sources.jobs import JobCache, PoliteClient
+
+            self._client = PoliteClient(
+                self.settings,
+                cache=JobCache(settings=self.settings, ttl_hours=self.cfg.sources.cache_hours),
+            )
+        return self._client
 
     # ── stage 0: the target list ──
 
@@ -81,19 +119,10 @@ class JobSearch:
 
     def build_sources(self, index: TargetIndex, stats: JobSearchStats) -> list[Any]:
         """Every source this profile enables. What is skipped is said, not hidden."""
-        from ..sources.jobs import (
-            AdzunaSource,
-            ArbeitnowSource,
-            ATSSource,
-            JobCache,
-            PoliteClient,
-        )
+        from ..sources.jobs import AdzunaSource, ArbeitnowSource, ATSSource
 
         src_cfg = self.cfg.sources
-        client = PoliteClient(
-            self.settings,
-            cache=JobCache(settings=self.settings, ttl_hours=src_cfg.cache_hours),
-        )
+        client = self.client()
         out: list[Any] = []
         if src_cfg.target_ats:
             for row in index.rows.values():
@@ -129,6 +158,16 @@ class JobSearch:
                 board.target_company_id = int(target["id"]) if target else None  # type: ignore[attr-defined]
                 taken.add((kind, token))
                 out.append(board)
+        if src_cfg.discovered.enabled:
+            # Boards found from posting links on earlier runs (ats_harvest.py).
+            taken = [(s.ats, s.token) for s in out if isinstance(s, ATSSource)]
+            for board in boards_to_poll(self.conn, taken):
+                try:
+                    out.append(ATSSource(board["kind"], board["token"],
+                                         company_name=board.get("company"),
+                                         settings=self.settings, client=client))
+                except ValueError as exc:
+                    stats.notes.append(f"{board['kind']}:{board['token']}: {exc}")
         if src_cfg.arbeitnow.enabled:
             out.append(ArbeitnowSource(max_pages=src_cfg.arbeitnow.max_pages,
                                        settings=self.settings, client=client))
@@ -140,30 +179,40 @@ class JobSearch:
                     "(free at developer.adzuna.com)"
                 )
             else:
-                countries = adzuna.countries or self.cfg.locations.countries
-                cap = adzuna.daily_request_cap
-
-                def budget() -> bool:
-                    return self.repos.quota.used_today("adzuna") < cap
-
-                def spend() -> None:
-                    with self.repos.writing():
-                        self.repos.quota.consume("adzuna", 1)
+                from ..sources.jobs.budget import SourceBudget, allowance, usage_of
 
                 search = AdzunaSource(
                     self.settings.adzuna_app_id, self.settings.adzuna_app_key,
-                    queries=adzuna.queries, countries=countries,
-                    max_requests=adzuna.max_requests_per_run,
-                    results_per_page=adzuna.results_per_page,
-                    max_days_old=adzuna.max_days_old, title_only=adzuna.title_only,
-                    budget=budget, on_request=spend, settings=self.settings, client=client,
+                    queries=query_texts(self.cfg, src_cfg.queries),
+                    countries=adzuna.countries or self.cfg.locations.countries,
+                    max_requests=None, results_per_page=adzuna.results_per_page,
+                    backfill_days=adzuna.backfill_days,
+                    max_pages_per_search=adzuna.max_pages_per_search,
+                    title_only=adzuna.title_only,
+                    cursors=cursors_with_yield(self.repos, "adzuna"),
+                    settings=self.settings, client=client,
                 )
+                budget = SourceBudget(adzuna.per_day, adzuna.per_week, adzuna.per_month)
+                used = usage_of(self.repos.quota, "adzuna")
+                search.max_requests = allowance(budget, used, pace=adzuna.pace,
+                                                backfill_pending=search.backfill_pending())
                 if search.unsupported:
                     stats.notes.append(
                         "adzuna has no site for " + ", ".join(search.unsupported)
-                        + " — those countries rely on ATS boards and Arbeitnow"
+                        + " — other sources cover those countries"
                     )
-                out.append(search)
+                if search.max_requests == 0:
+                    stats.notes.append(
+                        f"adzuna: its free quota is spent for now ({used.day} today, "
+                        f"{used.week} this week, {used.month} this month) — it resumes "
+                        "when the window rolls"
+                    )
+                else:
+                    out.append(search)
+
+        ctx = MarketContext(self.cfg, self.settings, self.repos, client)
+        out.extend(market_sources(ctx))
+        stats.notes.extend(ctx.notes)
         return out
 
     def poll(self, index: TargetIndex, stats: JobSearchStats, run_stats: RunStats,
@@ -194,13 +243,38 @@ class JobSearch:
 
         before = (run_stats.jobs_seen, run_stats.jobs_new, run_stats.jobs_updated,
                   run_stats.jobs_closed, run_stats.job_sources_failed)
-        self.pipe.poll_sources(sources, run_stats, link=link, no_cache=no_cache,
-                               stage="job-search")
+        try:
+            self.pipe.poll_sources(sources, run_stats, link=link, no_cache=no_cache,
+                                   stage="job-search")
+        finally:
+            self.record_spend(sources)
         stats.seen += run_stats.jobs_seen - before[0]
         stats.new += run_stats.jobs_new - before[1]
         stats.updated += run_stats.jobs_updated - before[2]
         stats.closed += run_stats.jobs_closed - before[3]
         stats.sources_failed += run_stats.job_sources_failed - before[4]
+
+    def record_spend(self, sources: list[Any]) -> None:
+        """Quota and search cursors, written here on the thread that owns the
+        connection — the sources counted them on their worker threads.
+
+        Runs even when polling failed part-way: a request that was made is
+        spent whether or not its answer was stored.
+        """
+        for source in sources:
+            provider = getattr(source, "provider", None)
+            made = int(getattr(source, "requests_made", 0) or 0)
+            visits = list(getattr(source, "visits", None) or [])
+            if not ((provider and made) or visits):
+                continue
+            with self.repos.writing():
+                if provider and made:
+                    self.repos.quota.consume(provider, made)
+                for visit in visits:
+                    self.repos.source_queries.record(
+                        source.name, visit.query, visit.country, requests=visit.requests,
+                        found=visit.found, complete=visit.complete, total=visit.total,
+                    )
 
     def networking_names(self) -> dict[str, int]:
         """Normalised canonical name -> people-search company id. No aliases."""
@@ -272,13 +346,73 @@ class JobSearch:
             1, 1,
         )
 
+    # ── stage 3b: company boards found from posting links ──
+
+    def discover(self, index: TargetIndex, stats: JobSearchStats, run_stats: RunStats,
+                 *, no_cache: bool = False) -> None:
+        """Harvest board links, verify the pending ones, and store what the
+        verified boards list — in this run, from the responses just read.
+
+        Reading a board to verify it IS polling it, so its postings are stored
+        at once (the second read is a cache hit), not a day later.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        from ..sources.jobs import ATSSource
+
+        conf = self.cfg.sources.discovered
+        if not conf.enabled:
+            return
+        since = int(self.repos.state.get("ats_harvest.max_id", "0") or 0)
+        with self.repos.writing():
+            added, top = harvest(self.conn, since_id=since)
+            self.repos.state.set("ats_harvest.max_id", top)
+        stats.boards_found += added
+        todo = pending(self.conn, conf.max_checks_per_run)
+        if not todo:
+            return
+        self.pipe.progress("boards", f"checking {len(todo)} board(s) linked from postings",
+                           0, len(todo))
+        client = self.client()
+
+        def check(c: Candidate) -> tuple[Candidate, Any, list[Any] | None, str]:
+            board = ATSSource(c.kind, c.token, company_name=c.company,
+                              settings=self.settings, client=client)
+            try:
+                return c, board, board.fetch(no_cache=no_cache), ""
+            except Exception as exc:  # noqa: BLE001 - a bad board is a verdict, not a crash
+                return c, board, None, f"{type(exc).__name__}: {exc}"[:240]
+
+        verified: list[Any] = []
+        workers = max(1, int(self.settings.jobs_parallel_sources))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="board") as pool:
+            for n, (cand, board, postings, error) in enumerate(pool.map(check, todo), 1):
+                if postings is None:
+                    ok, reason, count = False, error or "no answer", 0
+                else:
+                    ok, reason = judge(cand, postings)
+                    count = len(postings)
+                with self.repos.writing():
+                    record(self.conn, cand, verified=ok, reason=reason, postings=count)
+                if ok:
+                    verified.append(board)
+                self.pipe.progress("boards", f"{n}/{len(todo)} · {cand.kind}:{cand.token}: "
+                                             f"{'✓ ' + str(count) if ok else '✕ ' + reason[:60]}",
+                                   n, len(todo))
+        stats.boards_verified += len(verified)
+        if verified:
+            self.poll(index, stats, run_stats, no_cache=False, sources=verified)
+            self.normalize(index, stats)
+
     # ── stage 4: filter and score ──
 
     def score(self, index: TargetIndex, stats: JobSearchStats) -> None:
         vocab = vocabulary()
         owned, warnings = load_my_skills(vocab=vocab)
         stats.notes.extend(warnings)
+        sponsor_index = sponsors.load(self.settings)
         rows = rows_to_score(self.conn)
+        self.attach_cv_similarity(rows)
         fingerprint = self.cfg.fingerprint()
         weights = self.cfg.weights.model_dump()
         self.pipe.progress("score", f"{len(rows)} posting(s) to rank", 0, len(rows))
@@ -286,7 +420,7 @@ class JobSearch:
             for row in rows:
                 target = index.get(row.get("target_company_id"))
                 rejections = hard_filter(row, self.cfg)
-                match = score(row, self.cfg, owned, vocab, target)
+                match = score(row, self.cfg, owned, vocab, target, sponsor_index)
                 save_match(self.conn, int(row["id"]), config_hash=fingerprint,
                            passed=not rejections,
                            reasons=[r.as_dict() for r in rejections], match=match,
@@ -295,6 +429,19 @@ class JobSearch:
                 stats.passed += int(not rejections)
         self.pipe.progress("score", f"{stats.passed} of {stats.scored} pass the hard filters",
                            len(rows), len(rows))
+
+    def attach_cv_similarity(self, rows: list[dict[str, Any]]) -> None:
+        """Each row's CV-similarity percentile among the rows being scored."""
+        from ..config import config_dir
+        from .similarity import CVSimilarity, profile_text
+
+        cv = profile_text(config_dir(), config_dir().parent / "profile")
+        if not cv.strip() or not rows:
+            return
+        texts = [f"{r.get('title') or ''}\n{r.get('description') or ''}" for r in rows]
+        model = CVSimilarity(cv, texts)
+        for row, rank in zip(rows, model.rank([model.cosine(t) for t in texts]), strict=True):
+            row["cv_similarity"] = rank
 
     # ── stage 5: the optional second opinion ──
 
@@ -339,10 +486,10 @@ class JobSearch:
             stats.notes.append("AI fit skipped — no LLM provider is reachable")
             return
         scorer = cast("JobRelevanceScorer", opened)
-        batch_size = self.settings.llm_batch_size
+        batch_size = fit_batch_size(profile, self.settings.llm_batch_size)
         for start in range(0, len(rows), batch_size):
             batch = rows[start:start + batch_size]
-            payload = [job_payload(r) for r in batch]
+            payload = [job_payload(r, description_limit=AI_FIT_DESCRIPTION_CHARS) for r in batch]
             outcome = scorer.score_jobs(profile, payload)
             if outcome.provider_error:
                 nxt = pipe._degrade(scorer, run_stats, LLMUnavailable(outcome.error or "failed"))
@@ -374,6 +521,9 @@ class JobSearch:
             if poll:
                 self.poll(index, stats, run_stats, no_cache=no_cache, sources=sources)
             self.normalize(index, stats, force=renormalize)
+            if poll and sources is None:     # injected sources = a test, offline
+                self.discover(index, stats, run_stats, no_cache=no_cache)
+                stats.notes.extend(sponsors.refresh(self.settings, self.client()))
             self.score(index, stats)
             self.ai_fit(stats, run_stats, self.cfg.ai_fit_top_n if ai_fit is None else ai_fit)
             stats.notes.extend(n for n in run_stats.notes if n not in stats.notes)

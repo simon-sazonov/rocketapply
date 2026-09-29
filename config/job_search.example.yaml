@@ -108,8 +108,10 @@ career_interests: [optimisation, simulation, decision making, reinforcement lear
                    monte carlo, autonomous systems, robotics, vehicle, motorsport,
                    race strategy]
 
-# Languages you work in (ISO codes). A posting that asks for another one is
-# marked down and says which — never filtered out.
+# Languages you work in: an ISO code and an optional CEFR level (en, pt:B1,
+# it:A2, uk:native; a bare code means fluent). A posting that asks for one is
+# marked down by your level: none from B2 up, half at B1, fully at A1-A2 or
+# when not listed. Never filtered out.
 languages_spoken: [en]
 
 # ── ranking (§25) ───────────────────────────────────────────────────────
@@ -140,10 +142,17 @@ sources:
     queries: [data scientist, machine learning, AI engineer, applied scientist,
               research engineer, decision scientist, optimisation, simulation engineer]
     countries: []         # empty = your countries above that Adzuna covers
-    max_requests_per_run: 40
-    daily_request_cap: 200
+    # A free key's limits, counted over rolling windows by the quota ledger.
+    per_day: 250
+    per_week: 1000
+    per_month: 2500
+    # auto: up to the limits until every search has been read back
+    # backfill_days, then about per_month/31 a day. burst: always up to the
+    # limits. even: always the steady rate.
+    pace: auto
+    backfill_days: 30
+    max_pages_per_search: 20
     results_per_page: 50
-    max_days_old: 14
     title_only: true
   cache_hours: 6
 

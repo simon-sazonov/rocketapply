@@ -13,7 +13,7 @@ SXNG_URL := http://localhost:8888
 .PHONY: help venv test lint typecheck searxng searxng-env searxng-check \
         searxng-stop searxng-logs searxng-pull groq-check app cli \
         coverage sweep relabel domains domains-apply domains-show \
-        job-search job-rerank job-targets-ats
+        job-search job-rerank job-calibrate job-targets-ats fonts validate-profile calibrate
 
 help:  ## show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -25,6 +25,12 @@ venv:  ## create .venv and install everything
 	python3.11 -m venv .venv 2>/dev/null || python3 -m venv .venv
 	$(PY) -m pip install --upgrade pip
 	$(PY) -m pip install -r requirements.txt
+	# Editable, and not optional. Without it `pitwall` is not a command, so
+	# every `pitwall ...` line in the README is unrunnable and the only working
+	# entry point is `python scripts/run_pipeline.py`. pytest passed anyway
+	# because pyproject sets `pythonpath = ["src"]`, which is why this went
+	# unnoticed.
+	$(PY) -m pip install -e .
 
 test:  ## run the test suite (no network needed)
 	$(PY) -m pytest
@@ -34,6 +40,17 @@ lint:  ## ruff
 
 typecheck:  ## mypy
 	$(PY) -m mypy
+
+# ─────────────────────── cv + cover letter ─────────────────────────────
+
+fonts:  ## vendor DM Sans / Arimo / Archivo Black into assets/fonts
+	$(PY) scripts/fetch_fonts.py
+
+validate-profile:  ## frame compliance and data integrity for profile/
+	$(PY) profile/validate_profile.py
+
+calibrate:  ## re-measure the CV frame with real font metrics; fails on drift
+	$(PY) scripts/run_pipeline.py apply calibrate
 
 # ────────────────────────────── searxng ────────────────────────────────
 
@@ -109,6 +126,9 @@ job-search:  ## the daily job inbox: poll every source, filter, rank
 
 job-rerank:  ## re-rank stored jobs after editing the profile (no network)
 	$(PY) scripts/run_pipeline.py job-search --no-poll
+
+job-calibrate:  ## how well the score agrees with your ratings (proposes weights)
+	$(PY) scripts/run_pipeline.py job-calibrate
 
 job-targets-ats:  ## find the public ATS board of each target company
 	$(PY) scripts/discover_ats.py --targets

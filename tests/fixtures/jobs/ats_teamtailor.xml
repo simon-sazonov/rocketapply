@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:tt="https://teamtailor.com/locations">
+  <channel>
+    <title>Fortnox AB</title>
+    <description>Lediga jobb</description>
+    <link>https://fortnoxab.teamtailor.com/jobs</link>
+    <item>
+      <title>Project Manager</title>
+      <description>&lt;p&gt;&lt;em</description>
+      <pubDate>Mon, 28 Sep 2026 11:38:06 +0200</pubDate>
+      <link>https://fortnoxab.teamtailor.com/jobs/8463726-project-manager</link>
+      <remoteStatus>onsite</remoteStatus>
+      <guid>128e1d4a-86ee-469f-8c35-611267ab0c8b</guid>
+      <tt:locations>
+        <tt:location>
+          <tt:name>Växjö</tt:name>
+          <tt:address>Bollgatan 3</tt:address>
+          <tt:zip>352 46</tt:zip>
+          <tt:city>Växjö</tt:city>
+          <tt:country>Sweden</tt:country>
+        </tt:location>
+      </tt:locations>
+      <tt:department>Affärsstöd</tt:department>
+      <tt:role/>
+    </item>
+<item>
+      <title>Live Agent till Team Leverantörsfaktura</title>
+      <description>&lt;p&gt;&lt;em</description>
+      <pubDate>Thu, 24 Sep 2026 09:33:03 +0200</pubDate>
+      <link>https://fortnoxab.teamtailor.com/jobs/8446591-live-agent-till-team-leverantorsfaktura</link>
+      <remoteStatus>hybrid</remoteStatus>
+      <guid>4a9ddcca-65de-4279-b088-932899673cd7</guid>
+      <tt:locations>
+        <tt:location>
+          <tt:name>Växjö</tt:name>
+          <tt:address>Bollgatan 3</tt:address>
+          <tt:zip>352 46</tt:zip>
+          <tt:city>Växjö</tt:city>
+          <tt:country>Sweden</tt:country>
+        </tt:location>
+      </tt:locations>
+      <tt:department>Support</tt:department>
+      <tt:role/>
+    </item>
+  </channel>
+</rss>

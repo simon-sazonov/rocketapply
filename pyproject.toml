@@ -38,6 +38,19 @@ dependencies = [
   "rich>=13.9",
   "altair>=5.4",
   "openpyxl>=3.1",
+  # The CV/cover-letter engine (CV_COVER_LETTER_ENGINEERING_SPEC.md). All three
+  # are pure-Python wheels: no Homebrew, no LibreOffice, no system libraries.
+  # reportlab is also what makes the line-cost model a MEASUREMENT rather than
+  # a character-count estimate — see src/pitwall/apply/layout.py.
+  "reportlab>=4.2",
+  "python-docx>=1.1",
+  "pypdf>=5.0",
+  # Instantiates static weights from the upstream variable fonts;
+  # used only by scripts/fetch_fonts.py, never at generation time.
+  "fonttools>=4.50",
+  # CV preview in the Applications Studio; the page degrades to a
+  # download button without it.
+  "pypdfium2>=4.30",
 ]
 
 [project.optional-dependencies]
@@ -52,7 +65,7 @@ pitwall = "pitwall.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-pitwall = ["scoring/prompts/*.txt", "scoring/prompts/*.j2"]
+pitwall = ["scoring/prompts/*.txt", "scoring/prompts/*.j2", "apply/prompts/*.md"]
 
 [tool.ruff]
 line-length = 100

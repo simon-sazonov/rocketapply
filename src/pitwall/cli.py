@@ -14,6 +14,8 @@ anyone who has not run `pip install -e .`.
     pitwall job-search --no-poll       # re-rank what is stored after a profile edit
     pitwall enrich -c 41 -c 88         # find addresses, free engine only
     pitwall search --cache-only && pitwall extract --reprocess
+    pitwall apply calibrate            # does the CV frame still fit?
+    pitwall apply --job 412 --cv --letter
 """
 
 from __future__ import annotations
@@ -46,6 +48,13 @@ from .query_builder import build_all, load_templates
 
 app = typer.Typer(add_completion=False, help=__doc__, no_args_is_help=True)
 console = Console()
+
+# The tailored CV and cover-letter engine — CV_COVER_LETTER_ENGINEERING_SPEC.md.
+# A sub-app rather than more top-level commands: it has its own seven stages and
+# its own `profile/` source of truth, and nothing in it touches the people sweep.
+from .apply.cli import app as apply_app  # noqa: E402
+
+app.add_typer(apply_app, name="apply")
 
 
 def _csv_list(value: str | None) -> list[str] | None:
@@ -640,6 +649,68 @@ def job_search(
     if export:
         export.write_text(jobs_csv(search.conn, "matches"), encoding="utf-8")
         console.print(f"[green]wrote[/] {export}")
+
+
+@app.command("job-calibrate")
+def job_calibrate(
+    labels: Path | None = typer.Option(
+        None, "--labels", help="a ratings CSV (cluster_id,label) to fit on; your own "
+                               "ratings then become the test"),
+    apply: bool = typer.Option(False, "--apply",
+                               help="write the blended weights into job_search.yaml"),
+    verbose: bool = typer.Option(False, "-v", "--verbose"),
+) -> None:
+    """How well each part of the score agrees with your 👍 / 👎, applications
+    and dismissals — and the weights that would agree best. Proposes only,
+    unless --apply."""
+    from .jobsearch.calibrate import MIN_EACH, calibrate, load_labels
+    from .jobsearch.settings import JobSearchConfig, load_config, save_config
+
+    settings = _bootstrap(verbose)
+    cfg = load_config()
+    current = cfg.weights.model_dump()
+    borrowed = load_labels(str(labels)) if labels else None
+    report = calibrate(open_repos(settings).conn, current, borrowed)
+    console.print(f"your ratings (passing the filters): [green]{report.good}[/] good · "
+                  f"[red]{report.bad}[/] bad")
+    if borrowed is not None:
+        console.print(f"borrowed ratings used: [green]{report.extra_good}[/] good · "
+                      f"[red]{report.extra_bad}[/] bad")
+    if not report.auc:
+        console.print("Rate some jobs first: 👍 / 👎 on the 🎯 Job Search page, or dismiss "
+                      "with a reason.")
+        raise typer.Exit(0)
+    table = Table(title="How well each part separates good from bad (AUC: 0.5 = a coin)")
+    for column in ("part", "AUC", "now", "fitted", "blended"):
+        table.add_column(column)
+    for name in sorted(current, key=lambda n: -(report.auc.get(n) or 0)):
+        table.add_row(name, f"{report.auc.get(name, 0.5):.2f}", f"{current[name]:g}",
+                      f"{report.proposed[name]:g}" if report.proposed else "—",
+                      f"{report.blended[name]:g}" if report.blended else "—")
+    console.print(table)
+
+    def fmt(x: float | None) -> str:
+        return "—" if x is None else f"{x:.2f}"
+
+    console.print(f"on YOUR ratings: now {fmt(report.current_auc)} · fitted "
+                  f"{fmt(report.proposed_auc)} · blended {fmt(report.blended_auc)}"
+                  + (" (held out: fitted on the borrowed ratings)" if report.extra_good else ""))
+    if report.extra_good:
+        console.print(f"on the borrowed ratings: now {fmt(report.extra_current_auc)} · blended "
+                      f"{fmt(report.extra_blended_auc)}")
+    if not report.enough:
+        console.print(f"[yellow]Too few to fit weights:[/] at least {MIN_EACH} of each kind "
+                      f"in {report.fitted_on}.")
+        raise typer.Exit(0)
+    if apply:
+        if (report.blended_auc or 0) < (report.current_auc or 0):
+            console.print("[red]Not applied:[/] the blended weights rank YOUR ratings worse "
+                          "than the current ones.")
+            raise typer.Exit(1)
+        data = cfg.model_dump()
+        data["weights"] = report.blended
+        save_config(JobSearchConfig.model_validate(data))
+        console.print("[green]saved[/] the blended weights — run [bold]make job-rerank[/]")
 
 
 @app.command()

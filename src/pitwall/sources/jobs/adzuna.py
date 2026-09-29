@@ -23,21 +23,40 @@ Three properties shape how the rest of the system treats it:
 
 The credentials travel in the query string, so the URL is never used as a cache
 key or put into an error message: both use `redacted_url`.
+
+**robots.txt.** `api.adzuna.com/robots.txt` is `Disallow: /`. Honouring it
+meant this source stored nothing, ever. The API is used under a key and
+Adzuna's terms, which permit personal research, so it is `terms_govern`: the
+terms are the agreement, and the robots file is addressed to crawlers. Its
+published rate limit (25 a minute) is enforced as a floor on the request gap.
+
+**Searching in a rotation.** One visit to a (query, country) search asks only
+for what is newer than the previous complete visit (`max_days_old` = days since
+then, plus one). A search that has never been read is read back
+`backfill_days`, page by page. So when the day's budget cannot cover every
+search, the ones left out lose nothing: the next visit covers their gap.
+Searches never read come first, then the longest unvisited.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlencode
 
 from ...config import Settings, get_settings
-from .base import JobPosting, PoliteClient, SourceError, iso_date, strip_html
+from .base import JobPosting, PoliteClient, RateLimited, SourceError, iso_date, strip_html
+from .search import MIN_PAGE_PRECISION, SearchLedger, Visit, title_matches
+
+__all__ = ["AdzunaSource", "Visit", "parse"]
 
 log = logging.getLogger(__name__)
 
 ENDPOINT = "https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
+
+#: 25 requests a minute is Adzuna's published limit; 2.5 s keeps under it.
+MIN_GAP_SECONDS = 2.5
 
 #: Adzuna's country codes are ISO 3166 alpha-2 in lower case, except that the
 #: UK is `gb`. Countries not listed here have no Adzuna site.
@@ -47,7 +66,7 @@ SUPPORTED_COUNTRIES = frozenset({
 })
 
 
-def parse(data: Any, country: str | None = None) -> list[JobPosting]:
+def parse(data: Any, country: str | None = None, query: str | None = None) -> list[JobPosting]:
     """One search response, normalised. Pure — fixture-tested."""
     out: list[JobPosting] = []
     for job in (data or {}).get("results", []) or []:
@@ -78,6 +97,7 @@ def parse(data: Any, country: str | None = None) -> list[JobPosting]:
             salary_max=None if predicted else _num(job.get("salary_max")),
             country_hint=country.upper() if country else None,
             description_truncated=True,
+            found_query=query,
             raw=job,
         ))
     return out
@@ -96,11 +116,13 @@ def adzuna_country(iso2: str) -> str | None:
     return code if code in SUPPORTED_COUNTRIES else None
 
 
-class AdzunaSource:
-    """`what × country` searches from configuration, within a request budget."""
+class AdzunaSource(SearchLedger):
+    """`what × country` searches in a rotation, within this run's allowance."""
 
     kind = "aggregator_api"
     complete_listing = False
+    terms_govern = True
+    provider = "adzuna"
 
     def __init__(
         self,
@@ -109,12 +131,13 @@ class AdzunaSource:
         *,
         queries: list[str],
         countries: list[str],
-        max_requests: int = 40,
+        max_requests: int | None = 40,
         results_per_page: int = 50,
-        max_days_old: int = 14,
+        backfill_days: int = 30,
+        max_pages_per_search: int = 20,
         title_only: bool = True,
-        budget: Callable[[], bool] | None = None,
-        on_request: Callable[[], None] | None = None,
+        cursors: dict[tuple[str, str], dict[str, Any]] | None = None,
+        now: datetime | None = None,
         settings: Settings | None = None,
         client: PoliteClient | None = None,
     ) -> None:
@@ -125,46 +148,42 @@ class AdzunaSource:
         self.url = "https://api.adzuna.com"
         self.app_id = app_id
         self.app_key = app_key
-        self.queries = [q.strip() for q in queries if q and q.strip()]
         codes = [adzuna_country(c) for c in countries]
-        self.countries = list(dict.fromkeys(c for c in codes if c))
         #: What the configured list asked for that Adzuna does not cover.
         self.unsupported = sorted({c.upper() for c in countries if not adzuna_country(c)})
-        self.max_requests = max(0, int(max_requests))
+        # Queries are lower-cased: Adzuna's search ignores case, and the cursor
+        # table is keyed on the text, so "AI engineer" and "ai engineer" are one.
+        self._init_ledger(queries=queries, countries=[c for c in codes if c], cursors=cursors,
+                          max_requests=max_requests, backfill_days=backfill_days, now=now)
         self.results_per_page = max(1, min(50, int(results_per_page)))
-        self.max_days_old = max(1, int(max_days_old))
+        self.max_pages = max(1, int(max_pages_per_search))
         self.title_only = title_only
-        #: Asked before every request; False stops the run (the daily quota).
-        self.budget = budget
-        #: Called after every request that went to the network.
-        self.on_request = on_request
         self.client = client or PoliteClient(self.settings)
-        self.requests_made = 0
+        if hasattr(self.client, "set_min_delay"):
+            self.client.set_min_delay(self.url, MIN_GAP_SECONDS)
 
-    def plan(self) -> list[tuple[str, str]]:
-        """Every (query, country) pair, interleaved so a capped run covers every
-        country with the first queries before any country gets the last ones."""
-        pairs = [(q, c) for q in self.queries for c in self.countries]
-        return pairs[: self.max_requests]
+    # ── requests ──
 
-    def request_url(self, query: str, country: str, page: int = 1) -> str:
+    def request_url(self, query: str, country: str, page: int = 1,
+                    days: int | None = None) -> str:
         params: dict[str, Any] = {
             "app_id": self.app_id,
             "app_key": self.app_key,
             "results_per_page": self.results_per_page,
-            "max_days_old": self.max_days_old,
+            "max_days_old": days or self.backfill_days,
             "sort_by": "date",
             "content-type": "application/json",
         }
         params["title_only" if self.title_only else "what"] = query
         return ENDPOINT.format(country=country, page=page) + "?" + urlencode(params)
 
-    def redacted_url(self, query: str, country: str, page: int = 1) -> str:
+    def redacted_url(self, query: str, country: str, page: int = 1,
+                     days: int | None = None) -> str:
         """The same request with the credentials removed — the cache key, and
         the only form that may appear in a log or a health row."""
         field = "title_only" if self.title_only else "what"
         return (ENDPOINT.format(country=country, page=page) + "?" + urlencode({
-            field: query, "max_days_old": self.max_days_old,
+            field: query, "max_days_old": days or self.backfill_days,
             "results_per_page": self.results_per_page,
         }))
 
@@ -175,31 +194,56 @@ class AdzunaSource:
         out: list[JobPosting] = []
         failures: list[str] = []
         planned = self.plan()
+        stopped = ""
         for query, country in planned:
-            if self.budget is not None and not self.budget():
-                log.info("adzuna: daily request budget reached after %d request(s)",
-                         self.requests_made)
+            if not self.left():
+                stopped = "this run's allowance is spent"
                 break
-            safe = self.redacted_url(query, country)
-            try:
-                hits_before = self.client.cache.hits
-                data = self.client.get_json(
-                    self.request_url(query, country), no_cache=no_cache, cache_key=safe,
-                )
-                if self.client.cache.hits == hits_before:
-                    self.requests_made += 1
-                    if self.on_request:
-                        self.on_request()
-            except SourceError as exc:
-                failures.append(self.redact(str(exc)))
-                # Bad credentials fail every request identically; say so once.
-                if len(failures) >= 3 and not out:
-                    raise SourceError(
-                        f"adzuna: the first {len(failures)} searches all failed — "
-                        f"{failures[-1]}"
-                    ) from None
-                continue
-            out.extend(parse(data, country))
-        log.info("adzuna: %d posting(s) from %d search(es), %d failed",
-                 len(out), len(planned), len(failures))
+            days = self.days_for(query, country)
+            visit = self.open_visit(query, country)
+            page = 1
+            while self.left():
+                safe = self.redacted_url(query, country, page, days)
+                try:
+                    data = self.client.get_json(
+                        self.request_url(query, country, page, days), no_cache=no_cache,
+                        cache_key=safe, terms_govern=True,
+                    )
+                except RateLimited as exc:
+                    visit.requests += self.counted(self.client)
+                    stopped = self.redact(str(exc))
+                    break
+                except SourceError as exc:
+                    visit.requests += self.counted(self.client)
+                    failures.append(self.redact(str(exc)))
+                    # Bad credentials fail every request identically; say so once.
+                    if len(failures) >= 3 and not out:
+                        raise SourceError(
+                            f"adzuna: the first {len(failures)} searches all failed — "
+                            f"{failures[-1]}"
+                        ) from None
+                    break
+                visit.requests += self.counted(self.client)
+                rows = parse(data, country, query)
+                # A title search should return titles with every word; where the
+                # site's analyser dropped one (Adzuna Italy and "ai"), keep only
+                # those, and stop paging a search that has gone wrong.
+                batch = [p for p in rows if not self.title_only or title_matches(p.title, query)]
+                out.extend(batch)
+                visit.found += len(batch)
+                total = (data or {}).get("count") if isinstance(data, dict) else None
+                visit.total = int(total) if isinstance(total, int | float) else visit.total
+                last_page = (len(rows) < self.results_per_page
+                             or (visit.total is not None
+                                 and page * self.results_per_page >= visit.total))
+                noisy = bool(rows) and len(batch) < MIN_PAGE_PRECISION * len(rows)
+                if last_page or noisy or page >= self.max_pages:
+                    visit.complete = True
+                    break
+                page += 1
+            if stopped:
+                break
+        log.info("adzuna: %d posting(s) from %d search(es), %d request(s), %d failed%s",
+                 len(out), len(self.visits), self.requests_made, len(failures),
+                 f" — stopped: {stopped}" if stopped else "")
         return out

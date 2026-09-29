@@ -158,7 +158,7 @@ def test_adzuna_keeps_its_key_out_of_cache_files_and_error_messages(settings, tm
     seen_keys = []
 
     class Client(PoliteClient):
-        def get(self, url, *, no_cache=False, accept="*/*", cache_key=None):
+        def get(self, url, *, no_cache=False, accept="*/*", cache_key=None, **kwargs):
             seen_keys.append(cache_key)
             raise SourceError(f"{cache_key}: HTTP 401")
 
@@ -243,7 +243,7 @@ def test_every_score_is_explained_and_bounded(search):
         assert 0 <= job["score"] <= 100
         assert job["label"] in {"strong", "good", "fair", "weak"}
         assert set(job["components"]) == {"role", "experience", "skills", "location", "visa",
-                                          "career", "company"}
+                                          "career", "company", "fit"}
         assert job["reasons_plus"] or job["reasons_minus"], "never a bare number (§69)"
 
 
@@ -486,11 +486,47 @@ def _board(*pairs):
     ("Sword Health|Sword", "swordhealth", _board(("AI Engineer", "Sword")), True),
 ])
 def test_a_board_is_only_adopted_with_evidence_it_is_the_companys(target, token, postings, ok):
-    from pitwall.jobsearch.companies import TargetCompany, verify_board
+    from pitwall.jobsearch.companies import verify_board
 
     name, *aliases = target.split("|")
-    verdict, why = verify_board(TargetCompany(name=name, aliases=aliases), token, postings)
+    verdict, why = verify_board(name, aliases, token, postings)
     assert verdict is ok, why
+
+
+@pytest.mark.parametrize(("company", "token", "postings", "ok"), [
+    # the people-search list (config/companies.csv) goes through the same check
+    ("PREMA Racing|PREMA Powerteam", "prema", _board(("Race Engineer", None)), False),
+    ("Toyota Gazoo Racing|TGR-E|Toyota Gazoo Racing Europe", "toyota",
+     _board(("Sales Associate", "Toyota Motor North America")), False),
+    ("Trident|Trident Motorsport", "trident", _board(("Senior Marketer (Sample)", None)), False),
+    # its first live run, 22 Sep 2026: this board is Genesis Global, capital-markets software
+    ("Genesis Magma Racing|Genesis|Hyundai Motorsport", "genesis",
+     _board(("Head of DevOps", None)), False),
+    ("Manthey|Manthey Racing|Manthey EMA", "manthey", _board(("Data Engineer", None)), True),
+    ("Hitech TGR|Hitech Grand Prix|Hitech Pulse-Eight", "hitechgp",
+     _board(("Performance Engineer", "Hitech Grand Prix")), True),
+])
+def test_a_people_search_board_needs_the_same_evidence(company, token, postings, ok):
+    """A fragment of a team's name on a board that names nobody, a namesake
+    elsewhere in the group, and a placeholder board are all turned down — and
+    so is a nameless board at an alias, because those aliases are kept for
+    recall. An alias still counts when the postings themselves name it."""
+    from pitwall.jobsearch.companies import verify_board
+
+    name, *aliases = company.split("|")
+    verdict, why = verify_board(name, aliases, token, postings, alias_tokens=False)
+    assert verdict is ok, why
+
+
+def test_an_alias_vouches_for_a_nameless_board_only_when_allowed_to():
+    from pitwall.jobsearch.companies import verify_board
+
+    board = _board(("Head of DevOps", None))
+    aliases = ["Genesis", "Hyundai Motorsport"]
+    assert verify_board("Genesis Magma Racing", aliases, "genesis", board)[0]
+    ok, why = verify_board("Genesis Magma Racing", aliases, "genesis", board,
+                           alias_tokens=False)
+    assert not ok and "only an alias" in why
 
 
 def test_new_since_last_run_counts_only_what_the_latest_run_found(search):

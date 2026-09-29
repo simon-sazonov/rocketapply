@@ -33,6 +33,8 @@ from .base import JobPosting, PoliteClient, iso_date, strip_html
 log = logging.getLogger(__name__)
 
 ENDPOINT = "https://www.arbeitnow.com/api/job-board-api"
+#: The UK edition: same API, same shape, 100 a page (checked 28 Sep 2026).
+ENDPOINT_UK = "https://www.arbeitnow.co.uk/api/job-board-api"
 
 
 def parse(data: Any) -> list[JobPosting]:
@@ -70,18 +72,20 @@ class ArbeitnowSource:
         self,
         *,
         max_pages: int = 4,
+        endpoint: str = ENDPOINT,
+        name: str = "arbeitnow",
         settings: Settings | None = None,
         client: PoliteClient | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self.name = "arbeitnow"
-        self.url = ENDPOINT
+        self.name = name
+        self.url = endpoint
         self.max_pages = max(1, int(max_pages))
         self.client = client or PoliteClient(self.settings)
 
     def fetch(self, *, no_cache: bool = False) -> list[JobPosting]:
         out: list[JobPosting] = []
-        url: str | None = ENDPOINT
+        url: str | None = self.url
         pages = 0
         while url and pages < self.max_pages:
             data = self.client.get_json(url, no_cache=no_cache)
@@ -91,5 +95,5 @@ class ArbeitnowSource:
             if not batch:
                 break
             url = ((data or {}).get("links") or {}).get("next")
-        log.info("arbeitnow: %d posting(s) from %d page(s)", len(out), pages)
+        log.info("%s: %d posting(s) from %d page(s)", self.name, len(out), pages)
         return out

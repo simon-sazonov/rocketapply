@@ -93,6 +93,24 @@ _RELOCATION = re.compile(
 )
 
 _NEG_RE = [re.compile(p, re.I) for p in _NEGATIVE]
+
+#: Requirements only a citizen or a cleared resident can meet: a refusal with
+#: its country built in, whatever the rest of the posting says about visas.
+#: Each was a job that reached the top of the list on 28 Sep 2026 and could not
+#: be applied for: "Requirement: Singaporean ONLY, due to G50 security
+#: clearance", "Clearance Required: TS/SCI … U.S. citizenship", "Data Engineer -
+#: Active SC and NPPV3", "Data Engineer SC Cleared".
+_CITIZENSHIP: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bsingaporeans?\b(?:\s*(?:citizens?|/\s*PRs?|and\s+(?:singapore\s+)?PRs?))?"
+                r"\s*only\b|\bsingapore\s+citizens?\s+(?:and\s+PRs?\s+)?only\b|"
+                r"\bonly\s+(?:open\s+to\s+)?singaporeans?\b", re.I), "SG"),
+    (re.compile(r"(?-i:U\.S\.|US)\s+[Cc]itizenship\b"
+                r"(?!\s+(?:is\s+)?not\s+required|\s*(?:required)?\s*:\s*(?:no|not)\b)|"
+                r"\bmust\s+be\s+(?:a\s+)?(?-i:U\.S\.|US)\s+citizen|\bTS\s*/\s*SCI\b|"
+                r"\btop\s+secret\b[^.\n]{0,30}\bclearance\b", re.I), "US"),
+    (re.compile(r"\b(?:active\s+)?(?:SC|DV)\s+(?:cleared|clearance)\b|\bNPPV\s?3\b|"
+                r"\b(?:british|UK)\s+(?:citizens?|nationals?)\s+only\b", re.I), "GB"),
+)
 _POS_RE = [re.compile(p, re.I) for p in _POSITIVE]
 
 #: A sentence about US work authorisation, for the "authorized to work in the
@@ -179,6 +197,12 @@ def extract(description: str | None, *, company_sponsorship: str | None = None) 
     """
     text = _relevant_text(description or "")
     relocation = bool(_RELOCATION.search(text))
+
+    for pattern, country in _CITIZENSHIP:
+        hit = pattern.search(description or "")
+        if hit:
+            return Visa(NO_SPONSORSHIP, _sentence(description or "", hit.start(), hit.end()),
+                        relocation, country)
 
     negatives: list[str] = []
     for pattern in _NEG_RE:

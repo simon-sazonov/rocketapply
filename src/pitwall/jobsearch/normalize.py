@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -22,10 +22,26 @@ from . import roles as roles_mod
 from . import visa as visa_mod
 from .companies import normalize_company, normalize_title, title_key
 from .locations import country_code, parse_location
+from .sections import split_requirements
 from .skills import Vocabulary
 
 #: Bump when a rule changes; every open posting is re-normalised on the next run.
-NORMALIZER_VERSION = "js2"   # js2: qualitative seniority, decoded Greenhouse HTML
+NORMALIZER_VERSION = "js9"   # js2: qualitative seniority, decoded Greenhouse HTML
+#                              js3: remote_regions as a list; the source's own
+#                                   remote flag and search country used
+#                              js4: seven more posting languages; US level
+#                                   suffixes (Engineer II, Scientist IV) in titles;
+#                                   nice-to-have skills; recruitment agencies;
+#                                   PhD in the title; "read and write French"
+#                              js5: citizenship and clearance requirements;
+#                                   "Fluency in Dutch"; "PhD in …" as a
+#                                   requirement line; "(Based in Hong Kong)"
+#                              js6: customer-facing titles are not engineering
+#                                   roles; task marketplaces count as agencies
+#                              js7: Singapore agency licences and names
+#                              js8: a degree line under "Nice to have" is a wish
+#                              js9: the lowest degree a posting requires decides;
+#                                   "Skills that will differentiate…" is a wish
 
 # ───────────────────────────── canonical URL ─────────────────────────────
 
@@ -162,6 +178,16 @@ _DEGREE_HINT = re.compile(r"ph\.?\s?d|doctor|doktor|master|m\.?\s?sc|bachelor|b\
                           r"degree|postgraduate", re.I)
 
 
+_EDU_LEAD = re.compile(
+    r"^\W*(?:a\s+|an\s+)?(?:ph\.?\s?d|doctorate|doctoral\s+degree|master'?s?|m\.?sc|"
+    r"bachelor'?s?|b\.?sc)\b[^.\n]{0,25}?\b(?:in|degree)\b", re.I)
+
+#: "(Based in Hong Kong)" in a title beats the address a career fair or a
+#: recruiter's office put in the location field (28 Sep 2026: a Hong Kong job
+#: listed at a London career fair).
+_BASED_IN = re.compile(r"\bbased\s+in\s+([A-Za-z][A-Za-z .'-]{2,30}?)\s*(?:[)\],;|]|$)", re.I)
+
+
 def education(description: str | None) -> tuple[str | None, str | None]:
     """`(required, preferred)` — each `phd`, `masters`, `bachelors` or None (§16).
 
@@ -174,6 +200,11 @@ def education(description: str | None) -> tuple[str | None, str | None]:
     rank = {"bachelors": 1, "masters": 2, "phd": 3}
     if not _DEGREE_HINT.search(description or ""):
         return None, None
+    # The "a line that opens with a degree" rule only holds outside the
+    # wishes: "Nice to have • PhD in model evaluation…" is not a requirement
+    # (Helsing AI Safety, wrongly filtered for a few minutes on 28 Sep 2026).
+    core = split_requirements(description)[0]
+    lead: list[str] = []
     for sentence in re.split(r"(?<=[.!?;])\s+|\n+", description or ""):
         if not _DEGREE_HINT.search(sentence):
             continue
@@ -182,13 +213,25 @@ def education(description: str | None) -> tuple[str | None, str | None]:
         if not levels:
             continue
         lowest = min(levels, key=lambda lvl: rank[lvl])
+        # "• PhD in Computer Science, AI or a related discipline." under a
+        # Requirements heading: a line that opens with the degree IS the
+        # requirement, with no "required" in it (NTU, 28 Sep 2026).
+        stated = _EDU_REQUIRED.search(sentence)
+        if not stated and not _EDU_PREFERRED.search(sentence) and _EDU_LEAD.match(sentence) \
+                and sentence.strip() and sentence.strip() in core:
+            lead.append(lowest)
+            continue
         if _EDU_PREFERRED.search(sentence):
             best = max(levels, key=lambda lvl: rank[lvl])
             if preferred is None or rank[best] > rank[preferred]:
                 preferred = best
-        elif _EDU_REQUIRED.search(sentence) and (required is None or
-                                                 rank[lowest] > rank[required]):
-            required = lowest
+        elif stated:
+            lead.append(lowest)
+    if lead:
+        # Several requirement lines naming degrees ("Master's degree in X" …
+        # "PhD in Y"): the lowest is what makes someone eligible. A false
+        # rejection is the costly error (§90), so the floor, not the ceiling.
+        required = min(lead, key=lambda lvl: rank[lvl])
     return required, preferred
 
 
@@ -201,24 +244,41 @@ _STOPWORDS = {
            "dans", "sur", "du", "au", "en"},
     "en": {"and", "the", "with", "for", "you", "our", "are", "will", "your", "this",
            "that", "have", "from", "we", "to", "of"},
+    # The languages of the countries the search covers since Sep 2026. Only
+    # words distinctive enough to tell neighbours apart: Swedish and Danish,
+    # Spanish and Portuguese share many.
+    "pt": {"não", "você", "com", "uma", "dos", "das", "nosso", "nossa", "são", "também",
+           "equipa", "equipe", "para", "os", "as", "em"},
+    "es": {"y", "el", "los", "las", "una", "del", "con", "nuestro", "nuestra", "somos",
+           "también", "equipo", "para", "más", "sus"},
+    "it": {"il", "della", "delle", "degli", "gli", "sono", "siamo", "nostro", "nostra",
+           "che", "per", "nel", "anche", "una", "con"},
+    "nl": {"het", "een", "voor", "wij", "jij", "zijn", "onze", "ons", "bij", "ook",
+           "naar", "van", "je", "met", "en"},
+    "sv": {"och", "att", "är", "av", "ett", "till", "våra", "vår", "inom", "som", "med",
+           "för", "vi", "du", "det"},
+    "da": {"og", "er", "af", "et", "til", "vores", "inden", "som", "med", "for", "vi",
+           "du", "det", "på"},
+    "fi": {"ja", "että", "tai", "ovat", "olet", "meidän", "kanssa", "jossa", "joka",
+           "myös", "sinä", "sinun", "on"},
 }
 _LANGUAGE_REQUIRED = {
-    "de": re.compile(r"(?:fluent|native|business[- ]level|excellent|very good|strong|"
+    "de": re.compile(r"(?:fluen\w*|native|business[- ]level|excellent|very good|strong|"
                      r"proficien\w*|c1|c2|b2)\W+(?:\w+\W+){0,3}german|german\W+(?:\w+\W+){0,2}"
                      r"(?:is )?(?:required|mandatory|essential|a must)|german[- ]speaking|"
                      r"(?:sehr gute|fließende|verhandlungssichere)\s+deutschkenntnisse|"
                      r"deutsch\s+(?:auf\s+)?(?:c1|c2|muttersprach)", re.I),
-    "fr": re.compile(r"(?:fluent|native|business[- ]level|excellent|proficien\w*|c1|c2)\W+"
+    "fr": re.compile(r"(?:fluen\w*|native|business[- ]level|excellent|proficien\w*|c1|c2)\W+"
                      r"(?:\w+\W+){0,3}french|french\W+(?:\w+\W+){0,2}(?:is )?(?:required|"
                      r"mandatory|essential)|french[- ]speaking|français\s+(?:courant|"
                      r"obligatoire|indispensable)", re.I),
-    "nl": re.compile(r"(?:fluent|native|proficien\w*)\W+(?:\w+\W+){0,3}dutch|dutch\W+(?:\w+\W+)"
+    "nl": re.compile(r"(?:fluen\w*|native|proficien\w*)\W+(?:\w+\W+){0,3}dutch|dutch\W+(?:\w+\W+)"
                      r"{0,2}(?:is )?(?:required|mandatory)|dutch[- ]speaking", re.I),
-    "it": re.compile(r"(?:fluent|native|proficien\w*)\W+(?:\w+\W+){0,3}italian|italian\W+"
+    "it": re.compile(r"(?:fluen\w*|native|proficien\w*)\W+(?:\w+\W+){0,3}italian|italian\W+"
                      r"(?:\w+\W+){0,2}(?:is )?(?:required|mandatory)", re.I),
-    "es": re.compile(r"(?:fluent|native|proficien\w*)\W+(?:\w+\W+){0,3}spanish|spanish\W+"
+    "es": re.compile(r"(?:fluen\w*|native|proficien\w*)\W+(?:\w+\W+){0,3}spanish|spanish\W+"
                      r"(?:\w+\W+){0,2}(?:is )?(?:required|mandatory)", re.I),
-    "sv": re.compile(r"(?:fluent|native|proficien\w*)\W+(?:\w+\W+){0,3}swedish|swedish\W+"
+    "sv": re.compile(r"(?:fluen\w*|native|proficien\w*)\W+(?:\w+\W+){0,3}swedish|swedish\W+"
                      r"(?:\w+\W+){0,2}(?:is )?(?:required|mandatory)", re.I),
 }
 
@@ -240,16 +300,82 @@ def posting_language(text: str | None) -> str | None:
     return lang if n >= 5 else None
 
 
+#: "Read and write French", "you speak Dutch", "able to write in German": the
+#: ability stated as a verb. Missed by the patterns above until a rating said
+#: so (Meetdavis, 28 Sep 2026: "Read and write French: our sources and
+#: deliverables are in French").
+_LANGUAGE_NAMES_EN = {"de": "german", "fr": "french", "nl": "dutch", "it": "italian",
+                      "es": "spanish", "sv": "swedish", "pt": "portuguese", "da": "danish",
+                      "fi": "finnish"}
+_LANGUAGE_VERB = {
+    lang: re.compile(rf"\b(?:read|write|speak|communicate|work)s?\b(?:\W+\w+){{0,4}}\W+"
+                     rf"(?:in\W+)?{name}\b|\b{name}\W+(?:\w+\W+){{0,2}}(?:is |are )?"
+                     rf"(?:needed|necessary|essential|mandatory)\b", re.I)
+    for lang, name in _LANGUAGE_NAMES_EN.items()
+}
+
+
+def _stated(pattern: re.Pattern[str], text: str) -> bool:
+    """A match that stays inside one clause. "Fluency in English and Dutch"
+    asks for Dutch; "Fluent English required; German is nice to have" does not."""
+    return any(not re.search(r"[;.\n]", m.group(0)) for m in pattern.finditer(text))
+
+
 def languages_required(title: str | None, text: str | None, language: str | None) -> list[str]:
     """Spoken languages the posting asks for beyond English. A posting written
     entirely in German asks for German whether or not it says so."""
     blob = f"{title or ''}\n{text or ''}"
     lowered = blob.lower()
     found = [lang for lang, pattern in _LANGUAGE_REQUIRED.items()
-             if any(word in lowered for word in _LANGUAGE_WORDS[lang]) and pattern.search(blob)]
+             if any(word in lowered for word in _LANGUAGE_WORDS[lang]) and _stated(pattern, blob)]
+    for lang, name in _LANGUAGE_NAMES_EN.items():
+        if lang not in found and name in lowered and _LANGUAGE_VERB[lang].search(blob):
+            found.append(lang)
     if language and language != "en" and language not in found:
         found.append(language)
     return found
+
+
+_PHD_TITLE = re.compile(r"\bph\.?\s?d\b|\bdoctoral\b|\bdoktorand\w*|\bdoctorant\w*", re.I)
+_PHD_OR_MASTERS = re.compile(
+    r"\b(?:ms|m\.?sc|master'?s?|ma)\s*(?:/|or|and|&)\s*ph\.?\s?d\b|"
+    r"\bph\.?\s?d\s*(?:/|or|&)\s*(?:ms|m\.?sc|master'?s?)\b", re.I)
+
+
+# ─────────────────────────── recruitment agencies ────────────────────────
+
+#: Agencies that appeared as the posting company on the first live runs
+#: (Randstad on MyCareersFuture, Brunel on EURES, Hays on ITJobs.pt's
+#: example), plus the large ones like them. The employer is then hidden, so
+#: the target list, the sponsor registers and dedupe cannot see it.
+_AGENCY_NAME = re.compile(
+    r"\b(?:randstad|adecco|manpower\w*|hays|michael page|page (?:personnel|executive)|"
+    r"robert (?:half|walters)|brunel|gi group|kelly services|experis|harvey nash|"
+    r"computer futures|jefferson frank|nigel frank|sthree|huxley|progressive recruitment|"
+    r"hirewell|staffing|recruit\w*|personalvermittlung|personaldienstleist\w*|"
+    r"personalberatung|headhunt\w*|talent (?:solutions|partners|acquisition)|"
+    r"search partners|executive search|hire feed|micro1|mercor|toptal|outlier ai|"
+    # Singapore agency names: "GOLDTECH RESOURCES PTE LTD", "MAESTRO HUMAN
+    # RESOURCE PTE. LTD.", "BUSINESS EDGE PERSONNEL SERVICES".
+    r"human\s+resources?|resources\s+pte|personnel|hr\s+(?:advisory|consult\w*|services|"
+    r"solutions)|jobster)\b", re.I)
+_AGENCY_TEXT = re.compile(
+    r"\b(?:on behalf of (?:our|a) client|our client(?:,| is| are)|für unseren kunden|"
+    r"unser(?:e)? kunde\w*|notre client|pour (?:le compte de )?(?:notre|un) client|"
+    r"o nosso cliente|nuestro cliente|il nostro cliente|onze opdrachtgever|"
+    # Task marketplaces that sell expert hours to AI labs: not an employer either.
+    r"per accepted task|paid per task|compensation is output-based)\b|"
+    # Singapore requires an agency to print its licence and each recruiter's
+    # registration number: "EA Licence 18C9105", "EA Reg R1104661", "CEI:
+    # R1104482". 296 of 1,261 MyCareersFuture postings did (28 Sep 2026).
+    r"(?-i:\bEA)\s*(?:licen[cs]e|reg(?:istration)?)\b|"
+    r"\breg(?:istration)?\.?\s*(?:no|number)\.?\s*:?\s*R\d{6,}\b|\bCEI\b\s*(?:no\.?)?\s*:?\s*R\d{6,}|"
+    r"\(R\d{7}\)", re.I)
+
+
+def is_agency(company: str | None, text: str | None) -> bool:
+    return bool(_AGENCY_NAME.search(company or "")) or \
+        bool(_AGENCY_TEXT.search((text or "")[:4000]))
 
 
 # ──────────────────────────── source hints ───────────────────────────────
@@ -303,7 +429,10 @@ def source_hints(raw: dict[str, Any]) -> SourceHints:
         country = country or country_code(str(area[0]))
 
     tags: list[str] = []
-    for key in ("job_types", "tags"):
+    # `_levels` is not the board's field but the adapter's: a board whose level
+    # words mean something else elsewhere (MyCareersFuture's "Executive" is an
+    # early-career grade) maps them to entry / mid / senior before storing.
+    for key in ("job_types", "tags", "_levels"):
         tags += [str(t) for t in raw.get(key) or [] if isinstance(t, str)]
     level = raw.get("experienceLevel")
     if isinstance(level, dict) and level.get("id"):
@@ -335,21 +464,38 @@ def normalize(row: dict[str, Any], *, vocab: Vocabulary,
 
     company = (row.get("posting_company") or (target or {}).get("name")
                or company_fallback or "")
+    # What the source stated outright (schema v7) backs up what its payload
+    # says: Adzuna's search country is not in its payload at all.
+    stated_remote = row.get("source_remote")
     loc = parse_location(
         row.get("location"),
-        remote_flag=hints.remote,
+        remote_flag=hints.remote if hints.remote is not None
+        else (None if stated_remote is None else bool(stated_remote)),
         workplace=hints.workplace,
-        country_hint=hints.country,
+        country_hint=hints.country or row.get("source_country"),
         title=title,
     )
-    remote_region = loc.remote_region
-    if hints.region and loc.remote_status == "remote":
-        remote_region = hints.region
+    based = _BASED_IN.search(title)
+    based_code = country_code(based.group(1).strip()) if based else None
+    if based_code:
+        loc = replace(loc, countries=(based_code,), cities=())
+    regions = list(loc.remote_regions)
+    if hints.region and loc.remote_status == "remote" and hints.region not in regions:
+        regions.insert(0, hints.region)
     exp = experience_mod.extract(title, description, list(hints.level_tags))
-    visa = visa_mod.extract(description, company_sponsorship=(target or {}).get("sponsorship"))
+    # The title too: "Data Engineer SC Cleared" says it nowhere else.
+    visa = visa_mod.extract(f"{title}\n{description}",
+                            company_sponsorship=(target or {}).get("sponsorship"))
     role = roles_mod.classify(title, description)
     skills = vocab.extract(f"{title}\n{description}")
+    core, wishes = split_requirements(description)
+    required_here = set(vocab.extract(f"{title}\n{core}"))
+    skills_nice = [s for s in vocab.extract(wishes) if s in skills and s not in required_here]
     edu_required, edu_preferred = education(description)
+    # "AI Research Intern (PhD)", "PhD Student Researcher": the title requires
+    # it. "MS/PhD" and "Master's or PhD" in a title accept either.
+    if _PHD_TITLE.search(title) and not _PHD_OR_MASTERS.search(title):
+        edu_required = "phd"
     salary = {} if row.get("salary_min") else parse_salary(description)
     language = posting_language(description)
 
@@ -364,7 +510,8 @@ def normalize(row: dict[str, Any], *, vocab: Vocabulary,
         "city": loc.city,
         "cities": json.dumps(list(loc.cities), ensure_ascii=False),
         "remote_status": loc.remote_status,
-        "remote_region": remote_region,
+        "remote_region": regions[0] if regions else None,
+        "remote_regions": json.dumps(regions),
         "employment_types": json.dumps(
             employment_types(row.get("employment_type"), title)
         ),
@@ -383,6 +530,8 @@ def normalize(row: dict[str, Any], *, vocab: Vocabulary,
         "relocation": int(visa.relocation),
         "role_labels": json.dumps(list(role.labels)),
         "skills": json.dumps(skills),
+        "skills_nice": json.dumps(skills_nice),
+        "agency": int(is_agency(company, description)),
         "language": language,
         "languages_required": json.dumps(languages_required(title, description, language)),
         "normalized_hash": row.get("content_hash"),

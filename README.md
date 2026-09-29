@@ -328,11 +328,39 @@ sources ─► normalise ─► dedupe ─► hard filters ─► score + reason
 | `config/skills_vocab.yaml` | the skill vocabulary both sides are mapped onto (`sklearn` = `scikit-learn`). |
 | `config/target_companies.csv` | employers to watch, priority A/B/C, and their public ATS board |
 
-**Sources.** Every target company's public ATS board (Greenhouse, Lever, Ashby,
-Workable, SmartRecruiters, Recruitee — `make job-targets-ats` finds them and
-*verifies* each one names the company before adopting it), the keyless
-Arbeitnow feed, and Adzuna's search API if you add `ADZUNA_APP_ID` and
-`ADZUNA_APP_KEY` to `.env` (free). No LinkedIn, no scraping behind logins.
+**Sources.** Thirteen market-wide sources, plus company boards, all free.
+Every source is switched on and off on 🧭 Job Setup:
+
+| kind | sources |
+|---|---|
+| aggregators | Adzuna (DE NL FR GB CH IT ES US SG), Jooble (US), Arbeitnow (DE) and Arbeitnow UK, Workable's cross-company search (every country), Findwork |
+| official portals | EURES (every EU country and CH), JobTech/Platsbanken (SE), MyCareersFuture (SG), ITJobs.pt (PT) |
+| country boards | GermanTechJobs, SwissDevJobs, DevITJobs UK and NL |
+| remote boards | Himalayas (searched for where *you* can work from), Jobicy, Remote OK |
+| company boards | every target company's ATS board (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee, Personio, Teamtailor), plus boards **found automatically** from the links inside other sources' postings, verified to belong to that employer |
+
+Keys go in `.env` (see `.env.example`): `ADZUNA_APP_ID`/`ADZUNA_APP_KEY`,
+`JOOBLE_API_KEY_US`, `ITJOBS_API_KEY`, `FINDWORK_API_KEY`. A missing key skips
+that source and says so. Keyless sources obey robots.txt (RFC 9309, wildcards
+included). A keyed API is used under its own terms, since several put a
+blanket `Disallow: /` on the API host. Each keyed source has a quota ledger:
+Adzuna's 250 a day / 1,000 a week / 2,500 a month are counted over rolling
+windows, spent quickly until everything open has been read once, then evenly.
+
+Searches are built from your role labels and preferred titles
+(`jobsearch/queries.py`), never kept by hand per source. Each search keeps a
+cursor: the next visit asks only for what is newer. Searches that keep finding
+relevant jobs come round more often.
+
+**Grading.** Eight parts: role, experience, skills, location, visa, direction,
+company, CV match. A skill named only as "a plus" counts a third. The UK and NL
+sponsor registers (refreshed weekly) and USCIS H-1B data (download the CSV
+from the USCIS H-1B Employer Data Hub into `data/sponsors/`) name employers
+that sponsor. Agency postings are marked. `make job-calibrate` measures how
+well each part agrees with your 👍 / 👎, dismissals and applications, and
+proposes weights.
+
+No LinkedIn, no scraping behind logins, no browser impersonation.
 
 **Rules the whole thing keeps.** An unknown never rejects a job — only what a
 posting *states* can: "3+ years required", "we cannot sponsor", "PhD required".
@@ -345,11 +373,157 @@ Apply link.
 ```bash
 make job-search        # poll, filter, rank — prints the new matches
 make job-rerank        # after editing your profile: re-rank, no network
+make job-calibrate     # how well the score agrees with your ratings
 make job-targets-ats   # find (and verify) ATS boards for target companies
 ```
 
-To run it every morning at 07:00, see `scripts/launchd/com.pitwall.jobsearch.plist`
-— a template, not installed for you.
+It runs every morning at 07:00 from `scripts/launchd/com.pitwall.jobsearch.plist`
+(installed 28 Sep 2026; `launchctl bootout gui/$(id -u)/com.pitwall.jobsearch`
+stops it).
+
+---
+
+## Tailored CVs and cover letters
+
+Built to `CV_COVER_LETTER_ENGINEERING_SPEC.md`. Ninety per cent deterministic,
+ten per cent model:
+
+> **The model decides what is *relevant*. The program guarantees what is *true*.**
+
+```bash
+make fonts
+python3 profile/validate_profile.py
+python scripts/run_pipeline.py apply calibrate
+python scripts/run_pipeline.py apply preview quantitative
+python scripts/run_pipeline.py apply jobs
+python scripts/run_pipeline.py apply analyze --job 930
+python scripts/run_pipeline.py apply generate --job 930
+```
+
+`make fonts` vendors DM Sans, Arimo and Archivo Black into `assets/fonts`.
+`calibrate` checks the frame still measures as it claims. `preview` renders a CV
+with no job and no model at all. `analyze` is a gap report for one model call.
+
+### The CV is a frozen frame
+
+The layout never changes: `CONTACT → SKILLS → EXPERIENCE → PROJECTS → EDUCATION`,
+all three jobs, 3/3/1 bullets, the education block verbatim. Exactly three things
+vary — which 3 of the 22 projects appear, what fills each skills row, and which
+pre-approved variant a bullet uses. The model has no field with which to change
+anything else, so the blast radius of a model error is three slots.
+
+**Fitting is a guarantee, not a hope.** Every piece of text declares its cost in
+rendered lines, measured by asking ReportLab's own paragraph engine rather than
+dividing a character count. Enumerating all 1,140 legal project trios gives 47
+body lines and one page every time.
+
+`apply calibrate` re-derives the geometry and fails on drift. It reports the
+margin in the direction that matters: how much narrower the column can get before
+a bullet gains a line and the page breaks.
+
+### The truth layer
+
+`forbidden_claims` is the profile's do-not-claim list, plus every skill at
+`confidence: none`, plus **every requirement this posting asks for that the
+profile cannot evidence** — because the most dangerous hallucination is the one
+that closes the gap the matcher just noticed.
+
+Nothing is forbidden without checking the profile first. Both the analyzer and
+the job search propose gaps, and the job search's inventory is narrower: it calls
+`simulation` missing while the profile carries Monte Carlo path simulation in
+three places. A proposed gap the profile disproves is reported and **not**
+silenced. Neither are activities — only named technologies are worth forbidding,
+because gagging "model development" suppresses true work while gagging "AWS"
+prevents a false claim.
+
+Beyond the spec, the layer enforces the rules `profile/` carries in its own right:
+
+| Rule | What it does |
+|---|---|
+| `never_mention` | Work authorisation, visas, residency, nationality are a **topic** block — never raised, even when a posting asks. Simon answers that himself. |
+| `not_my_work` | Three attributions belonging to teammates, blocked by `block_terms` because matching a whole sentence blocks nothing. |
+| `never_claim_specifically` | RL in the trading work — a **co-occurrence** rule, so the sepsis project's real RL evidence stays sayable. |
+| `evidence_private` | Claimable in prose; no public project exists to cite, so none may be named. |
+| `conflicts_with` | A project whose work already prints in the experience block is never selected. |
+| `readme_state` | A stub or absent README drops the GitHub label. The bullets stand alone; the link is what hurts. |
+| `gated_verbs` | Matched across inflections — `owns` and `managing`, not just `owned`. The bare stem needs a subject, so "my own harness" passes. |
+
+### Nothing unverified reaches `output/`
+
+The deterministic gates always block: a number with no profile record, a
+forbidden entity, a gated verb, a blocked topic. A rejected draft goes to `run/`
+marked `REJECTED` and the command exits non-zero.
+
+**The model audit does not block, and that is deliberate.** `fact_check` routes to
+local Qwen first so the auditor is never the model that wrote the text. But
+neither available judge is reliable enough for a veto: Groq is the writer, and
+Qwen2.5-7B is independent but imprecise — on a real run it marked *"built a
+seven-stage resumable pipeline"* unsupported while that phrase sat verbatim in
+the facts it was given.
+
+So the audit gets what it is good for. Its objections drive a rewrite, up to
+three rounds; anything still flagged is written as
+`..._Cover_Letter_NEEDS_REVIEW.txt` with the sentences printed. A human reading
+three highlighted sentences is the outcome the design wants. A 7B model silently
+discarding a good letter is not.
+
+An unreadable verdict is recorded as **unchecked**, never as a pass — Qwen
+answered one real call with `{"isAllowed": false, ...}` instead of the schema's
+keys, and defaulting a missing `verdict` to SUPPORTED would have turned the
+safety net into a rubber stamp.
+
+Every application ships a `provenance.json` naming the profile ids it used, the
+commit they came from, and every model call. That is what makes a line on the CV
+answerable six months later.
+
+### Making the letters sound like Simon
+
+The first version wrote competent, anonymous prose. It followed every rule and
+avoided every banned phrase, because it had far more *instructions about* the
+voice than *examples of* it: 22 banned phrases, 6 abstract voice notes, and about
+310 words of real writing. It had never seen a finished letter in that voice, so
+shape, pacing and the closing paragraph had nothing to copy from.
+
+`profile/style.yaml` therefore carries `exemplars` — whole letters, each marked
+`verdict: good` or `verdict: avoid` — and they lead the writer's prompt, ahead of
+every rule. Three are loaded, about 1,000 words: the Alpine letter as the anchor,
+and the Waymo and Red Bull letters as what to avoid. The `avoid` ones earn their
+place by being *the same person writing less well*, which isolates what went
+wrong rather than which words to dodge. `validate-profile` warns while either
+verdict is missing.
+
+**Showing a model bad prose has a cost**, and it is handled. A model shown any
+text absorbs its nouns, and the Red Bull letter names "Snowit" as an employer —
+which appears nowhere in `profile/`. So every capitalised word in the exemplars
+that the profile cannot account for is collected into `truth.contaminants` and
+blocked for the run, minus whatever this posting's own employer and role
+legitimately supply. The same letter says "I co-founded BeeSurfing" where
+`experience.yaml` records a University team project, so `co-founded` and
+`founded` are now gated verbs.
+
+**The studio is the better place to do this.** `streamlit run app/Home.py` →
+**✍️ Applications Studio**: pick a posting, read the advert without leaving the
+page, generate, then read the CV and the letter side by side with the evidence
+behind them, and score it there.
+
+Everything generated stays listed under **Everything generated so far**, graded
+or not, so a letter can be read now and scored tomorrow. That list is rebuilt
+from each run's `provenance.json` rather than held in memory, so it survives
+switching pages, closing the tab and restarting the server — losing a letter by
+navigating away to look at the job advert was the original complaint. A grade
+attaches to one *generation*, not to the job, because the same posting at the
+same prompt version gets generated more than once and each attempt deserves its
+own verdict. Rating a
+letter means reading four paragraphs of prose, and a terminal prompt is a poor
+place for that. Both front-ends call the same
+`pitwall.apply.pipeline.generate_application`, so a letter made in the browser
+and one made in the terminal are the same letter.
+
+`voice-eval` keeps that honest. Each round scores every letter on naturalness
+(1–5) and edit burden (%), keyed by prompt version, so a change that helps one
+letter and quietly hurts the next shows up instead of being argued about. The
+scores are Simon's; nothing in the loop grades itself. Ship at an edit burden
+consistently at or under 30%.
 
 ---
 
@@ -400,6 +574,25 @@ pitwall stats
 pitwall coverage                      # how much of the company list is actually searched
 pitwall export --format md --min-score 55
 pitwall export --include-contacts     # addresses are excluded unless you ask
+
+# tailored CVs and cover letters
+make fonts                            # vendor the three typefaces (once)
+make validate-profile                 # is profile/ sound?
+make calibrate                        # does the CV frame still measure as it claims?
+pitwall apply preview quantitative    # a CV for a role family — no job, no model
+pitwall apply jobs                    # the best-scoring postings, with ids
+pitwall apply analyze --job 930       # matched / partial / missing, one model call
+pitwall apply research Anthropic      # what they build, from their own pages
+pitwall apply research X --dry-run    # what the model would see; calls no model
+pitwall apply research --show         # what is cached, and what was rejected
+pitwall apply generate --job 930 --dry-run     # the plan, writing nothing
+pitwall apply generate --job 930               # CV + letter + provenance
+pitwall apply generate --job 930 --no-llm      # deterministic CV only
+pitwall apply generate --job 930 --record      # also track it as SHORTLISTED
+pitwall apply tidy                    # one folder per job + output/README.md
+pitwall apply tidy --dry-run          # what would move, moving nothing
+pitwall apply voice-eval --job 930 --job 2922  # generate, read, score 1-5
+pitwall apply voice-eval --show                # the trend across prompt versions
 
 # housekeeping
 make searxng-check                    # is the search container healthy?

@@ -12,7 +12,10 @@ than the source being empty.
 
 from __future__ import annotations
 
+import importlib.util
+import io
 import json
+import sqlite3
 from pathlib import Path
 
 import httpx
@@ -25,6 +28,7 @@ from pitwall.sources.jobs import (
     ATSSource,
     CareerPageSource,
     JobCache,
+    NotFound,
     PoliteClient,
     RobotsDisallowed,
     RobotsGate,
@@ -42,6 +46,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def fixture(name: str):
+    xml = FIXTURES / f"ats_{name}.xml"
+    if xml.exists():        # Personio and Teamtailor answer in XML
+        return xml.read_text(encoding="utf-8")
     return json.loads((FIXTURES / f"ats_{name}.json").read_text(encoding="utf-8"))
 
 
@@ -83,7 +90,7 @@ def client(settings, tmp_path):
 @pytest.mark.parametrize("kind", sorted(ATS_KINDS))
 def test_every_ats_adapter_has_a_fixture_and_parses_it(kind):
     """§2.3: "Test every adapter against a saved response fixture"."""
-    postings = parse(kind, fixture(kind))
+    postings = parse(kind, fixture(kind), "example")
     assert postings, f"{kind} produced nothing from its fixture"
     for job in postings:
         assert job.title and job.url
@@ -165,6 +172,180 @@ def test_probing_a_wrong_token_answers_none_rather_than_raising(settings, client
     """A 404 is the ordinary answer for a guess — discover_ats.py makes hundreds."""
     stub_http(monkeypatch, {})
     assert ATSSource("lever", "nope", settings=settings, client=client).probe() is None
+
+
+def test_a_404_is_told_apart_from_an_outage(settings, client, monkeypatch):
+    """`discover_ats.py --verify` clears a board that 404s, never one that is down."""
+    stub_http(monkeypatch, {"api.lever.co/v0/postings/down": FakeResponse("", 503)})
+    with pytest.raises(SourceError) as down:
+        ATSSource("lever", "down", settings=settings, client=client).fetch()
+    assert not isinstance(down.value, NotFound)
+    with pytest.raises(NotFound):
+        ATSSource("lever", "gone", settings=settings, client=client).fetch()
+
+
+# ─────────── ATS discovery for the people-search list (companies) ─────────
+
+
+def _discover_ats(monkeypatch):
+    """scripts/discover_ats.py as a module, with its console captured."""
+    from rich.console import Console
+
+    spec = importlib.util.spec_from_file_location(
+        "discover_ats", ROOT / "scripts" / "discover_ats.py"
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    out = io.StringIO()
+    monkeypatch.setattr(mod, "console", Console(file=out, width=240))
+    return mod, out
+
+
+def _boards(routes):
+    """`fetch(kind, token)` over a dict of boards; anything unrouted is a 404."""
+    def fetch(kind, token):
+        answer = routes.get((kind, token), NotFound(f"{kind}:{token}: not found (404)"))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    return fetch
+
+
+def _posts(*pairs):
+    return [JobPosting(title=t, url=f"https://b.test/{i}", company_name=c)
+            for i, (t, c) in enumerate(pairs)]
+
+
+def _company(repos, name, aliases=(), kind=None, token=None):
+    repos.conn.execute(
+        "INSERT INTO companies (name, aliases, ats_kind, ats_token) VALUES (?,?,?,?)",
+        (name, json.dumps(list(aliases)), kind, token),
+    )
+
+
+def test_people_search_discovery_passes_over_a_strangers_board(repos, tmp_path, monkeypatch):
+    """The first board to answer is a sample account, the next is a hospital
+    network that shares the name; the one adopted names the team."""
+    mod, out = _discover_ats(monkeypatch)
+    _company(repos, "McLaren Racing", ["McLaren F1", "McLaren Applied", "MTC"])
+    fetch = _boards({
+        ("recruitee", "mclarenracing"): _posts(("Senior Marketer (Sample)", "Fiture Marketing")),
+        ("greenhouse", "mclaren"): _posts(("Ward Nurse", "McLaren Health Care")),
+        ("greenhouse", "mclarenf1"): _posts(("Race Strategy Analyst", "McLaren F1")),
+    })
+    store = mod.BoardStore(repos.conn, tmp_path / "backups")
+
+    hits = mod.discover_companies(store, repos.companies.all(), ["recruitee", "greenhouse"],
+                                  4, fetch)
+
+    assert hits == [("McLaren Racing", "greenhouse", "mclarenf1", 1)]
+    row = repos.companies.by_name("McLaren Racing")
+    assert (row["ats_kind"], row["ats_token"]) == ("greenhouse", "mclarenf1")
+    text = out.getvalue()
+    assert "rejected recruitee:mclarenracing for McLaren Racing: a placeholder board" in text
+    assert ("rejected greenhouse:mclaren for McLaren Racing: "
+            "the postings name mclaren health care") in text
+    # the backup was taken before the write, so it has no board in it yet
+    assert store.backup is not None and store.backup.parent == tmp_path / "backups"
+    snapshot = sqlite3.connect(store.backup)
+    try:
+        assert snapshot.execute("SELECT ats_kind FROM companies").fetchall() == [(None,)]
+    finally:
+        snapshot.close()
+
+
+def test_people_search_discovery_adopts_nothing_it_cannot_verify(repos, tmp_path, monkeypatch):
+    """On boards that name nobody: `prema` is a fragment of "PREMA Racing", and
+    `genesis` is only an alias of Genesis Magma Racing — the live board there
+    is Genesis Global, a capital-markets software firm."""
+    mod, out = _discover_ats(monkeypatch)
+    _company(repos, "PREMA Racing", ["PREMA Powerteam"])
+    _company(repos, "Genesis Magma Racing", ["Genesis", "Hyundai Motorsport"])
+    fetch = _boards({
+        ("lever", "prema"): _posts(("Client Partner", None)),
+        ("lever", "genesis"): _posts(("Head of DevOps", None)),
+    })
+    store = mod.BoardStore(repos.conn, tmp_path / "backups")
+
+    assert mod.discover_companies(store, repos.companies.all(), ["lever"], 4, fetch) == []
+    assert not any(r["ats_kind"] for r in repos.companies.all())
+    assert "'genesis' is only an alias" in out.getvalue()
+    assert store.backup is None, "nothing was written, so nothing needed backing up"
+
+
+def test_a_dry_run_records_nothing_and_takes_no_backup(repos, tmp_path, monkeypatch):
+    mod, _ = _discover_ats(monkeypatch)
+    _company(repos, "Manthey", ["Manthey Racing"])
+    fetch = _boards({("lever", "manthey"): _posts(("Data Engineer", None))})
+    store = mod.BoardStore(repos.conn, tmp_path / "backups", dry_run=True)
+
+    hits = mod.discover_companies(store, repos.companies.all(), ["lever"], 4, fetch)
+
+    assert [h[:3] for h in hits] == [("Manthey", "lever", "manthey")]
+    assert repos.companies.by_name("Manthey")["ats_kind"] is None
+    assert store.backup is None and not (tmp_path / "backups").exists()
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_verify_clears_only_the_boards_shown_to_be_wrong(repos, tmp_path, monkeypatch, dry_run):
+    mod, out = _discover_ats(monkeypatch)
+    recorded = {
+        # name: (aliases, kind, token, what the board answers)
+        "McLaren Racing": (["McLaren F1"], "greenhouse", "mclarenf1",
+                           _posts(("Strategy Analyst", "McLaren F1"))),
+        "PREMA Racing": (["PREMA Powerteam"], "lever", "prema",
+                         _posts(("Client Partner", None))),
+        "Genesis Magma Racing": (["Genesis", "Hyundai Motorsport"], "lever", "genesis",
+                                 _posts(("Head of DevOps", None))),
+        "Trident": ([], "recruitee", "trident", _posts(("Senior Marketer (Sample)", None))),
+        "AF Corse": ([], "ashby", "afcorse", NotFound("ashby:afcorse: not found (404)")),
+        "Kessel Racing": ([], "taleo", "kessel", ValueError("unknown ATS 'taleo'")),
+        "Iron Lynx": ([], "workable", "ironlynx", SourceError("workable:ironlynx: HTTP 503")),
+        "Garage 59": ([], "smartrecruiters", "garage59", []),
+    }
+    for name, (aliases, kind, token, _) in recorded.items():
+        _company(repos, name, aliases, kind, token)
+    fetch = _boards({(kind, token): answer for _, kind, token, answer in recorded.values()})
+    store = mod.BoardStore(repos.conn, tmp_path / "backups", dry_run=dry_run)
+
+    cleared = mod.verify_companies(store, repos.companies.all(), fetch)
+
+    wrong = ["AF Corse", "Genesis Magma Racing", "Kessel Racing", "PREMA Racing", "Trident"]
+    assert sorted(cleared) == wrong
+    boards = {r["name"]: r["ats_token"] for r in repos.companies.all()}
+    if dry_run:
+        assert all(boards.values()) and store.backup is None
+        return
+    # a timeout or an empty board says nothing about whose board it is: kept
+    assert {n for n, token in boards.items() if token} == {"McLaren Racing", "Iron Lynx",
+                                                           "Garage 59"}
+    assert store.backup is not None
+    snapshot = sqlite3.connect(store.backup)
+    try:
+        before = snapshot.execute(
+            "SELECT COUNT(*) FROM companies WHERE ats_kind IS NOT NULL").fetchone()[0]
+    finally:
+        snapshot.close()
+    assert before == len(recorded)
+    assert "the board is gone (404)" in out.getvalue()
+
+
+def test_verify_from_the_command_line_backs_up_beside_the_database(settings, repos,
+                                                                  monkeypatch):
+    mod, _ = _discover_ats(monkeypatch)
+    _company(repos, "Trident", [], "recruitee", "trident")
+    monkeypatch.setattr(mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(mod, "board_fetcher", lambda _settings: _boards({
+        ("recruitee", "trident"): _posts(("Senior Marketer (Sample)", None)),
+    }))
+
+    mod.main(companies=None, limit_tokens=4, ats=None, show=False, clear=None,
+             dry_run=False, targets=False, verify=True)
+
+    assert repos.companies.by_name("Trident")["ats_kind"] is None
+    backups = list((settings.db_file.parent / "backups").glob("pitwall-pre-ats-*.db"))
+    assert len(backups) == 1
 
 
 # ───────────────────────────── the aggregator ────────────────────────────

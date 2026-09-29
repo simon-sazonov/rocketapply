@@ -30,3 +30,15 @@ dist/
 config/job_search.yaml
 config/my_skills.yaml
 config/my_profile.md
+
+# ── the CV / cover-letter engine ──
+# Per-run intermediates: analyses, drafts, rejected letters, trace.jsonl.
+# `run/*` rather than `run/`: git cannot re-include a file inside an ignored
+# DIRECTORY, so ignoring the contents is what makes the exception below work.
+run/*
+# …except the voice ratings. That file is the only record of whether the letters
+# are getting better, the scores in it are Simon's own, and a `run/` clean would
+# otherwise throw away every round of the loop.
+!run/voice_eval.csv
+# Generated applications. Personal, and regenerable from profile/ + the job id.
+output/

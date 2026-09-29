@@ -21,7 +21,7 @@ from typing import Any, NamedTuple
 
 from .config import Settings, get_settings
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 9
 
 DDL = """
 PRAGMA journal_mode = WAL;
@@ -458,6 +458,49 @@ CREATE TABLE IF NOT EXISTS application_events (
 );
 CREATE INDEX IF NOT EXISTS ix_application_events_app ON application_events(application_id, id);
 
+-- v7: one row per search a keyword source runs (query x country). Two jobs:
+-- the cursor, so the next visit asks only for what is newer than the last one
+-- (a rotation that skips a day then loses nothing), and the yield, so the
+-- searches that never find a relevant job can make way for ones that do.
+CREATE TABLE IF NOT EXISTS source_queries (
+    source          TEXT NOT NULL,
+    query           TEXT NOT NULL,
+    country         TEXT NOT NULL DEFAULT '',
+    first_run_at    TEXT DEFAULT (datetime('now')),
+    last_fetched_at TEXT,             -- the last COMPLETE read; NULL = never
+    backfilled      INTEGER DEFAULT 0,
+    runs            INTEGER DEFAULT 0,
+    requests        INTEGER DEFAULT 0,
+    found           INTEGER DEFAULT 0,
+    last_total      INTEGER,          -- what the source said the search matched
+    PRIMARY KEY (source, query, country)
+);
+
+-- v7: ATS boards found from the links inside postings (jobsearch/ats_harvest.py).
+-- `verified` = the board's postings name the employer that linked to it, or it
+-- sits at that employer's whole name. A failed check keeps its reason and is
+-- not retried for 30 days.
+CREATE TABLE IF NOT EXISTS discovered_boards (
+    kind          TEXT NOT NULL,
+    token         TEXT NOT NULL,
+    company       TEXT,
+    company_norm  TEXT,
+    verified      INTEGER DEFAULT 0,
+    reason        TEXT,
+    postings      INTEGER DEFAULT 0,
+    active        INTEGER DEFAULT 1,
+    first_seen_at TEXT DEFAULT (datetime('now')),
+    checked_at    TEXT,
+    PRIMARY KEY (kind, token)
+);
+
+-- Small named markers a stage keeps between runs (the harvest's last job id).
+CREATE TABLE IF NOT EXISTS app_state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 """
 
@@ -507,6 +550,28 @@ JOB_SEARCH_COLUMNS: tuple[tuple[str, str], ...] = (
     ("normalizer_version", "TEXT"),
     ("cluster_id", "INTEGER"),
     ("possible_duplicate_of", "INTEGER"),
+)
+
+#: v6 -> v7: what a source states outright, kept so normalisation can use it,
+#: and the list form of a remote job's regions.
+JOB_SOURCE_FACT_COLUMNS: tuple[tuple[str, str], ...] = (
+    #: 1 / 0 when the source says remote or not; NULL when it does not say.
+    ("source_remote", "INTEGER"),
+    #: ISO2 when the search was country-scoped (an Adzuna DE search is).
+    ("source_country", "TEXT"),
+    #: The search that last returned this posting — for query yield.
+    ("found_query", "TEXT"),
+    #: JSON list of ISO2 / EU / EUROPE / EMEA / NA / WORLD. `remote_region`
+    #: stays as the first entry for display.
+    ("remote_regions", "TEXT"),
+)
+
+#: v7 -> v8: grading facts derived at normalisation (Phase 3).
+JOB_GRADING_COLUMNS: tuple[tuple[str, str], ...] = (
+    #: JSON list: skills named only as wishes ("a plus", "nice to have").
+    ("skills_nice", "TEXT"),
+    #: 1 when the poster is a recruitment agency hiring for a client.
+    ("agency", "INTEGER DEFAULT 0"),
 )
 
 #: v5 -> v6: source health (§46).
@@ -633,6 +698,13 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     * v5 -> v6 added the job search: `target_companies`, `job_matches`,
       `job_review`, `applications`, `application_events`, the normalised
       columns on `jobs` and the health columns on `job_sources`.
+    * v6 -> v7 added `source_queries`, `discovered_boards`, `app_state` and
+      four columns on `jobs`: what the source states about remote work and
+      country, the search that found the posting, and `remote_regions`.
+    * v7 -> v8 added two grading columns on `jobs`: nice-to-have skills and
+      the agency flag. (Sponsor registers are applied at scoring time.)
+    * v8 -> v9 added `job_review.feedback_reason` and `feedback_note`: why a
+      job was rated a bad match.
 
     `CREATE TABLE IF NOT EXISTS` covers a fresh database; an existing 2.0 MB file
     only ever needs the ALTERs, which is why each one is guarded rather than
@@ -661,10 +733,43 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS ix_jobs_company_norm ON jobs(company_norm)")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_jobs_cluster ON jobs(cluster_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_jobs_canonical_url ON jobs(canonical_url)")
+    # v6 -> v7: source facts on `jobs`; `source_queries` is IF NOT EXISTS above.
+    for column, ddl in JOB_SOURCE_FACT_COLUMNS:
+        _add_column(conn, "jobs", column, ddl)
+    # v7 -> v8: grading facts.
+    for column, ddl in JOB_GRADING_COLUMNS:
+        _add_column(conn, "jobs", column, ddl)
+    # v8 -> v9: why a job was rated a bad match, in the owner's words.
+    _add_column(conn, "job_review", "feedback_reason", "TEXT")
+    _add_column(conn, "job_review", "feedback_note", "TEXT")
 
 
 def vacuum(conn: sqlite3.Connection) -> None:
     conn.execute("VACUUM")
+
+
+def backup_database(conn: sqlite3.Connection, directory: Path | str, *,
+                    label: str = "backup") -> Path:
+    """Copy the live database to `directory/pitwall-<label>-<time>.db`.
+
+    Uses SQLite's online backup API rather than copying the file: the copy is
+    a consistent snapshot that includes what is still in the WAL, and it is
+    safe while the app or a pipeline run has the database open.
+    """
+    folder = Path(directory)
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = f"pitwall-{label}-{datetime.now():%Y-%m-%d-%H%M%S}"
+    target = folder / f"{stem}.db"
+    n = 1
+    while target.exists():
+        n += 1
+        target = folder / f"{stem}-{n}.db"
+    dest = sqlite3.connect(str(target))
+    try:
+        conn.backup(dest)
+    finally:
+        dest.close()
+    return target
 
 
 def utcnow() -> str:
@@ -1480,6 +1585,20 @@ class QuotaRepo:
         ).fetchone()
         return int(r["requests"]) if r else 0
 
+    def used_since(self, provider: str, days: int) -> int:
+        """Requests over the last `days` UTC days, today included.
+
+        A rolling window, because a provider that states "1,000 a week" rarely
+        says which day its week starts on, and a rolling count can never be
+        over the limit under any choice of start day.
+        """
+        r = self.conn.execute(
+            "SELECT COALESCE(SUM(requests), 0) AS n FROM quota"
+            " WHERE provider = ? AND day >= date(?, ?)",
+            (provider, today_utc(), f"-{max(0, int(days) - 1)} days"),
+        ).fetchone()
+        return int(r["n"]) if r else 0
+
     def consume(self, provider: str, n: int = 1) -> int:
         self.conn.execute(
             """
@@ -1679,11 +1798,15 @@ class JobRepo:
         ).fetchone()
         digest = content_hash(job.title, job.description, job.location)
         raw = json.dumps(job.raw, ensure_ascii=False, default=str)[:40000]
+        remote = getattr(job, "remote", None)
         extra = (
             getattr(job, "salary_min", None), getattr(job, "salary_max", None),
             getattr(job, "salary_currency", None),
             int(bool(getattr(job, "description_truncated", False))),
             getattr(job, "company_name", None),
+            None if remote is None else int(bool(remote)),
+            getattr(job, "country_hint", None),
+            getattr(job, "found_query", None),
         )
         if existing is None:
             cur = self.conn.execute(
@@ -1692,8 +1815,9 @@ class JobRepo:
                                   description, location, employment_type, url, posted_at,
                                   raw_json, content_hash, salary_min, salary_max,
                                   salary_currency, description_truncated, posting_company,
+                                  source_remote, source_country, found_query,
                                   status, first_seen_at, last_seen_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open', datetime('now'),
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open', datetime('now'),
                         datetime('now'))
                 """,
                 (company_id, target_company_id, source_id, job.external_id, job.title,
@@ -1714,6 +1838,9 @@ class JobRepo:
                    salary_min = COALESCE(?, salary_min), salary_max = COALESCE(?, salary_max),
                    salary_currency = COALESCE(?, salary_currency), description_truncated = ?,
                    posting_company = COALESCE(?, posting_company),
+                   source_remote = COALESCE(?, source_remote),
+                   source_country = COALESCE(?, source_country),
+                   found_query = COALESCE(?, found_query),
                    status = 'open', last_seen_at = datetime('now')
                    {", previous_description = ?, content_changed_at = datetime('now')"
                     if changed else ""}
@@ -2189,6 +2316,57 @@ def _row_to_role(r: sqlite3.Row) -> dict[str, Any]:
     return d
 
 
+class SourceQueryRepo:
+    """`source_queries`: a keyword source's cursors and yields (schema v7)."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def for_source(self, source: str) -> dict[tuple[str, str], dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM source_queries WHERE source = ?", (source,)
+        ).fetchall()
+        return {(r["query"], r["country"]): dict(r) for r in rows}
+
+    def record(self, source: str, query: str, country: str | None, *, requests: int,
+               found: int, complete: bool, total: int | None = None) -> None:
+        """One visit. `complete` = every page this visit needed was read, which
+        is what moves the cursor; an interrupted visit is simply redone."""
+        self.conn.execute(
+            """
+            INSERT INTO source_queries (source, query, country, runs, requests, found,
+                                        last_total, last_fetched_at, backfilled)
+            VALUES (?, ?, ?, 1, ?, ?, ?, CASE WHEN ? THEN datetime('now') END, ?)
+            ON CONFLICT(source, query, country) DO UPDATE SET
+                runs = runs + 1,
+                requests = requests + excluded.requests,
+                found = found + excluded.found,
+                last_total = COALESCE(excluded.last_total, last_total),
+                last_fetched_at = COALESCE(excluded.last_fetched_at, last_fetched_at),
+                backfilled = MAX(backfilled, excluded.backfilled)
+            """,
+            (source, query, country or "", int(requests), int(found), total,
+             int(complete), int(complete)),
+        )
+
+
+class AppStateRepo:
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def get(self, key: str, default: str | None = None) -> str | None:
+        row = self.conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set(self, key: str, value: Any) -> None:
+        self.conn.execute(
+            "INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, datetime('now'))"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value,"
+            " updated_at = excluded.updated_at",
+            (key, str(value)),
+        )
+
+
 class Repos:
     """Bundle of every repository over one connection."""
 
@@ -2208,6 +2386,8 @@ class Repos:
         self.contacts = ContactRepo(conn)
         self.domains = CompanyDomainRepo(conn)
         self.enrichment = EnrichmentLogRepo(conn)
+        self.source_queries = SourceQueryRepo(conn)
+        self.state = AppStateRepo(conn)
 
     @staticmethod
     def writing() -> Any:

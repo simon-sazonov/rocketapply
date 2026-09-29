@@ -165,3 +165,65 @@ def test_quick_add_says_so_when_a_skill_is_not_in_the_vocabulary(job_app):
 
     assert any("vocabulary" in line for line in _jobs.quick_add("Underwater Basket Weaving", ""))
     assert any("PyTorch" in line for line in _jobs.quick_add("pytorch", ""))
+
+
+# ── the applications studio ──
+
+STUDIO_PAGE = PAGES / "10_✍️_Applications_Studio.py"
+
+
+def test_the_studio_says_what_to_do_before_anything_is_scored(job_app):
+    """With no scored postings there is nothing to generate from, and the page
+    should say so rather than offering a button that cannot work."""
+    at = _run(STUDIO_PAGE)
+    _ok(at)
+    assert any("No scored postings" in str(i.value) for i in at.info)
+
+
+def test_the_studio_offers_the_scored_postings_and_explains_the_scoring(job_app):
+    _populate()
+    at = _run(STUDIO_PAGE)
+    _ok(at)
+    assert at.selectbox, "no posting picker"
+    assert at.button, "no generate button"
+    # Before a run it explains the two numbers, because a score given without
+    # knowing what it measures is worse than no score.
+    body = " ".join(str(m.value) for m in at.markdown)
+    assert "Naturalness" in body and "Edit burden" in body
+
+
+def test_the_studio_never_generates_on_its_own(job_app):
+    """Opening the page must not spend tokens. Generation happens on a click."""
+    _populate()
+    at = _run(STUDIO_PAGE)
+    _ok(at)
+    assert at.session_state["studio"]["thread"] is None
+    assert at.session_state["studio"]["result"] is None
+
+
+def test_the_worker_can_actually_report_back(job_app, monkeypatch):
+    """The bug this pins: a background thread has no Streamlit script context,
+    so `st.session_state[...] = value` inside a worker RAISES. The first version
+    did that in the worker and again in its own exception handler, so the thread
+    died instantly and the page redrew as though the button had not been pressed.
+
+    Nothing about that is visible from outside — no error, no progress, no
+    result — so the only way to catch it is to run a generation and check
+    something came back.
+    """
+    from pitwall.apply import pipeline
+
+    _populate()
+    marker = pipeline.ApplicationResult(company="Stub Co", title="Stub Role")
+    monkeypatch.setattr(pipeline, "generate_application", lambda *a, **k: marker)
+
+    at = _run(STUDIO_PAGE)
+    _ok(at)
+    at.button[0].click().run()
+    _ok(at)
+    assert at.session_state["studio"]["result"] is marker, (
+        "the worker thread could not report back — it almost certainly touched "
+        "st.session_state"
+    )
+    assert at.session_state["studio"]["done"] is True
+    assert at.session_state["studio"]["error"] == ""

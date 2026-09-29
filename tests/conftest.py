@@ -358,12 +358,27 @@ def pipeline(settings, repos, monkeypatch, company, role):
 
 @pytest.fixture()
 def app_root(project, monkeypatch, tmp_path):
-    """Point the app at a throwaway project root, never the owner's database."""
+    """Point the app at a throwaway project root, never the owner's database.
+
+    WORKING DIRECTORY TOO, not only the environment. `history.scan()` defaults
+    to the relative path `output`, and `voice_eval.EVAL_PATH` is
+    `run/voice_eval.csv` — both resolve against the cwd, so a page test run
+    from the project root read the owner's real applications and could have
+    appended to their real grades.
+
+    It surfaced as a confusing failure rather than as data loss: two of the
+    owner's folders shared a basename across `apply tidy`'s buckets, the Studio
+    keys its widgets on that name, and Streamlit refused the duplicate — so a
+    test failed because of what was in someone's `output/`.
+    """
     import streamlit as st
 
     from pitwall.config import reload_settings
     from pitwall.db import close_all
 
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "run").mkdir(exist_ok=True)
+    (tmp_path / "output").mkdir(exist_ok=True)
     monkeypatch.setenv("DB_PATH", str(tmp_path / "ui.db"))
     monkeypatch.setenv("CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("HUNTER_API_KEY", "")

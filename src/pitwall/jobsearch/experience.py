@@ -102,6 +102,19 @@ _TITLE_SENIOR = re.compile(
     r"distinguished|expert|architect|level (?:iii|iv|3|4|5)|l[4-7])\b", re.I)
 _TITLE_MID = re.compile(r"\b(?:mid[- ]?level|intermediate|level (?:ii|2)|l[23])\b", re.I)
 
+#: US ladder suffixes after the role noun: "Machine Learning Engineer II",
+#: "Data Scientist IV", "Machine Learning Engineer 5 (IC)". I is entry, III
+#: mid, IV and up senior. II is left to the body: it means one to three years
+#: at some employers and two to four at others, and "entry level" would
+#: overclaim. The first live runs on Adzuna US and Jooble brought hundreds of
+#: these, and none read as a level.
+_TITLE_LADDER = re.compile(
+    r"\b(?:engineer|scientist|analyst|developer|researcher|specialist|statistician)"
+    r"\s*,?\s*(?:level\s*)?(i{1,3}|iv|v|vi|[1-6])(?![\w.])", re.I)
+_LADDER = {"i": "entry", "1": "entry", "ii": "unknown", "2": "unknown", "iii": "mid", "3": "mid",
+           "iv": "senior", "4": "senior", "v": "senior", "5": "senior", "vi": "senior",
+           "6": "senior"}
+
 #: What the Arbeitnow / SmartRecruiters level tags say, normalised.
 _LEVEL_TAGS = {
     "entry": "entry", "entry level": "entry", "entry_level": "entry",
@@ -111,6 +124,10 @@ _LEVEL_TAGS = {
     "mid": "mid", "mid_senior_level": "mid", "mid-senior level": "mid",
     "experienced": "mid", "professional / experienced": "mid", "berufserfahren": "mid",
     "senior": "senior", "senior_level": "senior", "executive": "senior", "director": "senior",
+    # The boards added in the source expansion (Sep 2026): Himalayas, DevJobs,
+    # Jobicy. MyCareersFuture's grades are mapped by its adapter instead.
+    "entry-level": "entry", "mid-level": "mid", "regular": "mid", "midweight": "mid",
+    "lead": "senior", "principal": "senior", "manager": "senior",
 }
 
 
@@ -191,6 +208,9 @@ def title_level(title: str | None) -> str:
         return "intern"
     if _TITLE_SENIOR.search(title):
         return "senior"
+    ladder = _TITLE_LADDER.search(title)
+    if ladder and _LADDER[ladder.group(1).lower()] != "unknown":
+        return _LADDER[ladder.group(1).lower()]
     if _TITLE_ENTRY.search(title):
         return "entry"
     if _TITLE_MID.search(title):
