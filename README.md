@@ -14,6 +14,11 @@ Motorsport is the default profile and the one it was built for; `PITWALL_PROFILE
 points it at any other field. Pure Python: Streamlit, SQLite, free search, free
 LLMs. Runs locally, costs $0.
 
+**Two apps, one engine.** PitWall (`make pitwall`, dark, `apps/pitwall/`) finds
+people. **RocketApply** (`make rocketapply`, light, `apps/rocketapply/`) is the job
+application app — see [RocketApply](#rocketapply) below. They share `src/pitwall`
+and `data/pitwall.db`, and run side by side on :8501 and :8502.
+
 ---
 
 ## Quickstart
@@ -309,6 +314,36 @@ job pages below stay in PitWall too.
 On the Leads page, selecting a row shows **why this score**: the heuristic reasons,
 the LLM reasons, the red flags, and every search result that surfaced the person
 with its raw title and snippet. When a score looks wrong you can see exactly why.
+
+---
+
+## RocketApply
+
+`make rocketapply` → http://localhost:8502. The job side as one process, left to
+right, with a strip under the navigation counting each step:
+
+**Found → Selected → Documents ready → In process → Applied**
+
+| screen | what it is for |
+|---|---|
+| **Search** | a search box over every collected job (answers in ~70 ms; no job board is called), a Filters popover with a count beside every option, removable filter chips, a table you tick, *Select the top N*, and a detail panel: the 8-part score, for / watch-out, skills, other sources, the posting. *Fetch new jobs* runs a collection with a live per-source table. |
+| **Selected** | CV only, or CV + letter (+ an independent fact-check under Advanced); **today's Groq budget** — how many fit, from the key ledger over the rolling 24 h; the best-scored ticked up to that cap; a hint per letter; Generate. |
+| **Generate** | every job's eight-stage track, and what each stage produced as it produced it: the posting's skills with their quotes, coverage, the claims the letter may not make, the chosen projects and why, the letter plan, **each draft as the model writes it**, the checks, the CV. A run survives a restart (*Resume*). |
+| **Review** | the letter, editable (saved edits go through the same gates, the model's text is kept), CV and letter previews, the review note; Approve / Regenerate (fresh, not cached) / Remove; **Export N approved → CSV**. |
+| **Applications** | *In process* by export batch with one **Mark N as applied**; *Applied* with the People panel — LinkedIn searches you click, PitWall's people search for that employer (recruiters, hiring managers, peers, alumni; kept out of the motorsport lead list in `data/pitwall_employers.db`), free email finding, Hunter only on a confirmed click, a drafted ≤200-character note (never sent); *Outcomes*; *Exports*. |
+| **How it works** | the sources and their keys, run history, the score's parts and weights, what each hard rule removed, calibration against your ratings, the stages with the model at each, the gates, the key pool, quality numbers including your own letter ratings. |
+| **Settings** | the search profile, CV text for the AI, skills, target companies (the same files as PitWall's Job Setup), who to contact, and a check of `profile/`. |
+
+The export CSV (`output/exports/<batch>.csv`) has one row per application:
+company, role, location, score, why it matched, concerns, **the link to apply
+at, and the absolute path of the CV PDF, letter PDF, letter text and CV DOCX**
+where they already are in `output/`. `apply tidy` never moves a folder a CSV
+points at. Letters are typeset on the CV's letterhead (`pitwall apply letters`
+does it for runs made before that existed); a letter marked DO_NOT_SEND never is.
+
+A CV costs ~2.6k Groq tokens (one call reads the posting; the rest is
+deterministic); a CV + letter ~18-21k; with the fact-check ~34-61k. Five free keys
+give ~1M a rolling day.
 
 ---
 
