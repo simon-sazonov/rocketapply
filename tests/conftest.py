@@ -54,6 +54,27 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", guard)
 
 
+@pytest.fixture(autouse=True)
+def _never_the_owners_database(tmp_path_factory, monkeypatch):
+    """No test may open `data/pitwall.db`, whatever it forgets to pass.
+
+    Found on 29 Sep 2026: the apply suite, run as a whole, reached the owner's
+    live database through `get_settings()` — harmless while the schema stood
+    still, and then it migrated a 470 MB file to v10 as a side effect of a test
+    run. Every test now starts with `DB_PATH` pointing at its own scratch file
+    and the settings singleton rebuilt, so the default is never the real one.
+    Fixtures that want a specific database still set their own.
+    """
+    from pitwall.config import get_settings
+    from pitwall.db import close_all
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path_factory.mktemp("db") / "default.db"))
+    get_settings.cache_clear()
+    yield
+    close_all()
+    get_settings.cache_clear()
+
+
 @pytest.fixture()
 def project(tmp_path, monkeypatch):
     """A throwaway project root with its own `config/`.

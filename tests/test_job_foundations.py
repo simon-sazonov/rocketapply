@@ -394,7 +394,7 @@ def test_what_a_source_states_is_stored(repos):
 def test_the_schema_has_the_source_facts_and_source_queries(repos):
     from pitwall.db import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 9
+    assert SCHEMA_VERSION == 10
     cols = {r["name"] for r in repos.conn.execute("PRAGMA table_info(jobs)")}
     assert {"source_remote", "source_country", "found_query", "remote_regions"} <= cols
     assert repos.conn.execute("SELECT COUNT(*) FROM source_queries").fetchone()[0] == 0
