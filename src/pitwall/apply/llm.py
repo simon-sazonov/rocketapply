@@ -82,6 +82,9 @@ TASK_ROUTING: dict[str, tuple[str, ...]] = {
     # and whatever comes back has to satisfy the same regex that rejected the
     # original — so a weak answer is caught rather than shipped.
     "letter_repair": ("groq", "ollama"),
+    # A LinkedIn note for RocketApply's People panel. Prose, so capable-only
+    # like the letter: a small local model copies rather than writes.
+    "outreach_note": ("groq",),
 }
 
 #: Groq's free tier allows 8,000 tokens a minute. The letter prompt is about
@@ -99,7 +102,8 @@ RATE_LIMIT_RETRIES = 4
 #: verbatim, addressed to a different company. The contamination gate caught it,
 #: so nothing shipped, but twenty minutes were spent producing something that
 #: could never have passed. Prose generation waits for a capable model or stops.
-CAPABLE_ONLY: frozenset[str] = frozenset({"narrative_plan", "letter_write", "slot_select"})
+CAPABLE_ONLY: frozenset[str] = frozenset(
+    {"narrative_plan", "letter_write", "slot_select", "outreach_note"})
 
 #: A task that must NOT run on its provider's default model, and what it runs on
 #: instead. Keyed `(task, provider)`.

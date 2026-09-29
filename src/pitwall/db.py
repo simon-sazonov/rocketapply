@@ -1530,24 +1530,34 @@ class RunRepo:
             args.append(int(keep))
         return self.conn.execute(sql, args).rowcount or 0
 
-    def active(self, idle_minutes: float = 2.0) -> dict[str, Any] | None:
+    def active(self, idle_minutes: float = 2.0, *,
+               commands: Sequence[str] | None = None) -> dict[str, Any] | None:
         """The run that is going on right now, if there is one.
 
         "Running, and it said something recently." The heartbeat is what makes
         this safe to act on: a row abandoned by a killed process stops updating
         and stops counting as active, so one crash cannot lock the button that
         starts the next run for ever.
+
+        `commands` narrows it to runs of those kinds — RocketApply asks only
+        about `job-search`, so a people search in PitWall does not block
+        "Fetch new jobs", and the other way round. None = any run, as before.
         """
+        kinds = ""
+        params: list[Any] = [f"-{float(idle_minutes):g} minutes"]
+        if commands:
+            kinds = f" AND r.command IN ({','.join('?' * len(commands))})"
+            params += list(commands)
         row = self.conn.execute(
-            """
+            f"""
             SELECT r.*, p.stage, p.message, p.current, p.total, p.updated_at AS heartbeat
               FROM runs r
               LEFT JOIN run_progress p ON p.run_id = r.id
              WHERE r.status = 'running'
-               AND COALESCE(p.updated_at, r.started_at) >= datetime('now', ?)
+               AND COALESCE(p.updated_at, r.started_at) >= datetime('now', ?){kinds}
              ORDER BY r.id DESC LIMIT 1
             """,
-            (f"-{float(idle_minutes):g} minutes",),
+            params,
         ).fetchone()
         return dict(row) if row else None
 
