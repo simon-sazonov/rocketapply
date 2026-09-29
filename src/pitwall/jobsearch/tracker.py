@@ -19,9 +19,15 @@ from typing import Any
 from .companies import normalize_company
 
 STATUSES = (
-    "SHORTLISTED", "CV_READY", "APPLIED", "ONLINE_ASSESSMENT", "INTERVIEW",
-    "FINAL_INTERVIEW", "OFFER", "REJECTED", "WITHDRAWN", "CLOSED",
+    "SHORTLISTED", "CV_READY", "IN_PROCESS", "APPLIED", "ONLINE_ASSESSMENT", "INTERVIEW",
+    "FINAL_INTERVIEW", "OFFER", "REJECTED", "WITHDRAWN", "CLOSED", "SKIPPED",
 )
+#: RocketApply's pipeline, in order. IN_PROCESS = exported to a CSV to work
+#: through; SKIPPED = taken off the shortlist (nothing is ever deleted, §43).
+#: Everything submitted ranks above IN_PROCESS, so `advance` never pulls an
+#: application that went out back to "documents ready".
+PIPELINE_ORDER = {"SKIPPED": -1, "SHORTLISTED": 0, "CV_READY": 1, "IN_PROCESS": 2}
+
 #: Statuses that mean the application went out.
 SUBMITTED = frozenset({"APPLIED", "ONLINE_ASSESSMENT", "INTERVIEW", "FINAL_INTERVIEW",
                        "OFFER", "REJECTED", "WITHDRAWN"})
@@ -186,4 +192,235 @@ def due(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         "SELECT * FROM applications WHERE next_action_date IS NOT NULL"
         " AND next_action_date <= date('now') AND status NOT IN ('REJECTED','WITHDRAWN',"
         "'CLOSED','OFFER') ORDER BY next_action_date"
+    )]
+
+
+# ─────────────────────────── RocketApply lifecycle ─────────────────────────
+#
+# Selected (SHORTLISTED) → documents ready (CV_READY, written when generation
+# finishes) → IN_PROCESS (exported to a CSV batch) → APPLIED (a whole batch at
+# once) → the outcomes above. The database is the source of truth: a selection
+# is written the moment it is made, never held in a browser session.
+
+
+def rank(status: str | None) -> int:
+    """Position in the pipeline; every submitted status outranks IN_PROCESS."""
+    if status is None:
+        return -2
+    return PIPELINE_ORDER.get(status, 3)
+
+
+def cluster_for_job(conn: sqlite3.Connection, job_id: int) -> dict[str, Any] | None:
+    """What `from_cluster` needs, for a posting known only by its `jobs.id`.
+
+    The company is named the way the inbox names it — the target list's name,
+    else the posting's, else the networking list's — so "already applied to
+    this employer" (§39) matches across both entry points.
+    """
+    r = conn.execute(
+        """
+        SELECT j.id, j.cluster_id, j.title, j.location, j.url, j.target_company_id,
+               COALESCE(t.name, NULLIF(j.posting_company, ''), c.name, '') AS company
+          FROM jobs j
+          LEFT JOIN target_companies t ON t.id = j.target_company_id
+          LEFT JOIN companies c ON c.id = j.company_id
+         WHERE j.id = ?
+        """,
+        (job_id,),
+    ).fetchone()
+    if r is None:
+        return None
+    out = dict(r)
+    # A posting that dedupe has not reached yet is its own vacancy.
+    out["cluster_id"] = out["cluster_id"] if out["cluster_id"] is not None else -int(job_id)
+    return out
+
+
+def advance(conn: sqlite3.Connection, app_id: int, status: str,
+            *, note: str | None = None) -> bool:
+    """Move forward only. Returns False when the application is already at or
+    past `status` — regenerating a CV must not un-apply a job."""
+    if status not in STATUSES:
+        raise ValueError(f"unknown status {status!r}")
+    app = get(conn, app_id)
+    if app is None:
+        raise ValueError(f"no application {app_id}")
+    current = app["status"]
+    if current == "SKIPPED" or rank(status) > rank(current):
+        set_status(conn, app_id, status, note=note)
+        return True
+    return False
+
+
+def ensure_for_job(conn: sqlite3.Connection, job_id: int, status: str = "SHORTLISTED",
+                   *, note: str | None = None) -> int:
+    """The application for this posting, created if needed and moved forward to
+    `status` if it is behind. Never moves one backwards."""
+    cluster = cluster_for_job(conn, job_id)
+    if cluster is None:
+        raise ValueError(f"no job {job_id}")
+    existing = for_cluster(conn, int(cluster["cluster_id"]))
+    if existing is None:
+        return from_cluster(conn, cluster, status, note=note)
+    advance(conn, int(existing["id"]), status, note=note)
+    return int(existing["id"])
+
+
+def select_jobs(conn: sqlite3.Connection, job_ids: list[int]) -> list[int]:
+    """Search → Selected, for many postings at once. A SKIPPED one comes back."""
+    return [ensure_for_job(conn, int(j), "SHORTLISTED", note="selected") for j in job_ids]
+
+
+def skip(conn: sqlite3.Connection, app_id: int, *, note: str | None = None) -> None:
+    """Off the shortlist, kept on record."""
+    set_status(conn, app_id, "SKIPPED", note=note or "removed from the selection")
+
+
+def record_generation(conn: sqlite3.Connection, *, job_id: int, directory: str | None,
+                      cv_version: str | None = None, letter_version: str | None = None,
+                      letter_state: str = "", mode: str = "cv_letter") -> int:
+    """A CV (and maybe a letter) exists for this posting: remember where, and
+    move the application to CV_READY. Clears any earlier review, because the
+    documents it approved are not these ones."""
+    app_id = ensure_for_job(conn, job_id, "SHORTLISTED")
+    conn.execute(
+        """
+        UPDATE applications SET generation_dir = ?, generation_mode = ?,
+               generated_at = datetime('now'), letter_state = ?, reviewed_at = NULL,
+               review_note = NULL, cv_version = COALESCE(?, cv_version),
+               cover_letter_version = COALESCE(?, cover_letter_version),
+               updated_at = datetime('now')
+         WHERE id = ?
+        """,
+        (directory, mode, letter_state or "", cv_version, letter_version, app_id),
+    )
+    advance(conn, app_id, "CV_READY", note=f"documents generated ({mode})")
+    return app_id
+
+
+def set_review(conn: sqlite3.Connection, app_id: int, *, approved: bool,
+               note: str | None = None) -> None:
+    """Approve the generated documents (or take the approval back)."""
+    conn.execute(
+        "UPDATE applications SET reviewed_at = CASE WHEN ? THEN datetime('now') END,"
+        " review_note = ?, updated_at = datetime('now') WHERE id = ?",
+        (int(approved), note, app_id),
+    )
+
+
+def create_export_batch(conn: sqlite3.Connection, app_ids: list[int], *, name: str,
+                        csv_path: str | None = None, note: str | None = None) -> int:
+    """Freeze these applications into a named CSV batch and move them to
+    IN_PROCESS. The folder each one pointed at is snapshotted, so the CSV and
+    the batch agree even if a job is regenerated later."""
+    if not app_ids:
+        raise ValueError("an export batch needs at least one application")
+    if not name.strip():
+        raise ValueError("an export batch needs a name")
+    cur = conn.execute(
+        "INSERT INTO export_batches (name, csv_path, note) VALUES (?,?,?)",
+        (name.strip(), csv_path, note),
+    )
+    batch_id = int(cur.lastrowid or 0)
+    for position, app_id in enumerate(app_ids, start=1):
+        app = get(conn, int(app_id))
+        if app is None:
+            raise ValueError(f"no application {app_id}")
+        conn.execute(
+            "INSERT INTO export_batch_items (batch_id, application_id, position, generation_dir)"
+            " VALUES (?,?,?,?)",
+            (batch_id, int(app_id), position, app.get("generation_dir")),
+        )
+        advance(conn, int(app_id), "IN_PROCESS", note=f"exported in {name.strip()}")
+    return batch_id
+
+
+def set_batch_csv(conn: sqlite3.Connection, batch_id: int, csv_path: str) -> None:
+    conn.execute("UPDATE export_batches SET csv_path = ? WHERE id = ?", (csv_path, batch_id))
+
+
+def mark_batch_applied(conn: sqlite3.Connection, batch_id: int, *,
+                       exclude: tuple[int, ...] | list[int] = ()) -> int:
+    """Every application in the batch went out — except the ones in `exclude`,
+    which stay IN_PROCESS. Returns how many moved. Sets `date_applied` (via
+    `set_status`) and stamps the batch."""
+    batch = conn.execute("SELECT * FROM export_batches WHERE id = ?", (batch_id,)).fetchone()
+    if batch is None:
+        raise ValueError(f"no export batch {batch_id}")
+    skip_ids = {int(a) for a in exclude}
+    moved = 0
+    for item in batch_items(conn, batch_id):
+        app_id = int(item["application_id"])
+        if app_id in skip_ids:
+            continue
+        if advance(conn, app_id, "APPLIED", note=f"batch {batch['name']}"):
+            moved += 1
+    conn.execute("UPDATE export_batches SET applied_at = datetime('now') WHERE id = ?",
+                 (batch_id,))
+    return moved
+
+
+def batches(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Every export batch, newest first, with how many of it went out."""
+    return [dict(r) for r in conn.execute(
+        """
+        SELECT b.*, COUNT(i.application_id) AS size,
+               SUM(CASE WHEN a.status = 'IN_PROCESS' THEN 1 ELSE 0 END) AS in_process,
+               SUM(CASE WHEN a.status NOT IN ('IN_PROCESS', 'CV_READY', 'SHORTLISTED',
+                   'SKIPPED') THEN 1 ELSE 0 END) AS applied
+          FROM export_batches b
+          LEFT JOIN export_batch_items i ON i.batch_id = b.id
+          LEFT JOIN applications a ON a.id = i.application_id
+         GROUP BY b.id
+         ORDER BY b.id DESC
+        """
+    )]
+
+
+def batch_items(conn: sqlite3.Connection, batch_id: int) -> list[dict[str, Any]]:
+    return [dict(r) for r in conn.execute(
+        """
+        SELECT i.position, i.application_id, i.generation_dir AS exported_dir, a.*
+          FROM export_batch_items i JOIN applications a ON a.id = i.application_id
+         WHERE i.batch_id = ?
+         ORDER BY i.position
+        """,
+        (batch_id,),
+    )]
+
+
+def batch_of(conn: sqlite3.Connection, app_id: int) -> dict[str, Any] | None:
+    """The latest export batch an application went out in."""
+    r = conn.execute(
+        "SELECT b.* FROM export_batch_items i JOIN export_batches b ON b.id = i.batch_id"
+        " WHERE i.application_id = ? ORDER BY b.id DESC LIMIT 1",
+        (app_id,),
+    ).fetchone()
+    return dict(r) if r else None
+
+
+def exported_dirs(conn: sqlite3.Connection) -> set[str]:
+    """Folder names a CSV has pointed at. `apply tidy` leaves these in place."""
+    return {
+        str(r[0]).rstrip("/").split("/")[-1]
+        for r in conn.execute(
+            "SELECT generation_dir FROM export_batch_items WHERE generation_dir IS NOT NULL"
+        )
+    }
+
+
+def by_status(conn: sqlite3.Connection, statuses: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Applications in these statuses, with their posting's score, best first."""
+    marks = ",".join("?" * len(statuses))
+    return [dict(r) for r in conn.execute(
+        f"""
+        SELECT a.*, m.score, m.label, m.reasons_plus, m.reasons_minus, j.url AS job_url,
+               j.posted_at, j.country, j.remote_status
+          FROM applications a
+          LEFT JOIN job_matches m ON m.job_id = a.job_id
+          LEFT JOIN jobs j ON j.id = a.job_id
+         WHERE a.status IN ({marks})
+         ORDER BY COALESCE(m.score, 0) DESC, a.id
+        """,
+        statuses,
     )]

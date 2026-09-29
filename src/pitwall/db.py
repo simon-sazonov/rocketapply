@@ -21,7 +21,7 @@ from typing import Any, NamedTuple
 
 from .config import Settings, get_settings
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 DDL = """
 PRAGMA journal_mode = WAL;
@@ -501,8 +501,60 @@ CREATE TABLE IF NOT EXISTS app_state (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- v10: RocketApply. A CSV export is a named batch of applications, so the ones
+-- that went out together can be marked applied together. `generation_dir` is
+-- the folder the CSV pointed at, frozen at export: `apply tidy` leaves those
+-- folders where they are, so a path in a CSV never goes stale.
+CREATE TABLE IF NOT EXISTS export_batches (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    csv_path    TEXT,
+    created_at  TEXT DEFAULT (datetime('now')),
+    applied_at  TEXT,
+    note        TEXT
+);
+CREATE TABLE IF NOT EXISTS export_batch_items (
+    batch_id        INTEGER NOT NULL REFERENCES export_batches(id) ON DELETE CASCADE,
+    application_id  INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    position        INTEGER NOT NULL,
+    generation_dir  TEXT,
+    PRIMARY KEY (batch_id, application_id)
+);
+CREATE INDEX IF NOT EXISTS ix_export_items_app ON export_batch_items(application_id);
+
+-- v10: a drafted LinkedIn note to one person about one application. Drafts
+-- only — nothing in the codebase sends them. `person_key` is the profile URL
+-- when there is one, else the lower-cased name.
+CREATE TABLE IF NOT EXISTS outreach_notes (
+    id              INTEGER PRIMARY KEY,
+    application_id  INTEGER REFERENCES applications(id) ON DELETE CASCADE,
+    person_key      TEXT NOT NULL,
+    person_name     TEXT,
+    person_headline TEXT,
+    profile_url     TEXT,
+    kind            TEXT NOT NULL DEFAULT 'connection_note',
+    text            TEXT NOT NULL,
+    edited          INTEGER DEFAULT 0,
+    checks          TEXT,                 -- JSON array of gates it failed, [] when clean
+    model           TEXT,
+    prompt_version  TEXT,
+    tokens          INTEGER,
+    created_at      TEXT DEFAULT (datetime('now')),
+    updated_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE (application_id, person_key, kind)
+);
+
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 """
+
+#: v9 -> v10: what RocketApply generated for an application and whether it was
+#: reviewed. `generation_dir` is the application folder under output/,
+#: `generation_mode` is cv | cv_letter | cv_letter_audit, `letter_state` is the
+#: pipeline's clean | review | unsent | "" (no letter).
+APPLICATION_GENERATION_COLUMNS: tuple[str, ...] = (
+    "generation_dir", "generation_mode", "generated_at", "letter_state",
+    "reviewed_at", "review_note",
+)
 
 #: v5 -> v6: what normalisation extracts from a posting, stored on the posting.
 #: Facts about the job, not about the owner — those live in `job_matches`.
@@ -705,6 +757,10 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
       the agency flag. (Sponsor registers are applied at scoring time.)
     * v8 -> v9 added `job_review.feedback_reason` and `feedback_note`: why a
       job was rated a bad match.
+    * v9 -> v10 added RocketApply's lifecycle: `export_batches`,
+      `export_batch_items`, `outreach_notes`, the generation/review columns on
+      `applications`, and `job_matches.missing_languages` (languages used to be
+      stored in `missing_skills`).
 
     `CREATE TABLE IF NOT EXISTS` covers a fresh database; an existing 2.0 MB file
     only ever needs the ALTERs, which is why each one is guarded rather than
@@ -742,6 +798,13 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     # v8 -> v9: why a job was rated a bad match, in the owner's words.
     _add_column(conn, "job_review", "feedback_reason", "TEXT")
     _add_column(conn, "job_review", "feedback_note", "TEXT")
+    # v9 -> v10: what was generated for an application, whether it was reviewed,
+    # and the languages a posting asks for that the owner lacks.
+    for column in APPLICATION_GENERATION_COLUMNS:
+        _add_column(conn, "applications", column, "TEXT")
+    _add_column(conn, "job_matches", "missing_languages", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_applications_status ON applications(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_applications_job ON applications(job_id)")
 
 
 def vacuum(conn: sqlite3.Connection) -> None:

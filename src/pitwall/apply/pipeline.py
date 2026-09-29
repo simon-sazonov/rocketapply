@@ -194,10 +194,15 @@ def generate_application(
         step("truth")
         # Both opinions on what is missing: the analyzer's and the job search's
         # own scorer. `build_truth` verifies each against the profile first.
+        # The scorer's languages are read too: before v10 they were stored in
+        # `missing_skills`, and that is what kept "fluent German" out of letters.
+        scored = row.get("match") or {}
         truth = build_truth(
             profile,
             missing_requirements=[
-                *matched.missing_terms, *(row.get("match", {}).get("missing_skills") or [])
+                *matched.missing_terms,
+                *(scored.get("missing_skills") or []),
+                *(scored.get("missing_languages") or []),
             ],
             job=row,
         )

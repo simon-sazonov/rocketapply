@@ -78,20 +78,23 @@ def save_match(conn: sqlite3.Connection, job_id: int, *, config_hash: str, passe
         """
         INSERT INTO job_matches (job_id, config_hash, passed, filter_reasons, score, label,
             components, reasons_plus, reasons_minus, matched_skills, missing_skills,
-            visa_fit, scored_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'))
+            missing_languages, visa_fit, scored_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'))
         ON CONFLICT(job_id) DO UPDATE SET
             config_hash=excluded.config_hash, passed=excluded.passed,
             filter_reasons=excluded.filter_reasons, score=excluded.score,
             label=excluded.label, components=excluded.components,
             reasons_plus=excluded.reasons_plus, reasons_minus=excluded.reasons_minus,
             matched_skills=excluded.matched_skills, missing_skills=excluded.missing_skills,
+            missing_languages=excluded.missing_languages,
             visa_fit=excluded.visa_fit, scored_at=excluded.scored_at
         """,
         (job_id, config_hash, int(passed), json.dumps(reasons, ensure_ascii=False),
          match.score, match.label, json.dumps(components),
          json.dumps(match.plus, ensure_ascii=False), json.dumps(match.minus, ensure_ascii=False),
-         json.dumps(match.matched_skills), json.dumps(match.missing_skills), match.visa_fit),
+         json.dumps(match.matched_skills), json.dumps(match.missing_skills),
+         json.dumps(getattr(match, "missing_languages", []), ensure_ascii=False),
+         match.visa_fit),
     )
 
 

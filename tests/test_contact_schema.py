@@ -41,9 +41,10 @@ def seeded(repos):
 
 def test_schema_version_is_current(repos):
     # 5 added contact enrichment; 6 (the job search), 7 (source facts and
-    # search cursors), 8 (grading facts) and 9 (rating reasons) build on it unchanged.
+    # search cursors), 8 (grading facts), 9 (rating reasons) and 10 (RocketApply's
+    # export batches and notes) build on it unchanged.
     row = repos.conn.execute("SELECT MAX(version) v FROM schema_version").fetchone()
-    assert row["v"] == SCHEMA_VERSION == 9
+    assert row["v"] == SCHEMA_VERSION == 10
 
 
 def test_the_four_tables_exist(repos):

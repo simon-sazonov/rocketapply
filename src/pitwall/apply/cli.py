@@ -571,9 +571,10 @@ def generate(
             get_conn(get_settings()), job=result.job, company=result.company,
             cv_version=result.cv_pdf.name if result.cv_pdf else "",
             letter_version=result.letter_path.name if result.letter_path else "",
-            directory=result.directory,
+            directory=result.directory, letter_state=result.letter_state,
+            mode="cv_letter" if result.letter_path else "cv",
         )
-        console.print(f"  [green]✓[/] tracked as application {application_id} (SHORTLISTED)")
+        console.print(f"  [green]✓[/] tracked as application {application_id} (CV_READY)")
 
     console.print(f"\n  wrote [bold]{result.directory}[/]  [dim]({result.tokens} tokens)[/]")
     if result.directory is not None:

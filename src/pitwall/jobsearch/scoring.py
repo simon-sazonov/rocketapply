@@ -63,6 +63,11 @@ class Match:
     minus: list[str] = field(default_factory=list)
     matched_skills: list[str] = field(default_factory=list)
     missing_skills: list[str] = field(default_factory=list)
+    #: Languages the posting requires at a level the owner does not have, as
+    #: "German" or "Italian (you have A2)". Kept apart from `missing_skills`,
+    #: where they used to land by accident — the letter's truth layer still
+    #: forbids claiming them, it just reads both lists.
+    missing_languages: list[str] = field(default_factory=list)
     visa_fit: str = "unknown"      # ok | explicit | likely | unknown | no
 
 
@@ -338,18 +343,18 @@ def score(job: dict[str, Any], cfg: JobSearchConfig, owned: dict[str, OwnedSkill
     value = sum(weights[name] * comp.value for name, comp in components.items()) / total * 100
 
     cost = 0.0
-    missing: list[str] = []
+    missing_langs: list[str] = []
     for lang in _list(job.get("languages_required")):
         level = cfg.language_level(lang)
         share = LEVEL_SHARE.get(level, 0.0)
         name = LANGUAGE_NAMES.get(lang, lang)
         if share >= 1.0:
-            missing.append(f"{name} (you have {level})" if level else name)
+            missing_langs.append(f"{name} (you have {level})" if level else name)
         elif share > 0:
             minus.append(f"? Asks for {name} — you have {level}")
         cost += share
-    if missing:
-        minus.append("- Asks for " + " and ".join(missing))
+    if missing_langs:
+        minus.append("- Asks for " + " and ".join(missing_langs))
     value -= min(2.0, cost) * LANGUAGE_PENALTY
     masters = "masters" in (job.get("education_required"), job.get("education_preferred"))
     if masters and cfg.degree in ("masters", "phd"):
@@ -379,5 +384,6 @@ def score(job: dict[str, Any], cfg: JobSearchConfig, owned: dict[str, OwnedSkill
         minus=minus,
         matched_skills=matched,
         missing_skills=missing,
+        missing_languages=missing_langs,
         visa_fit=visa_fit,
     )

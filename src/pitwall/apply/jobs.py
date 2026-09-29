@@ -76,8 +76,8 @@ def load_job(job_id: int, conn: sqlite3.Connection | None = None) -> dict[str, A
         conn.execute("SELECT * FROM job_matches WHERE job_id = ?", (job_id,)).fetchone()
     )
     if match:
-        for key in ("matched_skills", "missing_skills", "reasons_plus", "reasons_minus",
-                    "filter_reasons", "components", "ai_reasons"):
+        for key in ("matched_skills", "missing_skills", "missing_languages", "reasons_plus",
+                    "reasons_minus", "filter_reasons", "components", "ai_reasons"):
             if isinstance(match.get(key), str):
                 try:
                     match[key] = json.loads(match[key])
@@ -148,10 +148,13 @@ def existing_application(
     Worth a warning before generating another: two applications to the same
     company should be a deliberate choice, not an accident.
     """
+    from ..jobsearch.tracker import at_company
+
     conn = _connection(conn)
-    rows = conn.execute(
-        "SELECT id, title, status, date_applied FROM applications "
-        "WHERE lower(company_name) = lower(?) ORDER BY id DESC",
-        (company,),
-    ).fetchall()
-    return [dict(r) for r in rows]
+    # Normalised, so "Anthropic PBC" and "anthropic" are the same employer —
+    # the tracker's rule, not a second one.
+    return [
+        {k: a.get(k) for k in ("id", "title", "status", "date_applied")}
+        for a in at_company(conn, company)
+        if a.get("status") != "SKIPPED"
+    ]

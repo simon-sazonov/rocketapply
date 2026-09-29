@@ -1116,3 +1116,22 @@ def test_a_language_costs_what_your_level_says(asked, cost, line):
     assert plain.score - asking.score == pytest.approx(cost)
     if line:
         assert line in asking.minus
+
+
+def test_missing_languages_are_not_reported_as_missing_skills():
+    """Until v10 the language loop reused the skills list's variable, so every
+    posting asking for German stored `["German"]` as its missing *skills* —
+    2,401 of them — and the real missing skills were lost."""
+    from pitwall.jobsearch.scoring import score
+    from pitwall.jobsearch.settings import JobSearchConfig
+    from pitwall.jobsearch.skills import vocabulary
+
+    cfg = JobSearchConfig.model_validate({"languages_spoken": ["en:C2", "it:A2"]})
+    job = {"title": "Data Scientist", "role_labels": '["DATA_SCIENCE"]',
+           "skills": '["Kubernetes"]', "countries": "[]", "cities": "[]",
+           "languages_required": '["de", "it"]'}
+    m = score(job, cfg, {}, vocabulary())
+    assert m.missing_languages == ["German", "Italian (you have A2)"]
+    assert "German" not in m.missing_skills
+    assert "Kubernetes" in m.missing_skills
+    assert "- Asks for German and Italian (you have A2)" in m.minus
