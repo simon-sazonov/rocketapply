@@ -86,9 +86,11 @@ def _person_card(person: dict[str, Any], app: dict[str, Any]) -> None:
     with st.container(border=True):
         top = st.columns([3, 1.1], vertical_alignment="center")
         email = person.get("email")
+        about = person.get("current_title") or person.get("headline") or ""
+        about = about if len(about) <= 110 else about[:107].rsplit(" ", 1)[0] + "…"
         top[0].html(
             f"<b>{html.escape(person.get('full_name') or '?')}</b> · "
-            f"<span class='ra-dim'>{html.escape(person.get('headline') or person.get('current_title') or '')}</span>"
+            f"<span class='ra-dim'>{html.escape(about)}</span>"
             + (f"<br><span class='ra-chip {'ok' if person.get('email_status') == 'verified' else 'accent'}'>"
                f"{html.escape(email)} · {person.get('email_status')}</span>" if email else ""))
         if person.get("profile_url"):
@@ -204,6 +206,24 @@ def people_panel(app: dict[str, Any]) -> None:
         _people_progress(company)
     if run is not None and run.error:
         st.error(f"The search stopped: {run.error}")
+    if found:
+        from pitwall.jobsearch.people import employer_domain, set_employer_domain
+
+        known = employer_domain(company)
+        d1, d2 = st.columns([2, 1], vertical_alignment="bottom")
+        typed = d1.text_input(
+            "Their email domain", value=known, placeholder="e.g. waymo.com",
+            key=f"dom_{company}",
+            help="Find email guesses addresses from the company's pattern at this domain. "
+                 "It is looked up automatically when local search (SearXNG) is running; "
+                 "otherwise type it once here.")
+        if d2.button("Save domain", key=f"domsave_{company}", disabled=not typed or typed == known,
+                     width="stretch"):
+            try:
+                st.toast(f"Using {set_employer_domain(company, typed)} for {company}")
+            except ValueError as exc:
+                st.error(str(exc))
+            st.rerun()
 
     for group in GROUPS:
         people = [p for p in found if p["group"] == group]

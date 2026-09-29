@@ -137,3 +137,32 @@ def test_known_in_pitwall_matches_the_normalised_employer(repos):
 
 def test_an_employer_never_searched_has_nobody(settings):
     assert people_at("Nobody GmbH", settings=settings) == []
+
+
+@pytest.mark.parametrize("title, found_by, group", [
+    ("Senior Talent Partner", {"hiring"}, "recruiter"),
+    ("Engineering Manager, Perception", {"peer"}, "hiring"),
+    ("SWE-II", {"hiring"}, "peer"),
+    ("Research Engineer", {"hiring"}, "peer"),
+    ("Engineering Manager", {"alumni", "hiring"}, "alumni"),
+    ("", {"recruiter"}, "recruiter"),
+    (None, set(), "hiring"),
+])
+def test_a_persons_own_title_decides_their_group(title, found_by, group):
+    from pitwall.jobsearch.people import group_for
+
+    assert group_for(title, found_by) == group
+
+
+def test_the_owner_can_tell_the_email_chain_an_employers_domain(settings, stub_search):
+    from pitwall.jobsearch.people import employer_domain, set_employer_domain
+
+    assert set_employer_domain("Anthropic", "https://www.anthropic.com/careers",
+                               settings=settings) == "anthropic.com"
+    find_people("Anthropic", job_title="Research Engineer", settings=settings, profile=PROFILE)
+    assert employer_domain("Anthropic", settings=settings) == "anthropic.com", \
+        "carried into the employer list, so the search's sync keeps it"
+    assert set_employer_domain("Anthropic", "anthropic.ai", settings=settings) == "anthropic.ai"
+    assert employer_domain("Anthropic", settings=settings) == "anthropic.ai", "override wins"
+    with pytest.raises(ValueError):
+        set_employer_domain("Anthropic", "not a domain", settings=settings)

@@ -323,3 +323,18 @@ def test_the_interest_sentence_is_never_operated_on():
     from pitwall.apply.truth import NO_SURGERY
 
     assert "DOMAIN_IN_INTEREST" in NO_SURGERY
+
+
+def test_a_short_acronym_is_matched_as_written():
+    """The posting wanted an MS; the letter said "110 ms per Monte Carlo race".
+    That sent a real letter to DO_NOT_SEND on 29 Sep 2026."""
+    from pitwall.apply.loader import load_profile
+    from pitwall.apply.truth import build_truth
+
+    truth = build_truth(load_profile(), missing_requirements=["MS"])
+    if "MS" not in truth.forbidden_claims:
+        import pytest
+
+        pytest.skip("the profile itself records an MS")
+    assert truth.forbidden_hits("I reached 110 ms per Monte Carlo race.") == []
+    assert truth.forbidden_hits("I hold an MS in data science.")

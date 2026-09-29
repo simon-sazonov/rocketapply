@@ -39,16 +39,42 @@ class EditResult:
     kept_original: pathlib.Path | None = None
 
 
-def gate_text(text: str, *, profile: Any, job: dict[str, Any] | None = None
-              ) -> tuple[str, list[str], list[str]]:
-    """(state, violations, banned) for a letter's text — the pipeline's rule."""
+def _analysed_gaps(job: dict[str, Any], profile: Any, router: Any = None) -> list[str]:
+    """What the posting asks for that the profile lacks, as generation saw it.
+
+    The analysis is cached by prompt, so for a job that was generated this is a
+    cache hit and costs nothing. Without it an edit would be gated more loosely
+    than the draft was. Never fatal: no model, no cache — the scorer's gaps
+    still apply.
+    """
+    try:
+        from .analyzer import analyze_job
+        from .matcher import match
+
+        if router is None:
+            from ..config import get_settings
+            from .llm import TaskRouter
+
+            settings = get_settings()
+            router = TaskRouter(settings=settings,
+                                cache_dir=pathlib.Path(settings.cache_dir) / "apply")
+        return list(match(analyze_job(job, router), profile).missing_terms)
+    except Exception:  # noqa: BLE001 - see docstring
+        return []
+
+
+def gate_text(text: str, *, profile: Any, job: dict[str, Any] | None = None,
+              router: Any = None) -> tuple[str, list[str], list[str]]:
+    """(state, violations, banned) for a letter's text — the pipeline's rule,
+    with the same do-not-claim list the pipeline built for this posting."""
     from .letter import banned_phrase_hits
     from .truth import build_truth, severity
 
     scored = (job or {}).get("match") or {}
     truth = build_truth(
         profile,
-        missing_requirements=[*(scored.get("missing_skills") or []),
+        missing_requirements=[*(_analysed_gaps(job, profile, router) if job else []),
+                              *(scored.get("missing_skills") or []),
                               *(scored.get("missing_languages") or [])],
         job=job,
     )

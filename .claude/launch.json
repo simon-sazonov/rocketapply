@@ -57,6 +57,7 @@
       "runtimeExecutable": "env",
       "runtimeArgs": [
         "DB_PATH=data/verify/pitwall.db",
+        "SEARCH_PROVIDER_CHAIN=ddgs",
         ".venv/bin/python",
         "-m",
         "streamlit",

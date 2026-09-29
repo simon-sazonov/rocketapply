@@ -34,9 +34,9 @@ from ..db import QuotaRepo, Repos, get_conn, init_schema, open_repos
 from .companies import normalize_company
 
 __all__ = [
-    "GROUPS", "GROUP_LABELS", "ContactRole", "employer_settings", "employer_repos",
+    "GROUPS", "GROUP_LABELS", "ContactRole", "employer_settings", "employer_repos", "group_for",
     "contact_roles", "roles_for_job", "upsert_employer", "find_people", "people_at",
-    "known_in_pitwall",
+    "known_in_pitwall", "set_employer_domain", "employer_domain",
 ]
 
 GROUPS = ("recruiter", "hiring", "peer", "alumni")
@@ -59,6 +59,29 @@ DEFAULT_ROLES = (
 )
 
 _PARENS = re.compile(r"\s*[\(\[].*?[\)\]]\s*")
+
+#: A person's own title outranks the search that found them: web search is
+#: loose (without operators especially), and "Engineering Manager at Waymo"
+#: turns up the SWE-II who reports to one. Alumni stay alumni — a shared school
+#: is the stronger opening whatever their title.
+_TITLE_GROUPS = (
+    ("recruiter", re.compile(r"recruit|talent|sourc(er|ing)|people partner|\bhr\b", re.I)),
+    ("hiring", re.compile(r"\b(manager|head|director|lead|vp|vice president|chief|founder)\b",
+                          re.I)),
+    ("peer", re.compile(r"engineer|scientist|researcher|developer|\bswe\b|analyst|"
+                        r"member of technical staff|\bmts\b", re.I)),
+)
+
+
+def group_for(title: str | None, found_by: set[str]) -> str:
+    """Which group a person belongs in: alumni if an alumni search found them,
+    else what their own title says, else the search that found them."""
+    if "alumni" in found_by:
+        return "alumni"
+    for group, pattern in _TITLE_GROUPS:
+        if title and pattern.search(title):
+            return group
+    return next((g for g in GROUPS if g in found_by), "hiring")
 
 
 @dataclass
@@ -307,8 +330,10 @@ def people_at(company: str, *, settings: Settings | None = None) -> list[dict[st
     out = []
     for pid, person in people.items():
         best = (emails.get(pid) or [None])[0]
-        person["groups"] = [g for g in GROUPS if g in person["groups"]] or ["hiring"]
-        person["group"] = person["groups"][0]
+        found_by = set(person["groups"])
+        person["groups"] = [g for g in GROUPS if g in found_by]
+        person["group"] = group_for(person.get("current_title") or person.get("headline"),
+                                    found_by)
         person["email"] = best.get("email") if best else None
         person["email_status"] = best.get("status") if best else None
         person.pop("role_title", None)
@@ -330,3 +355,44 @@ def known_in_pitwall(conn: sqlite3.Connection, company: str, *, limit: int = 20
     ).fetchall()
     return [dict(r) for r in rows if normalize_company(r["current_company"] or "") == target
             ][:limit]
+
+
+def employer_domain(company: str, *, settings: Settings | None = None) -> str:
+    """The email domain the free chain will use for this employer, if known."""
+    repos = employer_repos(settings)
+    row = repos.conn.execute("SELECT id, domain FROM companies WHERE lower(name) = lower(?)",
+                             (company.strip(),)).fetchone()
+    if row is None:
+        return ""
+    domains = repos.domains.for_company(int(row["id"]))
+    manual = [d["domain"] for d in domains if int(d["manual_override"] or 0)]
+    return str((manual or [d["domain"] for d in domains] or [row["domain"] or ""])[0])
+
+
+def set_employer_domain(company: str, domain: str, *,
+                        settings: Settings | None = None) -> str:
+    """Tell the free email chain which domain this employer's addresses use.
+
+    Without SearXNG the chain cannot look an employer's site up, and a job
+    posting's own host (careers.withwaymo.com) is not where the staff's mail
+    lives — so the owner's answer is taken, written to the employer list for
+    the next search and, if the employer is already known, set as PitWall's
+    manual override (the first thing the domain step reads).
+    """
+    from ..enrich.domains import set_manual_domain
+
+    settings = settings or get_settings()
+    repos = employer_repos(settings)
+    row = repos.conn.execute("SELECT id FROM companies WHERE lower(name) = lower(?)",
+                             (company.strip(),)).fetchone()
+    if row is not None:
+        cleaned = set_manual_domain(repos, int(row["id"]), domain)
+    else:
+        from ..enrich.domains import domain_from_url, registrable_domain
+
+        value = domain.strip()
+        cleaned = (domain_from_url(value) if "/" in value else registrable_domain(value)) or ""
+        if not cleaned:
+            raise ValueError(f"{domain!r} is not a usable domain")
+    upsert_employer(company, domain=cleaned, settings=settings)
+    return cleaned

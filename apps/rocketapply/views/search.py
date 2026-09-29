@@ -376,7 +376,7 @@ table, side = st.columns([2.15, 1], gap="medium")
 with table:
     event = st.dataframe(
         frame, key="results", on_select="rerun", selection_mode="multi-row", hide_index=True,
-        height=620, column_order=["Fit", "Role", "Company", "Where", "Posted", "Visa", "Salary",
+        height=min(620, 42 + 35 * len(frame)), column_order=["Fit", "Role", "Company", "Where", "Posted", "Visa", "Salary",
                                   "Status", "Why", "Link"],
         column_config={
             "Fit": st.column_config.ProgressColumn("Fit", min_value=0, max_value=100,

@@ -135,6 +135,7 @@ def detail(app: dict) -> None:
 
 def export_section(approved: list[dict]) -> None:
     st.markdown("#### Export")
+    last_export()
     with st.container(border=True):
         if not approved:
             st.caption("Approve applications above; they are exported together as one CSV and "
@@ -153,6 +154,10 @@ def export_section(approved: list[dict]) -> None:
             st.rerun()
         c2.caption("One row per application: company, role, score, why it fits, the link to "
                    "apply at, and the full path of every file to upload.")
+
+
+def last_export() -> None:
+    """The CSV just written — shown even when exporting emptied the list above."""
     last = st.session_state.get("last_export")
     if last and pathlib.Path(last).exists():
         p = pathlib.Path(last)
@@ -176,9 +181,7 @@ apps = data.applications("CV_READY")
 if not apps:
     components.empty("Nothing to review.",
                      "Generated applications arrive here. Start from Selected.")
-    last = st.session_state.get("last_export")
-    if last:
-        export_section([])
+    last_export()
     st.page_link("views/selected.py", label="Go to Selected", icon=":material/checklist:")
     st.stop()
 

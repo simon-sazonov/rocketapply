@@ -431,9 +431,13 @@ class TruthLayer:
         out = []
         for term in self.forbidden_claims:
             pattern = rf"\b{re.escape(term)}\b"
-            if not re.search(pattern, text, re.I):
+            # A short all-caps acronym is matched as written: "MS" (the degree a
+            # posting asks for) is not "110 ms per race". Found 29 Sep 2026, when
+            # exactly that sent a Waymo letter to DO_NOT_SEND.
+            flags = 0 if _ACRONYM.fullmatch(term) else re.I
+            if not re.search(pattern, text, flags):
                 continue
-            if not re.search(pattern, rest, re.I):
+            if not re.search(pattern, rest, flags):
                 out.append(Violation(
                     "DOMAIN_IN_INTEREST",
                     f"{term} — named as what attracts you rather than as something "
@@ -585,6 +589,10 @@ class TruthLayer:
 
     def fact(self, fact_id: str) -> Fact | None:
         return next((f for f in self.allowed_facts if f.id == fact_id), None)
+
+
+#: Two to four capitals: MS, AWS, GCP, SQL — case is the meaning.
+_ACRONYM = re.compile(r"[A-Z]{2,4}")
 
 
 def _loose(phrase: str) -> str:
