@@ -34,6 +34,42 @@
         "true"
       ],
       "port": 8511
+    },
+    {
+      "name": "rocketapply",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": [
+        "-m",
+        "streamlit",
+        "run",
+        "apps/rocketapply/app.py",
+        "--server.port",
+        "8504",
+        "--server.headless",
+        "true",
+        "--server.runOnSave",
+        "true"
+      ],
+      "port": 8504
+    },
+    {
+      "name": "rocketapply-verify",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DB_PATH=data/verify/pitwall.db",
+        ".venv/bin/python",
+        "-m",
+        "streamlit",
+        "run",
+        "apps/rocketapply/app.py",
+        "--server.port",
+        "8512",
+        "--server.headless",
+        "true",
+        "--server.runOnSave",
+        "true"
+      ],
+      "port": 8512
     }
   ]
 }

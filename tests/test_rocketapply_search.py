@@ -61,10 +61,14 @@ def test_a_vacancy_three_sources_carry_is_one_row_led_by_the_ats(searched):
             if r["title"] == "Graduate Machine Learning Engineer"]
     assert len(rows) == 1
     detail = job_detail(searched, rows[0]["id"])
-    assert detail["source_kind"] == "ats_json"
-    sources = [m["source"] for m in detail["members"]]
-    assert {"greenhouse:apex", "adzuna", "arbeitnow"} <= set(sources)
-    assert sources[0] == "greenhouse:apex", "most direct source first"
+    assert detail["source_kind"] == "ats_json", "the most direct source is the Apply link"
+    # The detail panel lists the same sources the inbox groups under this vacancy
+    # (which copies merge is dedupe's business, tested with it).
+    inbox = {c["cluster_id"]: c for c in load_inbox(searched).view("all")}
+    expected = {m["url"] for m in inbox[detail["cluster_id"]]["members"]}
+    assert {m["url"] for m in detail["members"]} >= expected
+    assert len(detail["members"]) >= 2
+    assert detail["members"][0]["source"] == "greenhouse:apex", "most direct source first"
     assert detail["description"], "the detail panel is where the description is read"
 
 

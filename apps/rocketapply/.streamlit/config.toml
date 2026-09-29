@@ -1,0 +1,27 @@
+# RocketApply's own theme. Streamlit loads this file because it sits beside the
+# main script (apps/rocketapply/app.py), and it overrides the repo-root
+# .streamlit/config.toml — which holds no [theme], so nothing of PitWall's dark
+# palette reaches this app. Tokens mirror rocket/theme.py; keep them together.
+[theme]
+base = "light"
+primaryColor = "#2563EB"              # one calm accent
+backgroundColor = "#FAFAF9"           # warm off-white, never pure white
+secondaryBackgroundColor = "#F2F2F0"  # widgets, cards
+textColor = "#1C1917"
+linkColor = "#2563EB"
+linkUnderline = false
+borderColor = "#E7E5E4"
+dataframeBorderColor = "#E7E5E4"
+dataframeHeaderBackgroundColor = "#F5F5F4"
+showWidgetBorder = true
+baseRadius = "0.6rem"
+buttonRadius = "0.5rem"
+baseFontSize = 15
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap, monospace"
+headingFontWeights = [650, 600, 600, 600, 600, 600]
+greenColor = "#15803D"
+orangeColor = "#C2410C"
+redColor = "#B91C1C"
+blueColor = "#2563EB"

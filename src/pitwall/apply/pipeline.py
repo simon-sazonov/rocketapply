@@ -107,6 +107,7 @@ def generate_application(
     router: Any = None,
     progress: Stage | None = None,
     on_event: Any = None,
+    fresh: bool = False,
 ) -> ApplicationResult:
     """Read a posting, decide what is true, and write an application.
 
@@ -182,6 +183,12 @@ def generate_application(
         )
 
     router_ref["router"] = router
+    if fresh:
+        # Regenerate: ask the model again for the letter rather than replaying
+        # the cached answer to the identical prompt. The posting's analysis
+        # stays cached — it cannot have changed.
+        router.fresh_tasks = frozenset(
+            router.fresh_tasks | {"narrative_plan", "letter_write", "letter_repair"})
     if (progress is not None or on_event is not None) and router.on_wait is None:
         def waiting(provider: str, seconds: float, attempt: int) -> None:
             # Groq's free tier is 8,000 tokens a minute and the letter prompt is

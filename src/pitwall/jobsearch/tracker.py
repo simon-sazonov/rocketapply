@@ -298,6 +298,19 @@ def record_generation(conn: sqlite3.Connection, *, job_id: int, directory: str |
     return app_id
 
 
+def set_generation(conn: sqlite3.Connection, app_id: int, *, directory: str,
+                   letter_state: str, letter_version: str | None = None) -> None:
+    """The documents moved or changed (a hand edit re-filed them): point the
+    application at them again. Any approval is taken back — it was of the old
+    text."""
+    conn.execute(
+        "UPDATE applications SET generation_dir = ?, letter_state = ?,"
+        " cover_letter_version = COALESCE(?, cover_letter_version), reviewed_at = NULL,"
+        " updated_at = datetime('now') WHERE id = ?",
+        (directory, letter_state, letter_version, app_id),
+    )
+
+
 def set_review(conn: sqlite3.Connection, app_id: int, *, approved: bool,
                note: str | None = None) -> None:
     """Approve the generated documents (or take the approval back)."""

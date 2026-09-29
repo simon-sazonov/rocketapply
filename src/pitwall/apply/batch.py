@@ -292,6 +292,7 @@ def run_batch(
     on_event: Callable[..., None] | None = None,
     record: bool = False,
     hints: Mapping[int, str] | None = None,
+    fresh: bool = False,
 ) -> list[BatchRow]:
     """This shard's jobs, one after another, never stopping for one failure.
 
@@ -373,6 +374,8 @@ def run_batch(
             extra["on_event"] = on_event
         if hints and hints.get(job_id):
             extra["hint"] = hints[job_id]
+        if fresh:
+            extra["fresh"] = True
         try:
             result = generate(job_id, out=out, cv=cv, letter=letter, audit=audit, **extra)
             row.company = result.company
