@@ -1,0 +1,133 @@
+# layout.yaml — the FROZEN CV frame, measured from
+# "Simon Sazonov CV Data Scientist.pdf" (16 Sep 2026).
+#
+# MEASUREMENT NOTE — this differs from the draft spec and matters.
+# The spec models line breaks as chars_per_line = 97 and derives line counts by
+# division. Real greedy word-wrap does not fill lines to the character. Measured
+# against the actual PDF, the right column wraps at ~99 characters but a bullet
+# only reaches that when the words happen to fit. Concretely:
+#   freedomcode.b3 is 193 chars and the spec's table calls it 2 lines.
+#   In the PDF it renders as THREE lines.
+# So line counts here are MEASURED from the PDF, not computed, and
+# validate_profile.py wraps text greedily instead of dividing. Trust the wrapper.
+
+page:
+  size: A4
+  max_pages: 1
+  column: right                      # section labels sit in the narrow left gutter
+  wrap_width_chars: 99               # calibrated so the wrapper reproduces the PDF
+  wrap_width_safe: 95                # what the validator enforces, for headroom
+
+# ── GEOMETRY — MEASURED off the reference PDF, 24 Sep 2026 ──
+# Points, A4. Not guessed and not solved from a band: read off
+# "screenshot of cv.png" by locating the white page rectangle, then measuring
+# the section rules, the column edges and two known lines of ophis.b1.
+#
+# The body size is pinned by those two lines. ophis.b1 wraps as
+#   "…with nine online-"  (438.1pt measured)  /  "safe features … max-F1)"  (315.1pt)
+# and 9.9pt DM Sans reproduces both to within 1pt, where 9.5pt is 17pt short and
+# 10.3pt is 19pt long. So 9.9pt, not a round number chosen for looking tidy.
+#
+#   margin_left   34.2   gutter labels and the section rules both start here
+#   content_x    106.3   org names, project names, contact lines
+#   bullet text  124.5   i.e. bullet_indent 18.2 from content_x
+#   text right   ~580    so margin_right 15.28
+#   bullet_width 455.5   the number that decides every line count on the page
+#
+# CHECKED: ReportLab's own paragraph engine reproduces all seven declared
+# rendered_lines at this geometry, and keeps all 44 project bullets on one line.
+# `pitwall apply calibrate` re-runs that check and fails loudly on any drift.
+geometry:
+  page_width: 595.28
+  page_height: 841.89
+  margin_left: 34.2
+  margin_right: 15.28
+  margin_top: 30
+  margin_bottom: 24
+  gutter_width: 60          # 34.2 + 60 + 12 = 106.3, the content column
+  gutter_gap: 12.1
+  bullet_indent: 18.2       # content_x to the start of the bullet's text
+  rule_bleed_right: 14.78   # the section rules run past the text, to x=594.5
+  # Vertical rhythm, measured the same way as the horizontal. The original's
+  # baseline-to-baseline distance is ~15.2pt (skills row 2 wraps 145.0 -> 159.4,
+  # ophis.b1 wraps 236.1 -> 250.6), and its section rules sit 3.4pt under the
+  # last line of the block above and 5.3pt over the first line of the block below.
+  header_gap: 19            # name block to the first contact line
+  section_gap: 3.5          # last line of a section to the rule under it
+  rule_gap: 5.3             # rule to the first line of the next section
+  type:
+    body:             {font: DMSans,            size: 9.9,  leading: 15.2}
+    body_bold:        {font: DMSans-Bold,       size: 9.9,  leading: 15.2}
+    body_italic:      {font: DMSans-Italic,     size: 9.9,  leading: 15.2}
+    body_bold_italic: {font: DMSans-BoldItalic, size: 9.9,  leading: 15.2}
+    heading:          {font: DMSans-Bold,       size: 9.9,  leading: 15.2}
+    gutter:           {font: Arimo-Bold,        size: 8.5,  leading: 10.5}
+    name:             {font: ArchivoBlack,      size: 22.5, leading: 25}
+
+section_order: [contact, skills, experience, projects, education]
+
+sections:
+  - id: contact
+    fixed: true
+
+  - id: skills
+    fixed: false
+    rows:
+      # 13 legitimate items, ~100 chars against a 95-char budget: membership is
+      # effectively fixed (at most one item drops). Tailoring here is ORDER —
+      # the job-relevant language leads. Rows 2 and 3 carry the real variation.
+      - {id: row.programming, lines: 1, max_chars: 95,  label: null, varies: order_only}
+      - {id: row.methods,     lines: 2, max_chars: 195, label: null, varies: true}
+      - {id: row.tools,       lines: 2, max_chars: 195, label: null, varies: true}
+      - {id: row.spoken,      lines: 1, max_chars: 105, label: null, varies: false}
+
+  - id: experience
+    fixed: true
+    line_budget: 17
+    entries:
+      - {id: ophis,       bullets: 3, rendered_lines: [2, 1, 1]}
+      - {id: freedomcode, bullets: 3, rendered_lines: [2, 2, 3]}
+      - {id: beesurfing,  bullets: 1, rendered_lines: [2]}
+
+  - id: projects
+    fixed: false
+    count: 3
+    bullets_per_project: 2
+    line_budget: 11
+    # cost of one project = 1 title line + lines(b1) + lines(b2).
+    # Every project in projects.yaml is written with two <=95-char bullets, so every
+    # project costs exactly 3 lines and any 3 of them total 9 - two lines of slack.
+    target_cost_per_project: 3
+
+  - id: education
+    fixed: true
+    line_budget: 14
+
+# Open items the frame depends on, carried over from the build spec.
+# ── Q9 RESOLVED 23 Sep 2026 ──
+typography:
+  font_licence_held: false
+  heading_font_original: "Machina Ultrabold"
+  heading_font_action: >
+    SUBSTITUTE. You do not hold the licence, so Machina cannot be used to export
+    generated documents. The substitute is chosen once at the template level and then
+    every CV uses it - it is not a per-application decision.
+  substitute_brief: >
+    Machina Ultrabold is a geometric grotesque with very heavy weight, flat terminals
+    and tight spacing. Closest freely-licensed matches, in order: Archivo Black,
+    Familjen Grotesk (800), Space Grotesk (700), Anton. Archivo Black is the safest
+    single swap for "Simon Sazonov / Data Scientist" at the current size. The developer
+    should set one and show you a side-by-side before it is locked.
+
+bullet_styling:
+  projects: upright
+  note: >
+    The current PDF is inconsistent - F1's bullets are upright, COVID-19's and PitWall's
+    are italic. You chose upright, so it now applies to all three project slots. Since
+    projects are selected dynamically, per-project styling could not have survived anyway.
+
+open_items:
+  ats_fallback: >
+    The Canva PDF extracts in non-linear order because the design is assembled
+    from separate text boxes. Plan is a second single-column DOCX with the same
+    content for portals that parse badly; the designed PDF stays the default.

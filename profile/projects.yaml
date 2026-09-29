@@ -1,0 +1,644 @@
+# projects.yaml — THE VARIABLE SLOT. Exactly 3 print on any given CV.
+# (Never hard-code a count here; validate_profile.py prints the live one every run.
+#  A hand-written count is a future lie - this one already drifted 18 -> 22.)
+#
+# Shape rules, enforced by validate_profile.py:
+#   - exactly 2 bullets per project
+#   - every bullet <= 95 characters, so every project costs exactly 3 rendered lines
+#   - title + link label <= 90 characters
+#   - any 3 projects therefore cost 9 of the 11-line budget, with slack to spare
+#
+# readme_state: checked live against GitHub on 24 Sep 2026.
+#   ok   — a README that explains the problem and the result
+#   stub — title only. §6 of the spec: "an empty repo is worse than no link",
+#          because a linked repo WILL be opened and a stub reads as abandoned.
+#   none — no README file at all.
+# RENDERER RULE: for stub/none, print the project but DROP the "GitHub" link label.
+# The work is real and the bullets stand on their own; the link is what hurts.
+# Restore the label the moment the README is written.
+#
+# conflicts_with: the selector must never print a project whose work is already
+# described in the fixed experience block. Ophis bullets cover the market-structure
+# and Monte Carlo work; printing those projects too would show the same work twice.
+
+- id: proj.thesis
+  type: project
+  name: "Risk-Aware Race Strategy Under Disruption – MSc Thesis"
+  link_label: "(in progress)"
+  url: ""
+  context_type: academic
+  period: 2026-09/present
+  role_note: "Sole author. Proposal stage - supervisor not yet confirmed. Never imply the thesis is supervised, approved or formally under way until it is."
+  team_size: 1
+  stack: [Python, FastF1, statsmodels, pandas, NumPy, matplotlib]
+  themes: [decision_under_uncertainty, risk_modelling, applied_research, time_series, simulation]
+  summary: >
+    Models F1 safety-car deployment as a discrete-time hierarchical hazard fitted to
+    race-control messages across 2018-2026, then couples the fitted hazard to a pit-stop
+    agent optimised for the bad tail rather than the expected case.
+  strength: strong
+  use_for: [research, quantitative, data_science, machine_learning]
+  bullets:
+    - id: proj.thesis.b1
+      text: "Modelled F1 safety-car deployment as a hierarchical hazard on 2018-2026 race data"
+      tags: [statistics, probability, time_series, risk_modelling, experimental_design]
+      metrics: [m.thesis.hazard]
+    - id: proj.thesis.b2
+      text: "Showed circuit fixed effects collapse out of sample, making partial pooling load-bearing"
+      tags: [statistics, model_evaluation, experimental_design, hypothesis_testing]
+      metrics: [m.thesis.pooling]
+
+- id: proj.f1_warehouse
+  type: project
+  name: "F1 Data Warehouse & ML Platform – PySpark"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/BigDataAnalytics
+  readme_state: stub          # checked 24 Sep 2026, 18 bytes
+  readme_note: "README.md is 18 bytes — the title and nothing else"
+  context_type: academic
+  period: 2026-05/2026-06
+  role_note: "Repository owner; authored the ETL/EDA notebooks and the MLlib notebook. Teammates delivered the GraphFrames and Structured Streaming notebooks - do not claim those."
+  team_size: "4-5"
+  stack: [PySpark, Spark SQL, Spark MLlib, Parquet, Python, Jupyter]
+  themes: [data_engineering, dimensional_modelling, applied_ml, big_data]
+  summary: >
+    A five-notebook platform over 74 years of Formula 1 data, framed as a consultancy
+    engagement for a constructor making pre-race and in-race decisions.
+  strength: strong
+  use_for: [data_engineering, data_science, machine_learning, analytics]
+  bullets:
+    - id: proj.f1_warehouse.b1
+      text: "Built a medallion ETL pipeline over 74 years of F1 data in 14 tables with enforced schemas"
+      tags: [data_engineering, etl, pyspark, parquet, data_quality, databases]
+      metrics: []
+    - id: proj.f1_warehouse.b2
+      text: "Modelled a star-schema gold layer; Spark MLlib scored ROC-AUC 0.878 and cut RMSE 73%"
+      tags: [dimensional_modelling, machine_learning, pyspark, model_evaluation, regression]
+      metrics: [m.f1.roc_auc, m.f1.rmse]
+
+- id: proj.covid_mlops
+  type: project
+  name: "COVID-19 Severity Prediction – End-to-End MLOps Pipeline"
+  link_label: GitHub
+  url: https://github.com/Isabely6/MLOps-Project-2526
+  readme_state: ok          # checked 24 Sep 2026, 6900 bytes
+  context_type: academic
+  period: 2026-06
+  role_note: "Team project. The repository is a bulk upload, so git history does not attribute individual work - be ready to describe your share verbally."
+  team_size: "4-5"
+  stack: [Kedro, MLflow, FastAPI, Docker, Evidently, scikit-learn, SHAP, pytest, Parquet]
+  themes: [mlops, pipelines, monitoring, healthcare]
+  summary: >
+    Predicting a country's relative COVID-19 mortality-severity tier from pre-pandemic
+    indicators, wrapped in a production-style lifecycle from ingestion to drift monitoring.
+  strength: strong
+  use_for: [machine_learning, data_engineering, data_science]
+  bullets:
+    - id: proj.covid_mlops.b1
+      text: "Co-built a ten-stage Kedro pipeline from ingestion and data-quality checks to serving"
+      tags: [mlops, kedro, etl, data_quality, pipelines, feature_store]
+      metrics: []
+    - id: proj.covid_mlops.b2
+      text: "Containerised serving with FastAPI and MLflow, plus PSI/KS drift and API-parity tests"
+      tags: [mlops, docker, fastapi, mlflow, monitoring, testing, drift_detection]
+      metrics: []
+
+- id: proj.pitwall
+  type: project
+  name: "PitWall – Lead Discovery & Scoring Pipeline"
+  link_label: "(walkthrough on request)"
+  url: ""
+  context_type: personal
+  period: 2026-08/present
+  role_note: "Sole author - architecture, implementation and testing. Private repository."
+  team_size: 1
+  stack: [Python, Streamlit, SQLite, SearXNG, Groq, DeepSeek, Ollama, pydantic-settings, pytest, ruff, mypy]
+  themes: [pipelines, applied_ml, evaluation, llm_engineering, system_design]
+  summary: >
+    A seven-stage pipeline turning two CSVs into a scored contact CRM, cross-referenced
+    against live job openings, with a reason attached to every decision.
+  strength: strong
+  use_for: [machine_learning, data_science, software, research]
+  bullets:
+    - id: proj.pitwall.b1
+      text: "Built a seven-stage resumable pipeline over SQLite with cached multi-provider fallback"
+      tags: [pipelines, databases, python, llm, system_design, caching]
+      metrics: []
+    - id: proj.pitwall.b2
+      text: "Held 0.94 recall on a 60-case labelled set by tuning thresholds; 260 tests, 90% coverage"
+      tags: [model_evaluation, testing, decision_making, llm, threshold_tuning]
+      metrics: [m.pitwall.recall, m.pitwall.coverage]
+
+- id: proj.rl_sepsis
+  type: project
+  name: "Reinforcement Learning for Sepsis Treatment Optimisation"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Reinforcement_Learning
+  readme_state: stub          # checked 24 Sep 2026, 24 bytes
+  readme_note: "README.md is 24 bytes"
+  context_type: academic
+  period: 2026-05/2026-06
+  role_note: "Repository owner; team of four."
+  team_size: 4
+  stack: [Python, Gymnasium, Stable-Baselines3, Optuna, NumPy, LaTeX]
+  themes: [reinforcement_learning, decision_under_uncertainty, applied_research, healthcare]
+  summary: >
+    Learning vasopressor and IV-fluid dosing policies for ICU sepsis patients as an
+    episodic MDP with sparse terminal reward, across tabular and function-approximation regimes.
+  strength: strong
+  use_for: [machine_learning, research, data_science, quantitative]
+  bullets:
+    - id: proj.rl_sepsis.b1
+      text: "Benchmarked Q-Learning, SARSA, Double Q, DQN and PPO on a 716-state ICU sepsis MDP"
+      tags: [reinforcement_learning, mdp, deep_learning, python, model_evaluation]
+      metrics: []
+    - id: proj.rl_sepsis.b2
+      text: "Reward shaping lifted SARSA survival 70.0% to 74.5%; Pareto sweep traded off intensity"
+      tags: [reward_shaping, multi_objective, decision_making, reinforcement_learning]
+      metrics: [m.sepsis.survival, m.sepsis.pareto]
+
+- id: proj.montecarlo_risk
+  type: project
+  name: "Monte Carlo Pre-Trade Risk Module"
+  link_label: GitHub
+  url: https://github.com/KofeMne/monte-carlo-risk-module
+  readme_state: ok          # checked 24 Sep 2026, 3385 bytes
+  context_type: academic
+  period: 2026-03/2026-05
+  role_note: "Authored the engine, tests and documentation (~2,700 lines). A teammate's later BTC fixes changed 52 lines, and the audit report in that repository is not your work."
+  team_size: 4
+  stack: [Python, NumPy, pandas, Optuna, pytest, QuantConnect]
+  themes: [simulation, risk_modelling, decision_under_uncertainty, quantitative]
+  summary: >
+    A pre-trade filter that simulates thousands of futures for one trade candidate and
+    returns accept, reduce or reject before the order is placed.
+  strength: strong
+  use_for: [quantitative, data_science, research, machine_learning]
+  conflicts_with: [ophis.b2, ophis.b3]
+  bullets:
+    - id: proj.montecarlo_risk.b1
+      text: "Simulated GBM and bootstrap price paths per trade, replayed under live exit rules"
+      tags: [monte_carlo, simulation, probability, python, finance]
+      metrics: []
+    - id: proj.montecarlo_risk.b2
+      text: "Scored VaR, CVaR and Kelly into accept/reduce/reject, tuned by walk-forward Optuna"
+      tags: [risk_modelling, decision_making, optimization, quantitative, threshold_tuning]
+      metrics: []
+
+- id: proj.ga_image
+  type: project
+  name: "Genetic Algorithm Image Reconstruction"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Computational_Intelligence_for_Optimization
+  readme_state: ok          # checked 24 Sep 2026, 17455 bytes
+  context_type: academic
+  period: 2026-05
+  role_note: "Repository owner; team project."
+  team_size: "4-5"
+  stack: [Python, NumPy, Pillow, Optuna, SciPy, Jupyter]
+  themes: [optimization, metaheuristics, experimental_design, statistics]
+  summary: >
+    Reconstructing a painting from 100 semi-transparent triangles - a 1,000-dimensional
+    integer optimisation problem - with a genetic algorithm validated against simulated annealing.
+  strength: strong
+  use_for: [research, quantitative, machine_learning, data_science]
+  bullets:
+    - id: proj.ga_image.b1
+      text: "Built a modular genetic algorithm for a 1,000-dimensional image reconstruction task"
+      tags: [optimization, genetic_algorithms, metaheuristics, python, system_design]
+      metrics: []
+    - id: proj.ga_image.b2
+      text: "Cut mean RMSE 28.40 to 26.18 over 30 seeds; beat simulated annealing on variance"
+      tags: [hypothesis_testing, statistics, benchmarking, optimization, model_evaluation]
+      metrics: [m.cifo.rmse, m.cifo.ga_vs_sa]
+
+- id: proj.tweet_sentiment
+  type: project
+  name: "Financial Tweet Sentiment Classification"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Text_Mining
+  readme_state: stub          # checked 24 Sep 2026, 13 bytes
+  readme_note: "README.md is 13 bytes"
+  context_type: academic
+  period: 2026-05/2026-06
+  role_note: "Repository owner and contributor; group project."
+  team_size: "4-5"
+  stack: [PyTorch, Hugging Face Transformers, scikit-learn, XGBoost, gensim, NLTK, LangChain, Azure OpenAI]
+  themes: [nlp, transformers, model_selection, llm_engineering]
+  summary: >
+    A three-class sentiment classifier over 9,543 financial tweets, benchmarking 29
+    configurations from bag-of-words to a fine-tuned transformer, then wrapped in an agent.
+  strength: strong
+  use_for: [machine_learning, data_science, research]
+  bullets:
+    - id: proj.tweet_sentiment.b1
+      text: "Benchmarked 29 configurations on 9,543 tweets, from TF-IDF to fine-tuned RoBERTa"
+      tags: [nlp, text_classification, transformers, model_selection, class_imbalance]
+      metrics: []
+    - id: proj.tweet_sentiment.b2
+      text: "Reached 0.832 macro-F1 on a once-touched test split; served via a LangChain agent"
+      tags: [model_evaluation, llm, agents, nlp, cross_validation]
+      metrics: [m.text.macro_f1]
+
+- id: proj.painter_cnn
+  type: project
+  name: "Painter Classification – CNN Improvement Study"
+  link_label: GitHub
+  url: https://github.com/Khuzaima-bashir/DL2026
+  readme_state: stub          # checked 24 Sep 2026, 8 bytes
+  readme_note: "README.md is 8 bytes; also not your repo to fix — ask Khuzaima"
+  context_type: academic
+  period: 2026-04
+  role_note: "Contributor - authored and analysed the CNN improvement notebook."
+  team_size: "4-5"
+  stack: [TensorFlow, Keras, scikit-learn, NumPy, pandas]
+  themes: [deep_learning, computer_vision, experimental_design, class_imbalance]
+  summary: >
+    A controlled ablation on a 23-class painter-classification task, changing one factor
+    at a time - capacity, then regularisation, then imbalance - to diagnose underfitting.
+  strength: strong
+  use_for: [machine_learning, research, data_science]
+  bullets:
+    - id: proj.painter_cnn.b1
+      text: "Diagnosed underfitting, then built a deeper from-scratch CNN with BatchNorm and GAP"
+      tags: [deep_learning, cnn, computer_vision, tensorflow, regularization]
+      metrics: []
+    - id: proj.painter_cnn.b2
+      text: "Raised macro-F1 0.32 to 0.44 and top-3 to 0.71 in a one-factor-at-a-time ablation"
+      tags: [ablation, model_evaluation, class_imbalance, experimental_design]
+      metrics: [m.painter.macro_f1, m.painter.top3]
+
+- id: proj.market_structure_ml
+  type: project
+  name: "Market-Structure ML Toolkit"
+  link_label: GitHub
+  url: https://github.com/ArtemKhomytskyi/market-structure-ml-toolkit
+  readme_state: stub          # checked 24 Sep 2026, 29 bytes
+  readme_note: "README.md is 29 bytes; Artem's repo"
+  context_type: academic
+  period: 2026-03
+  role_note: "Contributor - contributed the ML v1 package: EDA, labelling, feature selection, baselines and the runtime detector."
+  team_size: 4
+  stack: [Python, scikit-learn, pandas, Parquet, PyYAML, Jupyter]
+  themes: [time_series, applied_ml, train_serve_consistency, quantitative]
+  summary: >
+    Replacing a rule-based swing detector with a supervised one: fractal labels, online-safe
+    features, and a runtime detector whose confirmation contract matches the training labels.
+  strength: strong
+  use_for: [machine_learning, quantitative, data_science]
+  conflicts_with: [ophis.b1]
+  bullets:
+    - id: proj.market_structure_ml.b1
+      text: "Labelled swing points by fractals on 4 years of 15-minute ETH bars; nine safe features"
+      tags: [time_series, feature_engineering, classification, labelling, finance]
+      metrics: []
+    - id: proj.market_structure_ml.b2
+      text: "Shipped a non-repainting runtime detector at validation-tuned thresholds (0.75/0.82)"
+      tags: [train_serve_consistency, threshold_tuning, deployment, time_series]
+      metrics: [m.swing.thresholds]
+
+- id: proj.breakout_v1
+  type: project
+  name: "Break-of-Structure Breakout Strategy – QuantConnect"
+  link_label: GitHub
+  url: https://github.com/ArtemKhomytskyi/breakout-strategy-v1
+  readme_state: stub          # checked 24 Sep 2026, 22 bytes
+  readme_note: "README.md is 22 bytes; Artem's repo"
+  context_type: academic
+  period: 2025-12/2026-03
+  role_note: "Core contributor - built the swing/BOS detection, stop-loss validation and position sizing."
+  team_size: 4
+  stack: [Python, QuantConnect, pandas, NumPy, Jupyter]
+  themes: [time_series, backtesting, risk_modelling, quantitative]
+  summary: >
+    A Break-of-Structure breakout strategy on ETH/USD 15-minute bars, designed around
+    removing look-ahead bias and validated walk-forward rather than on a single fit.
+  strength: medium
+  use_for: [quantitative, data_science, research]
+  bullets:
+    - id: proj.breakout_v1.b1
+      text: "Built an online swing detector with N-bar confirmation, removing look-ahead bias"
+      tags: [time_series, look_ahead_bias, finance, python, signal_design]
+      metrics: []
+    - id: proj.breakout_v1.b2
+      text: "Sized positions from a cash risk budget; validated by grid search and walk-forward"
+      tags: [risk_modelling, walk_forward, backtesting, grid_search, quantitative]
+      metrics: []
+
+- id: proj.marketing_analytics
+  type: project
+  name: "Marketing Analytics – Churn, RFM & Basket Analysis"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Marketing-Analytics
+  readme_state: ok          # checked 24 Sep 2026, 2956 bytes
+  context_type: academic
+  period: 2025-06/2026-01
+  role_note: "Repository owner and lead contributor; joint project with one other student."
+  team_size: 2
+  stack: [Python, pandas, scikit-learn, Hugging Face Transformers, mlxtend, PDM, Conda, Git LFS]
+  themes: [customer_analytics, applied_ml, commercial_framing, nlp]
+  summary: >
+    A six-notebook pipeline from raw retail transactions to marketing action: who to
+    retain, who to target, what to cross-sell.
+  strength: medium
+  use_for: [analytics, data_science, machine_learning]
+  bullets:
+    - id: proj.marketing_analytics.b1
+      text: "Segmented retail customers by RFM and predicted churn with a random-forest model"
+      tags: [clustering, churn_prediction, rfm, machine_learning, analytics]
+      metrics: []
+    - id: proj.marketing_analytics.b2
+      text: "Compared logistic regression and SVM against BERT; mined cross-sell rules by Apriori"
+      tags: [nlp, association_rules, model_evaluation, transformers, analytics]
+      metrics: []
+
+- id: proj.airbnb_mongo
+  type: project
+  name: "Airbnb Database Optimisation – MongoDB"
+  link_label: "(walkthrough on request)"
+  url: ""
+  context_type: academic
+  period: 2026-04
+  role_note: "Contributor - owned the host-performance analytics part; group of five. Private repository."
+  team_size: 5
+  stack: [MongoDB, pymongo, Docker, Studio 3T, Python, pandas]
+  themes: [databases, query_optimization, data_modelling, analytics]
+  summary: >
+    Consulting on a slow, denormalised Airbnb database: normalise the schema and prove
+    every optimisation with explain-plan metrics rather than assertion.
+  strength: strong
+  use_for: [data_engineering, data_science, analytics, software]
+  bullets:
+    - id: proj.airbnb_mongo.b1
+      text: "Normalised an embedded-host Airbnb schema into referenced MongoDB collections"
+      tags: [mongodb, databases, data_modelling, normalization, nosql]
+      metrics: []
+    - id: proj.airbnb_mongo.b2
+      text: "Tuned compound indexes against explain plans, comparing keys and documents examined"
+      tags: [query_optimization, indexing, performance, databases, mongodb]
+      metrics: []
+
+- id: proj.wwc_sql
+  type: project
+  name: "Women's World Cup Relational Database – SQL Server"
+  link_label: GitHub
+  url: https://github.com/ArtemKhomytskyi/sql-server-relational-database-design
+  readme_state: none          # checked 24 Sep 2026, 0 bytes
+  readme_note: "NO README AT ALL. Repo is public and reachable; Artem's repo"
+  context_type: academic
+  period: 2023-10/2024-05
+  role_note: "Team member, group of four. Files were uploaded in bulk by a teammate, so git history does not attribute individual work - be ready to describe your share verbally."
+  team_size: 4
+  stack: [SQL Server, T-SQL, SAP PowerDesigner]
+  themes: [databases, data_modelling, business_rules, requirements]
+  summary: >
+    A relational database for a football World Cup, taken from a prose brief through
+    conceptual and physical models to a SQL Server schema with rule-enforcing triggers.
+  strength: medium
+  use_for: [data_engineering, software, analytics]
+  bullets:
+    - id: proj.wwc_sql.b1
+      text: "Modelled a 14-table SQL Server schema in PowerDesigner from a written prose brief"
+      tags: [sql, databases, data_modelling, normalization, requirements]
+      metrics: []
+    - id: proj.wwc_sql.b2
+      text: "Wrote six T-SQL triggers enforcing match rules, validating goals against the line-up"
+      tags: [sql, t_sql, business_rules, data_quality, databases]
+      metrics: []
+
+- id: proj.powerbi_health
+  type: project
+  name: "Global Health Analysis – Power BI"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Global-Health-Analysis-Project-using-PowerBI
+  readme_state: ok          # checked 24 Sep 2026, 7332 bytes
+  context_type: academic
+  period: 2024-11
+  role_note: "Repository owner and contributor."
+  team_size: "4-5"
+  stack: [Power BI, Power Query (M), DAX]
+  themes: [business_intelligence, dimensional_modelling, etl, public_health]
+  summary: >
+    Thirteen linked analyses of global health indicators built on a proper star schema,
+    where most of the work is making five institutions' extracts joinable at all.
+  strength: medium
+  use_for: [analytics, data_engineering, data_science]
+  bullets:
+    - id: proj.powerbi_health.b1
+      text: "Merged World Bank, Eurostat, IMF and ITU extracts in Power Query, unpivoting years"
+      tags: [etl, power_bi, data_quality, analytics, time_series]
+      metrics: []
+    - id: proj.powerbi_health.b2
+      text: "Modelled a star schema on country and year dimensions across 13 linked report pages"
+      tags: [dimensional_modelling, power_bi, dax, business_intelligence, visualization]
+      metrics: []
+
+- id: proj.socialhire
+  type: project
+  name: "SocialHire – Trust-Based Job Networking Platform"
+  link_label: "live site"
+  url: https://social-hire.vercel.app
+  context_type: academic
+  period: 2024-10/2025-01
+  role_note: "Contributor in a five-person team - authentication, landing page, user profile, database diagrams and the job-application flow."
+  team_size: 5
+  stack: [React, JavaScript, Bootstrap, Firebase Auth, Cloud Firestore, Vercel, GitHub Actions]
+  themes: [web_development, databases, product_thinking, teamwork]
+  summary: >
+    A deployed job-networking web app organised around personal recommendation rather
+    than cold applications, built by five people on feature branches with CI.
+  strength: supporting
+  use_for: [software, data_engineering]
+  bullets:
+    - id: proj.socialhire.b1
+      text: "Built Firebase auth, the user profile and the job-application flow in React"
+      tags: [react, javascript, firebase, web_development, software]
+      metrics: []
+    - id: proj.socialhire.b2
+      text: "Designed the Firestore schema diagrams a five-person team built against; CI on Vercel"
+      tags: [databases, nosql, system_design, ci_cd, teamwork]
+      metrics: []
+
+- id: proj.prolog_europe
+  type: project
+  name: "Prolog-Based Europe Analysis System"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Prolog-Based-Europe-Analysis-System
+  readme_state: ok          # checked 24 Sep 2026, 5906 bytes
+  context_type: academic
+  period: 2024-11
+  role_note: "Repository owner and contributor."
+  team_size: "4-5"
+  stack: [SWI-Prolog]
+  themes: [symbolic_ai, knowledge_representation, explainability]
+  summary: >
+    A knowledge base over European countries answering compositional queries that were
+    never explicitly encoded - the answers are inferred, not stored.
+  strength: supporting
+  use_for: [research, software, data_science]
+  bullets:
+    - id: proj.prolog_europe.b1
+      text: "Encoded EU Open Data, UNESCO and World Bank sources as a structured Prolog fact base"
+      tags: [prolog, knowledge_representation, symbolic_ai, data_modelling]
+      metrics: []
+    - id: proj.prolog_europe.b2
+      text: "Wrote composable predicates inferring shared languages and exports never stored"
+      tags: [prolog, logic_programming, explainability, symbolic_ai]
+      metrics: []
+
+- id: proj.conference_android
+  type: project
+  name: "Scientific Conference Manager – Android"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Scientific-Conference-Manager-Android-App
+  readme_state: ok          # checked 24 Sep 2026, 3740 bytes
+  context_type: academic
+  period: 2024-11
+  role_note: "Repository owner and contributor; course final project."
+  team_size: "4-5"
+  stack: [Kotlin, Android Studio, Firebase Auth, Cloud Firestore, Google Maps]
+  themes: [mobile, databases, access_control]
+  summary: >
+    A native Android app for browsing conferences, schedules and articles, serving both
+    attendees and organisers from one Firestore backend.
+  strength: supporting
+  use_for: [software]
+  bullets:
+    - id: proj.conference_android.b1
+      text: "Built a native Kotlin Android app over Firestore for conferences and article search"
+      tags: [kotlin, mobile, firebase, nosql, software]
+      metrics: []
+    - id: proj.conference_android.b2
+      text: "Implemented role-based access with separate user and admin interfaces and moderation"
+      tags: [access_control, system_design, software, databases]
+      metrics: []
+
+- id: proj.bpmn_o2c
+  type: project
+  name: "Order-to-Cash Process Modelling – BPMN"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Business_Project_Management_project
+  readme_state: ok          # checked 24 Sep 2026, 2953 bytes
+  context_type: academic
+  period: 2024-10
+  role_note: "Repository owner, main contributor."
+  team_size: "4-5"
+  stack: [BPMN 2.0, Bizagi Modeler]
+  themes: [process_modelling, requirements, consulting_framing, bottleneck_analysis]
+  summary: >
+    An as-is BPMN model of a retailer's ticket-sales order-to-cash process across two
+    channels, built to expose where the load actually builds up.
+  strength: supporting
+  use_for: [analytics, data_science, research]
+  bullets:
+    - id: proj.bpmn_o2c.b1
+      text: "Modelled an as-is retail order-to-cash process across store and call-centre channels"
+      tags: [bpmn, process_optimization, requirements, stakeholder_management]
+      metrics: []
+    - id: proj.bpmn_o2c.b2
+      text: "Located bottlenecks from daily volumes: registration, staffing and payment lag"
+      tags: [bottleneck_analysis, process_optimization, analytics, communication]
+      metrics: []
+
+- id: proj.car_racer
+  type: project
+  name: "Car Racer – Object-Oriented Game"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Car-Racer-Game
+  readme_state: ok          # checked 24 Sep 2026, 3509 bytes
+  context_type: academic
+  period: 2023-12/2024-11
+  role_note: "Team of three; final project for Computation III."
+  team_size: 3
+  stack: [Python, Pygame, NumPy, OpenCV, UML]
+  themes: [software_design, oop, teamwork]
+  summary: >
+    A basic in-class racer extended into a modular, documented game - built to
+    demonstrate object-oriented design rather than to be a game.
+  strength: supporting
+  use_for: [software]
+  bullets:
+    - id: proj.car_racer.b1
+      text: "Extended an in-class racer into a modular Pygame game with a power-up hierarchy"
+      tags: [python, software, system_design, uml]
+      metrics: []
+    - id: proj.car_racer.b2
+      text: "Added two-player mode, a score-based unlock economy and a documented class model"
+      tags: [software, system_design, uml, teamwork]
+      metrics: []
+
+- id: proj.figma_hci
+  type: project
+  name: "User-Centric Website Prototype – Figma"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/User-Centric-Website-Prototype-in-Figma
+  readme_state: ok          # checked 24 Sep 2026, 4013 bytes
+  context_type: academic
+  period: 2024-11
+  role_note: "Repository owner and contributor; Human-Computer Interaction course."
+  team_size: "4-5"
+  stack: [Figma, usability testing, SWOT analysis]
+  themes: [user_centred_design, evaluation, requirements]
+  summary: >
+    An ingredient-first recipe-discovery prototype, validated with recorded
+    usability tests rather than opinion.
+  strength: supporting
+  use_for: [software, analytics]
+  bullets:
+    - id: proj.figma_hci.b1
+      text: "Designed a high-fidelity interactive prototype for ingredient-first recipe search"
+      tags: [requirements, system_design, software]
+      metrics: []
+    - id: proj.figma_hci.b2
+      text: "Ran recorded think-aloud usability tests with outside participants and iterated"
+      tags: [testing, requirements, communication]
+      metrics: []
+
+- id: proj.caesar_8085
+  type: project
+  name: "Caesar Cipher Decryption – 8085 Assembly"
+  link_label: GitHub
+  url: https://github.com/simon-sazonov/Caesar-s-Cipher-Decryption-Project-Assembly-8085-
+  readme_state: ok          # checked 24 Sep 2026, 4097 bytes
+  context_type: academic
+  period: 2024-01
+  role_note: "Team of four; contributor."
+  team_size: 4
+  stack: [Intel 8085 assembly, Sim8085]
+  themes: [low_level_programming, cryptanalysis, foundations]
+  summary: >
+    A known-plaintext attack on a Caesar cipher written in 8085 assembly - no
+    libraries, a handful of registers, direct memory addressing.
+  strength: supporting
+  use_for: [software, research]
+  bullets:
+    - id: proj.caesar_8085.b1
+      text: "Wrote an Intel 8085 program that breaks a Caesar cipher without being given the key"
+      tags: [assembly, software, python]
+      metrics: []
+    - id: proj.caesar_8085.b2
+      text: "Derived the shift from a known plaintext marker; handled ASCII wrap-around both ways"
+      tags: [assembly, software, testing]
+      metrics: []
+
+# ── TEAM SIZES (Q8) ──
+# You said "teams of 4-5, distribute those numbers randomly". I have written "4-5"
+# instead of picking a number per project. Inventing a specific figure is the one thing
+# this whole system exists to prevent, and it is a question you will actually be asked
+# ("how big was the team?"). A range you can stand behind beats a number you cannot.
+# It never prints on the CV either way. Replace "4-5" with the real figure whenever
+# you happen to remember one.
+#
+# ── COVERAGE against your two portfolio documents, checked 24 Sep 2026 ──
+# Both documents describe 22 distinct projects. All 22 are now accounted for:
+#   21 are here as projects
+#    1 is BeeSurfing, which lives in experience.yaml because it prints in the
+#      EXPERIENCE block on your CV. The same work must never appear twice on one
+#      page, so it is deliberately not also a project.
+# Plus the MSc thesis, which is in neither document because it started afterwards.
+# (count intentionally not stated here - the validator prints it)
+#
+# One merge to know about: your portfolio lists Breakout V1 and Breakout V2 as separate
+# entries. V2's deliverable that is yours is the Monte Carlo risk module (the EMA regime
+# filter was a teammate's), so V2 appears here as proj.montecarlo_risk rather than as a
+# second strategy project. Split it if you would rather show both.

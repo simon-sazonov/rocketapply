@@ -1,0 +1,179 @@
+# experience.yaml — FIXED SHAPE. Three entries, 3 / 3 / 1 bullets, all seven printed
+# on every application. Tailoring happens through `variants`, never by swapping bullets.
+#
+# Bullet text is a plain double-quoted single-line string on purpose, NOT a `>` folded
+# block: folding adds whitespace and a trailing newline, and every rule in this system
+# is a character count. What you see between the quotes is exactly what renders.
+#
+# rendered_lines is MEASURED from the CV PDF, not computed. A variant must produce the
+# same number of lines when greedily wrapped at 95-99 chars. validate_profile.py checks it.
+
+- id: ophis
+  type: experience
+  org: Ophis Research
+  role: Machine Learning Engineer | FinTech ML Developer
+  employment_type: Contract
+  location: Remote
+  start: 2025-11
+  end: present
+  context: >
+    Machine-learning research on a quantitative trading system, in a four-person team,
+    alongside the MSc. Scope was modelling and risk, not execution infrastructure: a
+    predictive market-structure model first, then a separate risk layer around it once
+    it became clear that improving the prediction was only part of the problem.
+  # ---------------------------------------------------------------------------
+  # ATTRIBUTION — RESOLVED 23 Sep 2026 (Q1, answer a).
+  # Ophis Research IS the four-person team behind the trading repositories. So:
+  #   ophis.b1        == proj.market_structure_ml
+  #   ophis.b2, b3    == proj.montecarlo_risk
+  # These are the same body of work described twice, once as employment and once as
+  # a project. That is legitimate, and the single rule it creates is that the CV must
+  # never print both on one page - enforced by conflicts_with in projects.yaml.
+  #
+  # ⚠ Two framings of the same work now exist and BOTH are in play:
+  #   CV/experience: "Ophis Research, Contract, Machine Learning Engineer"
+  #   portfolio:     "team project, contributor, Mar-May 2026"
+  # An interviewer who opens the repos sees four contributors and an academic cadence.
+  # That is fine as long as you say "four-person team at Ophis" rather than letting
+  # "Contract ML Engineer" imply solo professional delivery. forbidden.yaml blocks
+  # the sole-authorship implication; the rest is your wording in the room.
+  # ---------------------------------------------------------------------------
+  bullets:
+    - id: ophis.b1
+      text: "Built a swing-point classifier on 4 years of ETH 15-minute bars, fractal-labelled with nine online-safe features and validation-tuned thresholds (0.75/0.82 by max-F1)"
+      rendered_lines: 2
+      tags: [python, machine_learning, time_series, classification, feature_engineering, finance, model_evaluation]
+      metrics: [m.swing.thresholds]
+      strength: strong
+      use_for: [data_science, machine_learning, quantitative, research]
+      never_use_for: []
+      overlaps_with: [proj.market_structure_ml]
+      variants:
+        - id: ophis.b1.v2       # ML-engineering vocabulary
+          use_for: [machine_learning]
+          text: "Trained fractal-labelled swing-point classifiers on 4 years of 15-minute ETH bars, using nine online-safe features and operating points chosen on validation by max-F1"
+        - id: ophis.b1.v3       # quant / market-microstructure vocabulary
+          use_for: [quantitative]
+          text: "Replaced a rule-based market-structure detector with supervised classifiers over 4 years of 15-minute ETH bars, using nine causal features and validation-tuned thresholds"
+
+    - id: ophis.b2
+      text: "Built a Monte Carlo pre-trade engine (GBM and bootstrap paths) scoring VaR, CVaR and Kelly"
+      rendered_lines: 1
+      tags: [monte_carlo, simulation, probability, risk_modelling, quantitative, finance, python]
+      metrics: []
+      strength: strong
+      use_for: [data_science, quantitative, research, machine_learning]
+      never_use_for: []
+      overlaps_with: [proj.montecarlo_risk]
+      variants:
+        - id: ophis.b2.v2       # simulation / OR vocabulary
+          use_for: [research]
+          text: "Simulated thousands of price paths per trade to score VaR, CVaR, Kelly and profit factor"
+        - id: ophis.b2.v3       # decision-systems vocabulary
+          use_for: [data_science]
+          text: "Built a Monte Carlo pre-trade risk engine returning accept, reduce or reject per trade"
+
+    - id: ophis.b3
+      text: "Replayed every simulated path under the live exit rules, keeping sim and execution in step"
+      rendered_lines: 1
+      tags: [simulation, train_serve_consistency, testing, python, system_design]
+      metrics: []
+      strength: medium
+      use_for: [data_science, quantitative, machine_learning, software]
+      never_use_for: []
+      overlaps_with: [proj.montecarlo_risk]
+      variants:
+        - id: ophis.b3.v2       # MLOps / train-serve-consistency vocabulary
+          use_for: [data_engineering, software]
+          text: "Replayed each simulated path under production exit rules, keeping sim and serving aligned"
+
+- id: freedomcode
+  type: experience
+  org: FreedomCode
+  role: Technical Program Associate, CTO & CIO office
+  employment_type: Contract       # printed on the CV as "|Contract|"
+  location: ""                    # not stated on the CV; never prints
+  start: 2024-01
+  end: 2024-05
+  context: >
+    FreedomCode connected investors with vetted non-profits, using a verification badge
+    as the trust signal - the product bet was that carrying the badge would change how a
+    non-profit was perceived by funders. Worked to the CTO and CIO on delivery process
+    across cross-functional web and mobile teams: mapping workflows, replacing ad-hoc
+    status reporting with a structured data pipeline, and analysing product and Google
+    Analytics data for UX and performance bottlenecks.
+  # Useful angle for letters: this is the only trust-and-verification product in your
+  # history, and it rhymes with PitWall - both are "decide which of these is real, and
+  # show your reasoning". Worth reaching for on any role about ranking, scoring,
+  # verification or marketplace quality.
+  bullets:
+    - id: freedomcode.b1
+      # "cutting project timelines ~20%" REMOVED 23 Sep 2026: you could not reconstruct
+      # how it was measured (Q4). A true bullet with no number beats an impressive number
+      # you cannot defend. If the measurement ever comes back, restore it and fill in
+      # m.freedomcode.timeline - but only then.
+      text: "Worked directly with the CTO and CIO to map and streamline delivery workflows across cross-functional web and mobile teams"
+      rendered_lines: 2
+      tags: [stakeholder_management, process_optimization, communication, requirements]
+      metrics: []
+      strength: medium
+      use_for: [data_science, analytics, software, research]
+      never_use_for: []
+      variants:
+        - id: freedomcode.b1.v2
+          text: "Partnered with the CTO and CIO to map and streamline delivery workflows across cross-functional web and mobile delivery teams"
+
+    - id: freedomcode.b2
+      text: "Designed and implemented a structured data pipeline that replaced ad-hoc status reporting, halving redundant communication and freeing engineers for technical work"
+      rendered_lines: 2
+      tags: [data_engineering, etl, process_optimization, pipelines]
+      metrics: []
+      strength: medium
+      use_for: [data_engineering, data_science, analytics, software]
+      never_use_for: []
+      variants:
+        - id: freedomcode.b2.v2
+          text: "Built a structured data pipeline replacing ad-hoc status reporting, which halved redundant communication and returned engineering hours to technical work"
+
+    - id: freedomcode.b3
+      # 193 chars. Renders as THREE lines in the PDF, not two - see layout.yaml.
+      # Any variant must also render as three. This is the tightest bullet on the page;
+      # a variant is optional here and the canonical text is fine on its own.
+      text: "Analysed product and Google Analytics data to locate UX and performance bottlenecks, presented findings to technical and non-technical stakeholders, and ran QA test protocols to validate the fixes"
+      rendered_lines: 3
+      tags: [analytics, communication, stakeholder_management, testing, eda]
+      metrics: []
+      strength: medium
+      use_for: [analytics, data_science, software]
+      never_use_for: []
+      variants:
+        - id: freedomcode.b3.v2
+          text: "Analysed product and Google Analytics data to locate UX and performance bottlenecks, presented the findings to both technical and non-technical stakeholders, and ran QA protocols to validate the fixes"
+
+- id: beesurfing
+  type: experience
+  org: BeeSurfing
+  role: Information Systems Developer
+  employment_type: University team project
+  location: Lisbon, Portugal
+  start: 2024-01
+  end: 2024-06
+  context: >
+    Cross-platform booking product for Portuguese surf schools, built in a university
+    team. Built in FlutterFlow, which commits generated output under a bot account, so
+    git history attributes nothing to individual developers - be ready to describe the
+    screens and features you built directly.
+  bullets:
+    - id: beesurfing.b1
+      text: "Built a cross-platform mobile application in Flutter and engineered a Firestore-based backend to support real-time booking, school availability, and group surf sessions"
+      rendered_lines: 2
+      tags: [software, mobile, databases, firebase, system_design]
+      metrics: []
+      strength: supporting
+      use_for: [software, data_engineering]
+      never_use_for: []
+      # Deliberately NOT also a project. The same work must never print twice on one page.
+      overlaps_with: []
+      variants:
+        - id: beesurfing.b1.v2
+          text: "Built a cross-platform Flutter mobile app on a Firestore backend supporting real-time booking, surf-school availability and group session scheduling"

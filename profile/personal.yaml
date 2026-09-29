@@ -1,0 +1,43 @@
+# personal.yaml — contact details and gating facts. Answers from Simon, 23 Sep 2026.
+
+name: Simon Sazonov
+title: Data Scientist            # the fixed title line on the CV, right of the name
+email: sazonov.simon@gmail.com
+phone: ""                        # deliberately omitted - not wanted on the CV
+location: Lisbon, Portugal
+
+linkedin: https://www.linkedin.com/in/simon-sazonov/
+github: https://github.com/simon-sazonov
+portfolio: ""
+
+willing_to_relocate: true
+# Inferred from where you have actually applied: Alpine (Enstone, UK - you wrote
+# "I would move to Enstone for it"), Bending Spoons (Milan), Waymo. Confirm or trim.
+relocation_targets: [Portugal, United Kingdom, Italy, EU, remote-EU]
+
+notice_period: "available immediately, full-time"
+
+# ── DO NOT USE. Instructed by Simon, 23 Sep 2026. ──
+# Nothing may state, imply or hint at work authorisation, visa status, residence
+# permit, nationality or sponsorship needs - not in a CV, not in a cover letter, not
+# in a form field a generator fills. Enforced in forbidden.yaml under never_claim and
+# never_say, and left empty here so there is nothing to read even by accident.
+#
+# If a posting asks about it directly, the generator must stay silent rather than
+# guess. You answer that one yourself, in the application form.
+work_authorization: ""
+work_authorization_policy: never_mention
+
+languages:
+  - {name: English,    level: C2,     note: "MSc taught in English"}
+  - {name: Ukrainian,  level: native}
+  - {name: Russian,    level: native}
+  - {name: Portuguese, level: B1}
+  - {name: Italian,    level: A2}
+
+# RESOLVED 23 Sep 2026: available now, full time. The MSc runs alongside.
+# Note for you, not for the generator: your Alpine letter says "I finish my MSc in
+# July 2027, the month the placement starts". That is still true and still the right
+# thing to say to a placement scheme with a fixed start date. It is not a contradiction
+# as long as the default claim is availability now - which is what this file records.
+availability_conflict: resolved

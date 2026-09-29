@@ -1,0 +1,328 @@
+# evidence.yaml — narrative blocks for cover letters. Not CV bullets.
+#
+# `facts` are the ONLY things a model may assert about a block. Plain, verifiable,
+# no adjectives. `story` is what stops a letter sounding like a language model.
+#
+# ═══ ALL NINE STORIES ARE NOW SIMON'S OWN, dictated 24 Sep 2026. ═══
+# My drafts were replaced wholesale. What I did: removed speech filler, joined the
+# clauses into sentences, and nothing else. His words, his emphasis, his choice of
+# what mattered - which differs from mine in several places, and his choice wins.
+#
+# FOUR THINGS HE SAID ARE NOT SUPPORTED AND WERE NOT WRITTEN IN. See the block at the
+# bottom of this file. Three are likely misspeaks; one is a banned phrase of his own.
+#
+# (Historical note - the superseded second pass:)
+# REWRITTEN 23 Sep 2026, second pass, after reading your Alpine and Bending Spoons
+# letters and the thesis FINDINGS.md. The first pass was my register. This one copies
+# four habits straight out of your own prose:
+#   1. concrete noun first, abstraction never
+#   2. every number against the baseline it beat
+#   3. a "two things" construction when there are two things
+#   4. the limitation volunteered before anyone asks
+# Read each one aloud. Where it still does not sound like you, change it and set
+# needs_simon_rewrite: false. See the HOW TO CHECK THESE block at the bottom.
+
+- id: ev.monte_carlo_risk
+  title: Deciding whether a trade is worth taking at all
+  source_refs: [ophis.b2, ophis.b3, proj.montecarlo_risk.b1, proj.montecarlo_risk.b2]
+  facts:
+    - built a pre-trade risk filter that simulates thousands of price paths for one trade candidate
+    - generated paths two ways - parametric geometric Brownian motion and bootstrap resampling of historical returns
+    - replayed each simulated path under the strategy's production exit rules
+    - computed probability of loss, VaR, CVaR, Kelly fraction, Sharpe and profit factor per candidate
+    - returned a graded accept, reduce or reject decision rather than a binary filter
+    - tuned the decision thresholds by walk-forward Optuna optimisation rather than setting them by hand
+  skills: [monte_carlo, simulation, risk_modelling, probability, decision_making, optimization]
+  themes: [decision_under_uncertainty, risk_weighted_decisions, simulation_fidelity]
+  use_for: [quantitative, data_science, research, machine_learning]
+  strength: strong
+  one_line_hook: >
+    A single expected return tells you almost nothing about whether to take a trade;
+    the shape of the distribution around it tells you everything.
+  story: >
+    The maths itself was not the interesting part. What I got out of it was building
+    something that had to run in a real financial environment rather than in a notebook -
+    taking a model and putting it into the rhythm of the tools we already had. The
+    problem worth solving was the logic underneath: making the numbers mean something,
+    and framing them so they gave the most value to the tools that would consume them.
+  needs_simon_rewrite: false
+  story_source: "Simon, dictated 24 Sep 2026 - his content and phrasing, transcribed to sentences"
+
+- id: ev.rl_sepsis
+  title: Sequential treatment decisions under a sparse reward
+  source_refs: [proj.rl_sepsis.b1, proj.rl_sepsis.b2]
+  facts:
+    - modelled ICU sepsis treatment as an episodic MDP where survival is observed only at episode end
+    - benchmarked tabular methods (Q-Learning, SARSA, Double Q-Learning, Value Iteration) against linear function approximation, DQN and PPO
+    - wrapped the environment with observation noise, randomly missing features and acute deterioration events
+    - added SOFA-delta reward shaping to attack the sparse-reward problem
+    - ran a Pareto sweep trading survival against treatment intensity
+    - found that deep RL did not beat a linear model at the available training budget
+  skills: [reinforcement_learning, decision_making, experimental_design, deep_learning, multi_objective]
+  themes: [decision_under_uncertainty, sequential_decisions, negative_results, applied_research]
+  use_for: [machine_learning, research, data_science, quantitative]
+  strength: strong
+  one_line_hook: >
+    Credit assignment was the limitation here: the only signal arrives at the end, and by
+    then there are hundreds of decisions to explain it.
+  story: >
+    We tried a lot of different methods - SARSA, Q-learning, double Q-learning. We never
+    got a perfect number out of any of them, and double Q-learning actually came in below
+    the baseline. But the numbers were not really the point. What I got from it was
+    understanding how these methods learn, which matters more to me than the final figure.
+    The baseline looked fine on a single run; if you look at the learning process instead,
+    the comparison is much more valuable.
+  needs_simon_rewrite: false
+  story_source: "Simon, dictated 24 Sep 2026 - his content and phrasing, transcribed to sentences"
+
+- id: ev.optimisation_rigour
+  title: Making an optimisation comparison actually mean something
+  source_refs: [proj.ga_image.b1, proj.ga_image.b2]
+  facts:
+    - built a genetic algorithm for a 1,000-dimensional integer optimisation problem
+    - designed crossover to operate at whole-triangle granularity so shape and colour stayed co-adapted
+    - tuned in stages - one-at-a-time experiments to set defensible ranges, then Optuna TPE over those ranges, then structural ablations
+    - validated across 30 seeds with Mann-Whitney U and Wilcoxon tests
+    - compared the genetic algorithm against simulated annealing at an equal 63,000-evaluation budget and found it gave substantially lower variability (SD 0.70 vs 4.41), although the difference in means was not statistically significant
+    - an independent replication reproduced the final result
+  skills: [optimization, genetic_algorithms, statistics, experimental_design, hyperparameter_tuning]
+  themes: [experimental_rigour, fair_comparison, reproducibility]
+  use_for: [research, quantitative, machine_learning, data_science]
+  strength: strong
+  one_line_hook: >
+    Most algorithm comparisons are won by whichever one got tuned harder. I gave both the
+    same budget and 30 seeds, so the result was not down to one lucky run.
+  story: >
+    This was a chance to put optimisation techniques onto a problem that is not a standard
+    modelling problem. We tried simulated annealing and genetic algorithms. The experience
+    I wanted was combining and fine-tuning the parameters, and understanding what is
+    actually happening behind every single one of them - how the thing learns, how big the
+    search space should be, and how to get better results without increasing the cost.
+  needs_simon_rewrite: false
+  story_source: "Simon, dictated 24 Sep 2026 - his content and phrasing, transcribed to sentences"
+
+- id: ev.pitwall
+  title: Building a system that degrades instead of failing
+  source_refs: [proj.pitwall.b1, proj.pitwall.b2]
+  facts:
+    - designed and built a seven-stage resumable pipeline solo, from search through scoring to a CRM interface
+    - combined explainable heuristic scoring with batched LLM verdicts carrying reasons and red flags
+    - hand-labelled a 60-candidate evaluation set and chose the operating threshold from a precision-recall sweep
+    - accepted lower precision to hold a 0.90 recall floor because a missed lead costs more than a wasted review
+    - built provider fallback chains for both search and inference so an exhausted provider disables itself mid-run
+    - wrote 260 hermetic tests at roughly 90% coverage, with real search captures saved as fixtures
+  skills: [system_design, llm, threshold_tuning, testing, decision_making, entity_resolution]
+  themes: [graceful_degradation, precision_recall_tradeoff, scope_discipline, solo_ownership]
+  use_for: [machine_learning, software, data_science, research]
+  strength: strong
+  one_line_hook: >
+    Finding links is easy. Deciding which links are real - the same name at four
+    different companies, people who left in 2019 - is the actual problem.
+  story: >
+    It started as a project for finding people and turned into something else: a reason to
+    work with open-weight models through their APIs. Getting the data, analysing it, and
+    teaching the model the specific area I was looking for. That is the part I would do again.
+  needs_simon_rewrite: false
+  story_source: "Simon, dictated 24 Sep 2026 - his content and phrasing, transcribed to sentences"
+
+- id: ev.model_selection
+  title: Knowing when the model is not the bottleneck
+  source_refs: [proj.tweet_sentiment.b1, proj.tweet_sentiment.b2, proj.painter_cnn.b1, proj.painter_cnn.b2]
+  facts:
+    - benchmarked 29 configurations on a three-class financial sentiment task from bag-of-words to a fine-tuned transformer
+    - used macro-F1 under class imbalance and touched the test split exactly once
+    - fitted every vectoriser inside the training fold so the pipeline stayed leak-free
+    - ran a separate one-factor-at-a-time ablation on a 23-class image task, starting from an underfitting diagnosis
+    - documented two negative results - over-regularisation and a failed rare-class specialist
+    - traced residual errors to cases where the gold labels themselves are debatable
+  skills: [model_evaluation, cross_validation, nlp, deep_learning, class_imbalance, experimental_design]
+  themes: [diagnosis_over_score_chasing, negative_results, data_ceiling]
+  use_for: [machine_learning, data_science, research]
+  strength: strong
+  one_line_hook: >
+    The 29 configurations ranked almost exactly by how much pretrained knowledge and
+    labelled data each one consumed. That ordering is the finding, not the leaderboard.
+  story: >
+    The painter project was deep learning built from our side, from scratch rather than
+    starting from pre-trained weights. It was fun to work with the layers - the convolution
+    layers, the dense layers - and it is where I actually understood how these models work,
+    how the neurons communicate, backpropagation, hands on rather than described. The
+    text-mining project was the other half of that: fine-tuning models that had already
+    been trained, RoBERTa and the rest. Doing both is what made the difference between them
+    clear to me.
+  needs_simon_rewrite: false
+  story_source: "Simon, dictated 24 Sep 2026 - his content and phrasing, transcribed to sentences"
+
+- id: ev.data_engineering
+  title: Treating the pipeline as the deliverable
+  source_refs: [proj.f1_warehouse.b1, proj.f1_warehouse.b2, proj.covid_mlops.b1, proj.covid_mlops.b2, proj.airbnb_mongo.b1, proj.airbnb_mongo.b2]
+  facts:
+    - built a medallion bronze-silver-gold pipeline over 74 years of data in 14 tables with explicit schemas and referential-integrity checks
+    - modelled a star-schema gold layer with slowly-changing dimensions
+    - co-built a ten-stage Kedro lifecycle from ingestion through a Parquet feature store to a containerised FastAPI service
+    - added drift monitoring with PSI, KS and Jensen-Shannon statistics
+    - wrote tests proving the served predictions match the trained model
+    - normalised a denormalised MongoDB schema and proved each index change against explain plans
+  skills: [etl, dimensional_modelling, mlops, data_quality, query_optimization, big_data]
+  themes: [lifecycle_thinking, data_contracts, measurable_optimisation]
+  use_for: [data_engineering, machine_learning, data_science, analytics]
+  strength: strong
+  one_line_hook: >
+    Proving the served predictions match the trained model catches failures before they
+    propagate into downstream analysis.
+  story: >
+    This was about taking machine learning I already knew - clustering, k-means, the
+    standard models - and running it on actual big data with PySpark. The libraries are a
+    little different and so is the behaviour. The real lesson is what big-data analysis
+    looks like in practice, when you cannot just put everything into a dataframe and hope
+    for the best, or wait days for a simple table-to-table analysis to come back.
+  needs_simon_rewrite: false
+  story_source: "Simon, dictated 24 Sep 2026 - his content and phrasing, transcribed to sentences"
+
+- id: ev.why_me_graduate
+  title: Where I am and what I am looking for
+  source_refs: [edu.msc]
+  facts:
+    - part-way through an MSc in Data Science and Advanced Analytics at NOVA IMS, expected July 2027
+    - working as a contract ML engineer on quantitative trading systems alongside the degree
+    - built and shipped a production-grade pipeline solo outside coursework
+  skills: []
+  themes: [motivation, trajectory]
+  use_for: [data_science, machine_learning, quantitative, research, analytics]
+  strength: medium
+  one_line_hook: >
+    Improving the prediction turned out to be the easy half. The half that mattered was
+    deciding how much to trust it.
+  story: >
+    My background is information systems and technology, and I enjoyed the projects and the
+    algorithms. During my Erasmus year I found how deep learning and convolutional networks
+    work genuinely fascinating - how you can teach a model to make decisions for you, inside
+    the algorithm you are building. That is what I want to keep doing: data science, models,
+    AI, genetic algorithms, agentic AI. Getting something out of a dataset that can think,
+    that can make a decision, that can find the clusters and tell you which group is
+    actually different from the rest.
+  needs_simon_rewrite: false
+  story_source: "Simon, dictated 24 Sep 2026 - his content and phrasing, transcribed to sentences"
+
+- id: ev.working_style
+  title: How I work
+  source_refs: [proj.pitwall.b2, proj.ga_image.b2, proj.rl_sepsis.b2]
+  facts:
+    - comfortable owning an open-ended problem end to end, including the parts that are not modelling
+    - habitually reports negative results and stated limitations alongside headline numbers
+    - works from pre-registered success criteria and fixed evaluation protocols rather than post-hoc justification
+    - has worked in teams of two to five and solo
+  skills: []
+  themes: [autonomy, problem_framing, intellectual_honesty]
+  use_for: [data_science, machine_learning, research, quantitative, analytics]
+  strength: medium
+  one_line_hook: >
+    I would rather find the hole in my own argument than have someone find it for me.
+  story: >
+    I am used to working on my own and in a team - around 99% of my projects have been group
+    projects. I work better in a competitive environment; that is just what my experience
+    says. I like to keep pushing and find out how far I can get with something. I am always
+    thinking about the improvement, whether that is performance or efficiency. Every day for
+    the last two years there has been new information, new knowledge, something else to try
+    on one model or another, or some way to make it more efficient.
+  needs_simon_rewrite: false
+  story_source: "Simon, dictated 24 Sep 2026 - his content and phrasing, transcribed to sentences"
+
+- id: ev.thesis
+  title: Modelling the disruption instead of the strategy
+  source_refs: [proj.thesis.b1, proj.thesis.b2, edu.msc]
+  facts:
+    - modelling F1 safety-car and virtual-safety-car deployment as a discrete-time hierarchical hazard function
+    - fitted to FastF1 race-control messages across seasons 2018 to 2026
+    - measured 3,510 race-lap risk sets and 83 deployments across the three strictly complete seasons before committing to the design
+    - found circuit fixed effects collapse out of sample while circuit random effects fit, so the partial pooling is load-bearing
+    # REVIVAL FIRST, and deliberately. Written the other way round — "got an
+    # abandoned 2020-stack race simulator running" — a letter turned it into
+    # "I built an abandoned 2020-stack race simulator": every word grounded,
+    # the meaning inverted, and the gates passed it because they check tokens
+    # rather than sense. The adjective has to sit next to what it describes.
+    - revived TUMFTM's race simulator, abandoned on a 2020 stack, onto Python 3.13 with two shims, reaching 110 ms per Monte Carlo race
+    - the strategy agent is optimised for the bad tail rather than the expected case
+  skills: [statistics, probability, risk_modelling, decision_making, simulation, time_series, reinforcement_learning]
+  themes: [decision_under_uncertainty, applied_research, measurement_before_commitment, real_time_decisions]
+  use_for: [research, quantitative, data_science, machine_learning]
+  strength: strong
+  one_line_hook: >
+    Existing race-strategy agents optimise the average race. Races are lost in the tail,
+    on the lap a safety car comes out and a twenty-second pit stop suddenly costs nothing.
+  story: >
+    This is what I am working on right now. It is interesting to use a simulator that
+    already exists and try to predict the different possibilities and the different risks.
+    What makes it promising is that the idea is not limited to motorsport - the same thing
+    applies in finance. It is also genuinely challenging, both on the statistics side and
+    on the reinforcement-learning side, with CVaR and the risk-sensitive part I am
+    implementing now.
+  needs_simon_rewrite: false
+  story_source: "Simon, dictated 24 Sep 2026 - his content and phrasing, transcribed to sentences"
+
+# ═══════════════════════════ HOW TO CHECK THESE (Q6) ═══════════════════════════
+# You asked how to do this, or to do it together. Here is the method - it takes about
+# fifteen minutes for all nine, and it is a reading job, not a writing job.
+#
+# For each `story`, read it ALOUD and ask three questions:
+#
+#   1. Would I say this sentence?        If no, say the true version out loud and type
+#                                        that. Do not tidy it afterwards.
+#   2. Is anything here not true?        The facts are traced to your repos, but I chose
+#                                        which ones to put next to each other, and
+#                                        emphasis can mislead where facts do not.
+#   3. Is the best part missing?         I picked what I found interesting from your
+#                                        portfolio. You were there. If the real story is
+#                                        a different one, replace it wholesale.
+#
+# Then set needs_simon_rewrite: false. A story you approved is as good as one you wrote.
+#
+# Two of these are already almost entirely yours, lifted from your Bending Spoons letter
+# and your thesis notes: ev.why_me_graduate and ev.working_style. They are the two I said
+# I would not draft, and I still would not have - but you had already written them
+# elsewhere, so I assembled rather than invented. Check them hardest anyway.
+#
+# If you would rather do it together: tell me which block, say the story out loud in a
+# message, and I will format it. That is the fastest path and the output is genuinely yours.
+
+# ═════════════ NOT WRITTEN IN — four things to confirm (24 Sep 2026) ═════════════
+#
+# 1. MONTE CARLO / "reinforcement learning"  ⛔ THE ONE THAT MATTERS
+#    You said the interesting part was "trying to implement reinforcement learning
+#    model into the tools that we already did". There is no reinforcement learning
+#    anywhere in the Monte Carlo risk module. It is GBM and bootstrap path generation,
+#    trade replay under the live exit rules, and Optuna walk-forward threshold tuning.
+#    RL appears only in the sepsis project, and CVaR-based RL in the thesis.
+#    I wrote the rest of your answer and left this out. Which did you mean?
+#      (a) a misspeak - you meant the learned/tuned model generally  -> nothing to change
+#      (b) the Optuna walk-forward tuning loop                       -> I will say that
+#      (c) there really is RL in the Ophis trading work I have not seen -> tell me where,
+#          and it becomes a strong claim rather than an unsupported one
+#
+# 2. PITWALL / "Llama"
+#    The stack is Qwen 2.5 served locally through Ollama, plus Groq, DeepSeek and Z.ai.
+#    No Llama in the portfolio. I wrote "open-weight models through their APIs", which
+#    is true and needs no correction. Name Qwen instead if you want it specific.
+#
+# 3. PAINTER CNN / "fine-tune pre-trained models like RoBERTa"
+#    Two projects merged in the telling. The painter CNN was deliberately from scratch -
+#    your own report says pretrained weights and transfer learning were out of scope.
+#    RoBERTa fine-tuning is the text-mining project. I kept them as two halves of one
+#    story, which is what you were getting at, but they must not merge into one claim.
+#
+# 4. "passionate about"  -> on YOUR OWN banned_phrases list in style.yaml
+#    You said "I am really passionate about the data science". I wrote "That is what I
+#    want to keep doing" and let the specifics carry it. Say the word if you want it back
+#    and I will remove it from the banned list, but the list is there for a reason.
+#
+# ALSO NOTE, no action needed:
+#  - Thesis: you said "we". It is solo. Written as "I".
+#  - Data engineering: you said KNN. The F1 models were RandomForest, GBT and KMeans.
+#    Written as "clustering, k-means, the standard models", which is accurate.
+#  - Data engineering: your answer is about the Spark side only. The MongoDB and SQL
+#    Server facts stay in `facts`, but the story no longer covers them. That is fine -
+#    a story is one thing you learned, not a summary.
+#  - PitWall: you did not mention the Ollama context-truncation bug. It was the centre
+#    of my draft and it is a strong interview story. It is still in the portfolio if
+#    you want it; your version is about what you got out of the project, which is a
+#    different and equally legitimate answer.

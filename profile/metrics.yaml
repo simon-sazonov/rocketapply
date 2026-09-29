@@ -1,0 +1,172 @@
+# metrics.yaml — every number that may appear in a document.
+#
+# Three rules:
+#   1. `claim` is copied word-for-word into documents. It reads as it will print.
+#   2. `method` is for you, not the CV. It is the answer to "how did you measure that?"
+#   3. Derived forms ("251x faster") get their own record. Nothing is ever calculated.
+#
+# All figures below are traced to your portfolio document, which states they come from
+# committed result files, reports or notebook output. One exception is flagged.
+
+- id: m.f1.roc_auc
+  claim: "ROC-AUC 0.878"
+  raw_value: 0.878
+  unit: roc_auc
+  method: "RandomForest classifier predicting whether a driver reaches Q3, Spark MLlib pipeline with cross-validated selection; test ROC-AUC 0.878 against a 0.5 baseline, test F1 0.783"
+  source: proj.f1_warehouse
+  verifiable: true
+
+- id: m.f1.rmse
+  claim: "cut RMSE 73%"
+  raw_before: 9538
+  raw_after: 2533
+  unit: ms
+  method: "GBT regressor on median lap time; test RMSE 2,533 ms against a 9,538 ms baseline, test R-squared 0.974. The 73% is the reduction between those two numbers."
+  source: proj.f1_warehouse
+  verifiable: true
+
+- id: m.f1.multiclass
+  claim: "weighted F1 0.513 against a 0.196 baseline"
+  raw_before: 0.196
+  raw_after: 0.513
+  unit: weighted_f1
+  method: "Five-class outcome model (Win/Podium/Points/Finish/DNF), Spark MLlib. Worth quoting alongside the lap-time result - it is the honest one."
+  source: proj.f1_warehouse
+  verifiable: true
+
+- id: m.pitwall.recall
+  claim: "held 0.94 recall on a 60-case labelled set"
+  raw_value: 0.94
+  unit: recall
+  method: "Hand-labelled 60-candidate evaluation set with a threshold sweep reporting precision/recall/F1. The shipped heuristic threshold of 12 (0.61 precision / 0.94 recall) was chosen over the planned 25 (0.67 / 0.62) because 25 fell below the 0.90 recall floor."
+  source: proj.pitwall
+  verifiable: true
+
+- id: m.pitwall.coverage
+  claim: "260 tests, 90% coverage"
+  raw_value: 260
+  unit: tests
+  method: "pytest suite, hermetic - no network, throwaway project root, real SERP captures saved as fixtures. Coverage measured at roughly 90%; quote it as ~90% if asked precisely."
+  source: proj.pitwall
+  verifiable: true
+
+- id: m.sepsis.survival
+  claim: "lifted SARSA survival from 70.0% to 74.5%"
+  raw_before: 0.700
+  raw_after: 0.745
+  unit: survival_rate
+  method: "SOFA-delta reward shaping applied to tabular SARSA on the 716-state ICU-Sepsis MDP; test survival rate. Note the honest caveat: shaping left every Config B (function-approximation) algorithm unchanged, because wrapper noise overwhelms the intermediate signal."
+  source: proj.rl_sepsis
+  verifiable: true
+
+- id: m.sepsis.pareto
+  claim: "a Pareto sweep found lambda=0.01 optimal at 81.7% survival"
+  raw_value: 0.817
+  unit: survival_rate
+  method: "Sweep over the treatment-intensity penalty lambda, trading survival against treatment intensity; 81.7% at lambda=0.01, two points above the project default."
+  source: proj.rl_sepsis
+  verifiable: true
+
+- id: m.sepsis.ablation
+  claim: "an ablation traced 87% of the performance drop to acute deterioration events"
+  raw_value: 0.87
+  unit: share_of_gap
+  method: "Failure-mode ablation isolating each clinical-reality wrapper (observation noise p=0.15, missing features p=0.15, acute deterioration p=0.01 per step). 5.4 of the 6.2 percentage-point Config A to Config B gap attributed to deterioration events."
+  source: proj.rl_sepsis
+  verifiable: true
+
+- id: m.cifo.rmse
+  claim: "cut mean RMSE from 28.40 to 26.18 over 30 seeds"
+  raw_before: 28.40
+  raw_after: 26.18
+  unit: rmse
+  method: "Staged tuning (one-at-a-time experiments, then Optuna TPE, then structural ablations), validated across 30 seeds; final 26.18 +/- 0.84. An independent replication reproduced 26.18."
+  source: proj.ga_image
+  verifiable: true
+
+- id: m.cifo.ga_vs_sa
+  claim: "far more consistent than simulated annealing at an equal budget (SD 0.70 vs 4.41)"
+  raw_before: 4.41
+  raw_after: 0.70
+  unit: standard_deviation
+  method: "GA vs SA at an equal 63,000-evaluation budget, 30 seeds each. SA had a marginally lower mean (25.00 vs 25.12) but far higher variance; Mann-Whitney U p=0.061, not significant. Claim consistency, never superiority."
+  source: proj.ga_image
+  verifiable: true
+
+- id: m.cifo.dynamic
+  claim: "dynamic mutation and tournament scheduling cut mean RMSE from 27.35 to 26.43"
+  raw_before: 27.35
+  raw_after: 26.43
+  unit: rmse
+  method: "Structural ablation against a pre-registered promotion criterion, multi-seed."
+  source: proj.ga_image
+  verifiable: true
+
+- id: m.text.macro_f1
+  claim: "0.832 macro-F1 on an untouched test split"
+  raw_value: 0.832
+  unit: macro_f1
+  method: "Fine-tuned twitter-RoBERTa on 9,543 financial tweets across three classes. Stratified 5-fold CV on train for tuning, validation split for selection (0.853), internal test split touched exactly once (0.832 macro-F1 / 0.868 accuracy). The 0.021 gap is the evidence the protocol held."
+  source: proj.tweet_sentiment
+  verifiable: true
+
+- id: m.painter.macro_f1
+  claim: "raised macro-F1 from 0.32 to 0.44"
+  raw_before: 0.3234
+  raw_after: 0.4390
+  unit: macro_f1
+  method: "Baseline two-convolution CNN 0.3234 validation macro-F1; best model (deeper from-scratch CNN plus training-only oversampling) 0.4390 validation / 0.4432 test. Round to two decimals in print."
+  source: proj.painter_cnn
+  verifiable: true
+
+- id: m.painter.top3
+  claim: "0.71 top-3 accuracy"
+  raw_value: 0.7051
+  unit: top3_accuracy
+  method: "Test split, 23-class painter classification, best model. Validation 0.7011 - an almost identical validation-to-test result."
+  source: proj.painter_cnn
+  verifiable: true
+
+- id: m.swing.thresholds
+  claim: "validation-tuned thresholds (0.75/0.82 by max-F1)"
+  raw_value: [0.752, 0.817]
+  unit: decision_threshold
+  method: "Separate swing-high and swing-low classifiers on 4 years of 15-minute ETHUSDT bars; operating points chosen by maximising F1 on the validation split and recorded in thresholds.json rather than hard-coded at 0.5."
+  source: proj.market_structure_ml
+  verifiable: true
+
+- id: m.montecarlo.loc
+  claim: "about 2,700 lines across the engine, tests and documentation"
+  raw_value: 2700
+  unit: lines
+  method: "Twelve-module package. Use sparingly - lines of code is a weak metric and invites the wrong follow-up question. The stronger claim is that the module was lifted into its own repository and reused on a different instrument by someone else."
+  source: proj.montecarlo_risk
+  verifiable: true
+
+# ---------------------------------------------------------------------------
+# REMOVED 23 Sep 2026 — m.freedomcode.timeline ("cutting project timelines ~20%").
+# You could not reconstruct how it was measured, so the claim came off the CV rather
+# than shipping with an empty `method`. This is the right outcome: it was the only
+# figure in the profile without a traceable measurement, and now there are none.
+# All 16 remaining metrics trace to committed result files, reports or notebook output.
+# ---------------------------------------------------------------------------
+
+# ── MSc thesis (added 23 Sep 2026). Measured 8 Sep 2026 before the first supervisor
+# meeting, reproducible from src/ in the thesis repository. ──
+
+- id: m.thesis.hazard
+  claim: "3,510 race-lap risk sets and 83 safety-car and virtual-safety-car deployments"
+  raw_value: [3510, 83]
+  unit: [risk_sets, events]
+  method: "Discrete-time survival extract from FastF1 race-control messages, three strictly complete seasons (2018-2020, 59 races). Base hazard 2.36% per race-lap; 46 of 59 races carried at least one disruption. UNITS WARNING you should state unprompted: a safety car is a race-level event, so the denominator is race-laps (~3.5k), not driver-laps (~200k). Published F1 datasets quote driver-laps and mixing them inflates exposure 20x."
+  source: proj.thesis
+  verifiable: true
+
+- id: m.thesis.pooling
+  claim: "circuit fixed effects collapse out of sample (hold-out calibration slope -0.007)"
+  raw_before: -0.007
+  raw_after: 0.756
+  unit: calibration_slope
+  method: "Discrete-time cloglog hazard with a lap-shape spline, trained pre-2020 and tested on 2020. Model B (25 params, circuit fixed effects) has 2.2 events per variable and a hold-out calibration slope of -0.007 - no discrimination at all. Model A (4 params, lap shape only) reaches 0.756. Model C estimates one variance parameter across 27 circuits (tau = 0.241). CAVEAT to state: 0.756 is still below the [0.8, 1.2] band, i.e. mild overfitting on three seasons."
+  source: proj.thesis
+  verifiable: true

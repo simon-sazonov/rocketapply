@@ -1,0 +1,41 @@
+# summaries.yaml — NOT USED BY THE CV.
+#
+# Your layout goes straight from contact to skills to experience. There is no summary
+# block and adding one would change the frozen frame. These exist only as raw material
+# for a cover letter's opening, and as a forcing device: if you cannot write two clean
+# lines about what you do for a given role family, the matching profile records are thin.
+
+- id: sum.quantitative
+  for: [quantitative, research]
+  text: >
+    MSc Data Science student working as a contract ML engineer on quantitative trading
+    systems. Most of my work is decisions under uncertainty - Monte Carlo pre-trade risk,
+    reinforcement-learning treatment policies, accept/reduce/reject filters with tuned thresholds.
+
+- id: sum.ml_engineering
+  for: [machine_learning]
+  text: >
+    MSc Data Science student with project and contract experience building and evaluating
+    models end to end - fine-tuned transformers, CNNs from scratch, deep RL - with a habit
+    of reporting what did not work alongside what did.
+
+- id: sum.data_engineering
+  for: [data_engineering]
+  text: >
+    MSc Data Science student with hands-on Spark, Kedro and SQL experience: medallion ETL
+    over 74 years of data, a star-schema warehouse, and a containerised serving pipeline
+    with drift monitoring and API-model parity tests.
+
+- id: sum.ds_applied
+  for: [data_science, analytics]
+  text: >
+    MSc Data Science student comfortable taking a vague question to a measurable answer -
+    customer segmentation and churn, model benchmarking, BI modelling - and honest about
+    what the data does not support.
+
+- id: sum.research
+  for: [research]
+  text: >
+    MSc Data Science student whose project work is built around experimental discipline:
+    pre-registered criteria, equal-budget comparisons, multi-seed validation and
+    documented negative results.

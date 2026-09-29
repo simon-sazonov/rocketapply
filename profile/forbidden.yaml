@@ -1,0 +1,125 @@
+# forbidden.yaml — the do-not-claim list.
+#
+# `gated_verbs` matters more than it looks. Small models reach for "led the development
+# of" as filler. For a student and contract contributor it is a lie, and interviewers notice.
+
+never_claim:
+  - production ML deployment to real users
+  - MLOps ownership
+  - team leadership
+  - managing people
+  - years of professional experience beyond contract and internship work
+  - client-facing consulting
+  - published research
+  - AWS / Azure / GCP hands-on infrastructure work
+  - Kubernetes
+  - Spark at production scale
+  - Airflow
+  - Databricks
+  - classical forecasting (ARIMA / ETS / Prophet)
+  - LP / MIP solvers (OR-Tools / Gurobi / CPLEX)
+  - Bayesian inference or probabilistic programming
+  - A/B testing or causal inference
+
+# ── HARD BLOCK, instructed 23 Sep 2026 ──
+# Work authorisation is off-limits entirely. This is not a "phrase it carefully" rule;
+# it is a "do not raise the subject" rule, including where a template invites it
+# (config/profile.md's Constraints section asks for it - leave it out).
+never_mention:
+  - work authorisation or authorization
+  - visa, sponsorship, or the need for either
+  - residence permit or residency status
+  - nationality or citizenship
+  - right to work
+
+never_say:
+  - anything implying the Ophis Research contract was full-time permanent employment
+  - anything implying an academic or coursework project was commercial work
+  - anything implying a model has served real production users
+  - anything implying sole authorship of a team project
+  - anything implying Azure OpenAI API use is Azure cloud experience
+  - anything implying Optuna TPE is Bayesian modelling rather than Bayesian search
+  - anything at all about work authorisation, visas, sponsorship or residency - see never_mention
+
+# Specific attributions that are NOT yours, named so a letter can never absorb them.
+# All are recorded in your own portfolio document; an interviewer checking the repos
+# will find the same thing.
+#
+# `block_terms` added 24 Sep 2026 by the generator build. `claim_to_block` is a
+# sentence written for a human, and matching a whole sentence blocks nothing —
+# a letter would paraphrase it and sail through. The generator derives terms
+# automatically (proper nouns, CamelCase, acronyms) and drops any that ALSO
+# describe Simon's own work, which is right for two of these three and wrong for
+# the EMA one: he really did work on Breakout Strategy V2, and he really does use
+# EMAs, so neither token alone can be blocked. The phrase is what is not his.
+# Hence explicit terms. Derivation stays as the fallback for any record without them.
+not_my_work:
+  - id: nmw.f1_graphframes
+    claim_to_block: "GraphFrames analysis and Spark Structured Streaming in the F1 project"
+    reason: "Teammates delivered notebooks 4 and 5. You authored the ETL/EDA and MLlib notebooks."
+    block_terms: [GraphFrames, "Spark Structured Streaming", "Structured Streaming", "graph analysis"]
+  - id: nmw.breakout_ema
+    claim_to_block: "the EMA regime filter in Breakout Strategy V2"
+    reason: "A teammate's work. Yours was the RSI momentum-confirmation filter and the Monte Carlo risk module."
+    block_terms: ["EMA regime filter", "EMA regime", "moving-average regime filter", "moving average regime filter"]
+  - id: nmw.montecarlo_btc_audit
+    claim_to_block: "the BTC walk-forward audit and tuning report in the monte-carlo-risk-module repository"
+    reason: "A teammate's study on ~182k BTC bars and 2,544 trades. Useful context to know; not your work. A teammate's later fixes also changed 52 lines of the engine."
+    block_terms: ["BTC walk-forward audit", "BTC bars", "tuning report"]
+
+# Repositories where git history does not prove who did what. Not a reason to avoid
+# them - a reason to be ready with a verbal account before the question is asked.
+attribution_caveats:
+  - id: ac.covid_mlops
+    repo: "Isabely6/MLOps-Project-2526"
+    issue: "bulk upload - no per-author history"
+  - id: ac.wwc_sql
+    repo: "ArtemKhomytskyi/sql-server-relational-database-design"
+    issue: "files uploaded in bulk by a teammate - no per-author history"
+  - id: ac.beesurfing
+    repo: "vlbotnev/BeeSurfing"
+    issue: "FlutterFlow commits generated output under a bot account - history attributes nothing to individuals"
+
+# ── Checked 24 Sep 2026 against the live repositories ──
+# Simon believed the Monte Carlo risk module counted as reinforcement learning.
+# breakout-strategy-v1: code/, notebooks/, main.py — no RL.
+# breakout-strategy-v2: code/{entry_exit_rules, ma_regime_filter, risk_management,
+#   stop_loss, swing_high_low_detection}/, monte_carlo/, research/, tests/ — no RL.
+# Neither README mentions an agent, a reward, a policy or a value function.
+#
+# The conflation is understandable: Monte Carlo methods DO exist inside RL (Sutton &
+# Barto ch. 5 — estimating value functions by averaging returns over sampled episodes).
+# But that is Monte Carlo as policy EVALUATION. The risk module samples price paths to
+# estimate an outcome distribution for a FIXED, rule-based strategy. Nothing learns:
+# no policy, no reward signal, no value function, no action selection that improves.
+# Optuna tunes the thresholds by search, not by reinforcement.
+#
+# This matters because "RL in a trading system" invites "walk me through the reward
+# function", and there is no answer. The real RL evidence is the sepsis project, which
+# is strong and defensible on its own.
+never_claim_specifically:
+  - reinforcement learning in the Ophis Research / trading work
+  - an RL agent, reward function or learned policy in the Monte Carlo risk module
+  - RL in breakout-strategy-v1 or breakout-strategy-v2
+
+# `co-founded` and `founded` added 24 Sep 2026. Simon's own Red Bull letter says
+# "I co-founded BeeSurfing", while experience.yaml records BeeSurfing as a
+# University team project — which `never_say` already forbids implying was
+# commercial work or solely his. The verb is what carries that implication, so
+# it is gated like the rest.
+gated_verbs:
+  - co-founded
+  - cofounded
+  - founded
+  - led
+  - owned
+  - managed
+  - architected
+  - spearheaded
+  - directed
+  - headed
+  - drove
+  - pioneered
+
+# These verbs are fine and describe what you actually did.
+preferred_verbs: [built, designed, implemented, benchmarked, validated, measured, diagnosed, tuned, modelled, analysed, wrote, shipped, replayed, co-built, contributed]

@@ -1,0 +1,252 @@
+# style.yaml — your writing voice.
+#
+# The one field that matters most here is `writing_samples`, and it is the one field
+# I cannot fill. Instructions like "write naturally" do almost nothing; two paragraphs
+# of your real prose do a great deal, because a model copies rhythm from examples far
+# better than from adjectives. See OPEN_QUESTIONS Q5.
+
+voice_notes:
+  - direct, plain sentences; no corporate padding
+  - specific over enthusiastic - name the problem, not the feeling
+  - comfortable stating limits and negative results; it reads as confidence
+  - lead with the concrete thing, then the implication - never the reverse
+  - short paragraphs, no more than four sentences
+  - British spelling (optimise, modelling, analyse, behaviour)
+
+# ⚠ SPELLING INCONSISTENCY ON THE CURRENT CV
+# Skills row 2 reads "Dimensional Modelling ... Predictive Modeling" - British and
+# American spelling in the same line, seven words apart. Pick one. Your portfolio
+# document is consistently British, so these files use British throughout.
+spelling: british
+
+banned_phrases:
+  - "I am writing to apply"
+  - "I was excited to see"
+  - "passionate about"
+  - "perfect fit"
+  - "proven track record"
+  - "leverage my skills"
+  - "I believe my background makes me"
+  - "dynamic environment"
+  - "wealth of experience"
+  - "as a highly motivated individual"
+  - "delve"
+  - "in today's fast-paced world"
+  - "align with your needs"
+  - "hit the ground running"
+  - "cutting-edge"
+  - "state-of-the-art"
+  - "robust solutions"
+  - "eager to contribute"
+  - "I am confident that"
+  - "seamlessly"
+  - "it's not just X, it's Y"
+  - "deep dive"
+
+preferred_openings:
+  - name a specific thing about the company or the problem, then connect it to your work
+  - open with the problem you find interesting, then say why this role touches it
+  - open with a concrete result and what it cost, then what the role would let you do next
+
+# Habits worth encoding because they show up across your reports and are distinctive.
+signature_moves:
+  - quote the negative result alongside the positive one
+  - say what a number was measured against, not just the number
+  - name the trade-off you accepted and why, rather than implying there was none
+
+# ── EXEMPLARS — whole letters, added 24 Sep 2026 ──
+#
+# WHY THIS EXISTS, AND WHY IT MATTERS MORE THAN EVERYTHING ELSE IN THIS FILE.
+# The generator was given 22 banned phrases, 6 voice notes and about 310 words of
+# your prose, and it wrote competent anonymous letters. It followed every rule and
+# still did not sound like you. The reason is that it had never seen a FINISHED
+# letter in your voice - only fragments. That is like being shown three sentences
+# from a novel and asked to write a chapter: the shape, the pacing and above all
+# the closing paragraph have nothing to copy from.
+#
+# A model imitates a whole example far better than it follows a description. So:
+#
+#   verdict: good   - a letter you were happy with. The generator is shown this
+#                     complete, as the thing to sound like.
+#   verdict: avoid  - a letter of YOURS that reads less well. This is more useful
+#                     than any banned-phrase list, because it is the same person
+#                     writing worse, so the contrast isolates what actually went
+#                     wrong rather than which words to dodge.
+#
+# Paste the full text. Do not tidy it first - the imperfections are the signal.
+exemplars:
+  # ══ THE ANCHOR ══ Sent to Alpine, 15 Sep 2026. Simon's best letter, and the
+  # only one marked `good`. Every habit worth copying is visible in it:
+  #   · it opens on the thesis, a concrete noun, with no throat-clearing
+  #   · every number is priced against what it beat (2,533 ms vs 9,538 ms)
+  #   · it tells ONE decision properly - shipping 12 rather than 25, and why
+  #   · it volunteers a limitation before anyone asks ("no trackside experience")
+  #   · it names something real and recent about the company (IndraMind, January)
+  #     and connects it to his own work rather than flattering them
+  - id: ex.alpine
+    verdict: good
+    role: AI Engineering Student Placement
+    company: Alpine
+    sent: 2026-09-15
+    why: >
+      Concrete noun first, every number against its baseline, one decision told
+      in full, and a limitation volunteered before anyone asks for it. The
+      company paragraph cites a specific January announcement and connects it to
+      his thesis, which is the opposite of praising their culture.
+    text: |
+      Dear Hiring Manager,
+
+      My MSc thesis models Formula One safety-car deployment as a state-conditional hazard function, fitted to FastF1 race-control messages from 2018 to 2026, and couples it to a strategy agent optimised for the worst case rather than the average. I am applying for the AI Engineering Student Placement at Alpine because that is the work, with better data and with people who know what to do with it.
+
+      Before the thesis I built an F1 race strategy intelligence platform on PySpark, over 74 years of results across fourteen tables. Most of the effort was not modelling. It went into declaring explicit schemas instead of letting Spark infer them, normalising inconsistent lap and sector time strings into integer milliseconds, and validating referential integrity across raceId, driverId and constructorId so that nothing downstream could quietly join on a broken key. On that foundation the MLlib work was almost easy: a gradient-boosted median lap-time model at 2,533 ms RMSE against a 9,538 ms baseline, R2 0.974 on the held-out split, and a random forest predicting Q3 qualification at 0.878 ROC-AUC. The habit I would bring is that with historical motorsport data, the schema and integrity work is where the accuracy actually comes from.
+
+      More recently I shipped PitWall, a seven-stage pipeline that scores people worth contacting by running batched LLM verdicts on top of cheap, explainable heuristics. I hand-labelled sixty candidates and swept the acceptance threshold, then shipped 12 rather than the 25 I had planned, because 25 gave 0.67 precision at 0.62 recall and the task could not afford missed candidates. It sits behind 260 tests at roughly 90% coverage, and falls back to another provider when a rate-limited model drops out mid-run. I have no trackside experience, and everything I know about race weekends comes from the data side, but evaluating a model honestly before trusting it transfers anywhere.
+
+      The IndraMind collaboration Alpine announced in January treats real-time consolidation of multi-source race data as a strategy asset rather than a reporting one, which is the same bet my thesis makes from the risk side. I finish my MSc in July 2027, the month the placement starts, and I would move to Enstone for it. I would be glad to talk it through.
+
+      Best regards,
+      Simon Sazonov
+
+  # ══ AVOID 1 ══ Sent to Waymo. Simon's own verdict: not the good one.
+  # It has real specifics in it - Kedro, MLflow, macro-F1 0.32 to 0.44 - but they
+  # arrive as a LIST rather than a story, and the letter opens and closes on
+  # abstraction. "turning large amounts of sensor and environmental data into
+  # reliable representations" says nothing a hundred other applicants could not
+  # write. The close, "I would be excited to contribute to that environment",
+  # is one word off his own banned-phrase list.
+  - id: ex.waymo
+    verdict: avoid
+    role: Software Engineering Internship
+    company: Waymo
+    why: >
+      Runs on abstractions where Alpine runs on nouns, and lists capabilities
+      instead of telling one thing properly. Three of its four paragraphs end on
+      a generalisation about what he learned rather than on what happened.
+    text: |
+      Dear Waymo Hiring Team,
+
+      I am applying for the Software Engineering Internship because I am particularly interested in the challenge of turning large amounts of sensor and environmental data into reliable representations that an autonomous system can use to understand and react to the world. I am currently pursuing an MSc in Data Science and Advanced Analytics at NOVA IMS, where my work has focused on machine learning, deep learning, statistical modelling, data engineering, and optimization.
+
+      What interests me most is the full chain from observing a complex environment through data to making a decision. This is what attracted me to both computer vision and my work on decision-oriented ML systems: a model is only useful when the information it produces can support something downstream. In my COVID-19 MLOps project, I worked across the complete pipeline, from data preparation and feature engineering through model training and evaluation to deployment and testing. I built modular pipelines with Kedro, tracked experiments with MLflow, deployed the model through FastAPI and Docker, and added data and model quality checks. This experience taught me to think about an ML model as part of a larger software system rather than as an isolated component.
+
+      I have also worked directly with computer vision and large datasets. In an image-classification study covering 23 artists, I investigated model performance through controlled evaluation, including class imbalance, training-only oversampling, macro-F1 evaluation, and documenting negative results. I improved macro-F1 from 0.32 to 0.44, but the main value of the project for me was understanding why the model performed poorly and which changes actually improved it. Alongside ML, I have built software systems using Python and other languages, with experience in testing, modular design, APIs, databases, and deployment. Python is my main language for ML and data work.
+
+      While I have not worked directly with VLMs, I have hands-on experience with transformer-based models and LLM systems, which gives me a foundation I would like to extend into multimodal perception. Waymo particularly interests me because autonomous driving brings these areas together: multimodal data, perception, model evaluation, automated data pipelines, and software that must work reliably in the real world. I would be excited to contribute to that environment while continuing to grow as a software and ML engineer.
+
+      Best regards,
+      Simon Sazonov
+
+  # ══ AVOID 2 ══ Red Bull Racing, Sep 2025. The oldest and the weakest, and the
+  # most instructive because it fails differently from the Waymo one.
+  #
+  # ⚠ ITS CONTENT IS NOT A FACT SOURCE. Two claims in it are not supported by
+  # this profile, which is exactly why it is useful to show and dangerous to
+  # imitate:
+  #   · "At Snowit" - Snowit appears NOWHERE in profile/. The truth layer adds
+  #     any such name to `contaminants` and blocks it for the whole run.
+  #   · "I co-founded BeeSurfing" - experience.yaml records BeeSurfing as a
+  #     University team project, and never_say forbids implying otherwise.
+  #     `co-founded` and `founded` are now gated verbs because of this line.
+  - id: ex.redbull
+    verdict: avoid
+    role: Race Strategy Student Placement
+    company: Red Bull Racing
+    sent: 2025-09-26
+    why: >
+      Flattery instead of evidence - "collaborative energy", "every voice is
+      valued" - and a paragraph of fandom about a race he watched, which tells a
+      hiring manager nothing about him. The work paragraph is a list of verbs
+      with no numbers and no decisions. It closes on "my technical skills,
+      passion for data-driven decision making, and strong teamwork mindset",
+      which is three cliches in one sentence and uses a word he has since banned.
+    text: |
+      Dear Ms. Hannah Schmitz,
+
+      Everyone tells me the entry-level student placement in any Formula 1 team is going to be the same. However, after following the sport closely, studying race strategies, and researching Red Bull Racing's innovative approach to data-driven decision-making, it is clear to me that this role offers something far more exciting: the chance to contribute directly to one of the most competitive and forward-thinking teams in Formula 1.
+
+      What stood out to me most is the collaborative energy within Red Bull Racing. From engineers to drivers, every voice is valued, creating a diverse team environment where no detail is overlooked. I was especially inspired by the 2023 Hungarian Grand Prix, where abandoning the original plan and executing a bold tyre strategy turned 10th on the grid into victory.
+
+      Through my projects, I have built a strong foundation in using software and data to solve practical problems. At Snowit, I designed tools that helped predict customer behavior and improve seasonal planning. I have also worked on projects ranging from building databases to creating dashboards that highlight global health trends. Most recently, I co-founded BeeSurfing, where I developed an app that connects surfers with schools in real time. These experiences strengthened my skills in coding, analysis, and clear reporting - tools I am eager to apply in the fast-paced environment of race strategy.
+
+      Thank you for your time and consideration. My technical skills, passion for data-driven decision making, and strong teamwork mindset would make me a valuable addition to Red Bull Racing's Race Strategy Student Placement.
+
+      Sincerely,
+      Simon Sazonov
+
+writing_samples:
+  # Q5 RESOLVED 23 Sep 2026. Four samples, all yours, pasted unedited.
+  # Ranked: sample 1 is the anchor. Match its register before anything else.
+
+  - id: sample.alpine.technical
+    source: "Cover letter, Alpine AI Engineering Student Placement, 15 Sep 2026"
+    why: >
+      The best thing you have written. Concrete noun first, every number against its
+      baseline, and a limitation volunteered before anyone asks for it.
+    text: >
+      Before the thesis I built an F1 race strategy intelligence platform on PySpark,
+      over 74 years of results across fourteen tables. Most of the effort was not
+      modelling. It went into declaring explicit schemas instead of letting Spark infer
+      them, normalising inconsistent lap and sector time strings into integer
+      milliseconds, and validating referential integrity across raceId, driverId and
+      constructorId so that nothing downstream could quietly join on a broken key. On
+      that foundation the MLlib work was almost easy: a gradient-boosted median lap-time
+      model at 2,533 ms RMSE against a 9,538 ms baseline, R2 0.974 on the held-out
+      split, and a random forest predicting Q3 qualification at 0.878 ROC-AUC. The habit
+      I would bring is that with historical motorsport data, the schema and integrity
+      work is where the accuracy actually comes from.
+
+  - id: sample.alpine.limitation
+    source: "Cover letter, Alpine, 15 Sep 2026"
+    why: >
+      How you handle a gap: state it flatly, then name the thing that does transfer.
+      No hedging, no apology, no compensating adjective.
+    text: >
+      I hand-labelled sixty candidates and swept the acceptance threshold, then shipped
+      12 rather than the 25 I had planned, because 25 gave 0.67 precision at 0.62 recall
+      and the task could not afford missed candidates. It sits behind 260 tests at
+      roughly 90% coverage, and falls back to another provider when a rate-limited model
+      drops out mid-run. I have no trackside experience, and everything I know about race
+      weekends comes from the data side, but evaluating a model honestly before trusting
+      it transfers anywhere.
+
+  - id: sample.bending_spoons.reflective
+    source: "Cover letter, Bending Spoons Graduate Data Scientist, 16 Sep 2026"
+    why: >
+      Your reflective register - how you talk about what changed your thinking. This is
+      the tone for a "why this work" paragraph, and it is already a finished story.
+    text: >
+      At Ophis, I have worked on a quantitative trading project where I initially
+      approached the problem through a predictive ML model. As I developed it, I found
+      that improving the prediction itself was only part of the problem. I had to
+      investigate how predictions behaved under different market conditions, deal with
+      uncertainty, and build a separate risk layer around the model rather than treating
+      its output as automatically reliable. That experience changed how I think about ML:
+      a model is only useful when its behaviour is understood and its limitations are
+      accounted for.
+
+  - id: sample.thesis.blunt
+    source: "FINDINGS.md, MSc thesis week-0 feasibility probe, 8 Sep 2026"
+    why: >
+      Your technical writing when nobody is being sold anything. Blunt, willing to say a
+      source is wrong, and it explains why an error matters rather than just naming it.
+    text: >
+      DRS is not deleted - it is silently degenerate: the column is fully populated with
+      a constant. That is arguably a worse trap than deletion, because a naive transfer
+      consumes DRS = 0 as "DRS never deployed" instead of failing loudly. The phenomenon
+      is real and now confirmed at full grid scale; the proposal's description of it and
+      its cited source are both wrong.
+
+# ⚠ ONE SAMPLE DELIBERATELY EXCLUDED
+# The Waymo letter is the weakest of the three and should not be a model for anything.
+# It runs on abstractions where the other two run on nouns - "turning large amounts of
+# sensor and environmental data into reliable representations", "I would be excited to
+# contribute to that environment" (which is one word off your own banned list). Compare
+# its opening to Alpine's: Alpine leads with what your thesis actually does, in one
+# sentence, and only then says why you are writing. That is the pattern worth keeping.
+excluded_samples:
+  - {source: "Cover letter, Waymo Software Engineering Internship", reason: "abstract where the others are concrete; generic closing; not representative of your best register"}
+
+length:
+  cover_letter_words: 280-330
+  cover_letter_paragraphs: 4
+  cv_pages: 1

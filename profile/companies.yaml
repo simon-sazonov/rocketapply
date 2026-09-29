@@ -1,0 +1,34 @@
+# companies.yaml — the one thing the machine cannot write.
+#
+# Full guide: profile/COMPANIES_GUIDE.md  (why, what good looks like, which
+# companies to do first, and how the name is matched).
+#
+# Only `notes` and `angle` reach the model. They are joined with a space and
+# handed to the planner as COMPANY NOTES. Everything else is for you.
+#
+# The name is matched on its NORMALISED form, so `name: Predium` catches a
+# posting that says "Predium Technology GmbH". Genuinely different words need an
+# alias: "Meta" does not match "Meta Platforms".
+#
+# An empty file is fine. Where no entry matches, `pitwall apply research` fills
+# the same slot from a cache under data/cache/research/ — a grounded draft you
+# can promote into this file. An entry HERE always wins, including an entry with
+# a name and no notes, which is how you record "I looked, there is nothing".
+# Where neither has anything, the planner is told "(none — do not invent one)"
+# and the letter says nothing about the company, which beats flattery.
+#
+# Template — copy, do not edit in place:
+#
+# - id: co.example
+#   name: Example
+#   aliases: []
+#   notes: >
+#     What their team actually works on, in your words, from their engineering blog,
+#     papers or job posting. Specific enough that it could not describe a competitor.
+#   angle: >
+#     The honest connection to your work. Not "I am passionate about their mission" -
+#     something like "same class of problem as the sepsis work: a sequential decision
+#     where the feedback arrives far too late to be useful".
+#   source_urls: []
+
+[]

@@ -1,0 +1,253 @@
+# skills.yaml — four fixed rows, variable contents.
+#
+# WHAT CHANGED FROM THE FLAT LIST YOU SENT, AND WHY
+# Your list is good raw material but is not yet a profile file. Four things were added:
+#   1. `row` - which of the four CV rows each item can print in. Without it the packer
+#      cannot fill a row, because it does not know what belongs there.
+#   2. `confidence` + `evidence` - the honesty mechanism. A skill with no bullet id
+#      behind it cannot be `high`. This one rule removes the commonest CV lie.
+#   3. Printable NAMES, separated from concepts. "Decision-Making under Uncertainty"
+#      is a theme for matching, not a string that earns 33 of 195 characters on a CV
+#      row. Concepts stay searchable via `tags`; only short names get printable: true.
+#   4. De-duplication. Your list had the same capability at several altitudes
+#      (e.g. "Reinforcement Learning" and "Q-Learning / SARSA / Double Q-Learning").
+#      One skill record now carries the fine-grained forms as `aliases`, so matching
+#      still fires on the specific term while the CV prints the readable one.
+#
+# ─────────────────── SUPERSEDED 24 Sep 2026 — Simon's instruction ───────────────────
+# R, TypeScript, C# and Forecasting are REAL and supported. The public portfolio is a
+# subset of his work; some projects are private and cannot be published. `evidence: []`
+# on a skill therefore means "no PUBLIC bullet to cite", never "no experience".
+# Such skills carry `evidence_private: true`, print normally, and are usable in letters.
+# The CV/letter rule that still stands: cite a named public project only where one exists.
+# The reason is that the two are different sizes of claim. "R" as one token in a
+# comma-separated list is a weak, conventional signal. A sentence in a letter - "my
+# experience with R" - is a specific, elaborated, checkable assertion, and it is the
+# one an interviewer follows up on. The override covers the claim you made; it does
+# not silently grow into a bigger one.
+# To lift it entirely: delete the letter_policy lines. To revert: printable: false.
+
+rows:
+  row.programming:
+    lines: 1
+    max_chars: 95
+    pinned: [Python, SQL]
+  row.methods:
+    lines: 2
+    max_chars: 195
+    pinned: [Machine Learning]
+  row.tools:
+    lines: 2
+    max_chars: 195
+    pinned: [pandas, scikit-learn]
+  row.spoken:
+    lines: 1
+    max_chars: 105
+    fixed: true
+    fixed_text: "English(fluent - MSc taught in English), Ukrainian(native), Russian(native), Portuguese(B1), Italian(A2)"
+
+skills:
+
+  # ─────────────── canonical tags added as aliases, 24 Sep 2026 ───────────────
+  # Eighteen records had a canonical tag on their bullets that no alias matched:
+  # skill.testing is named "Testing & QA", so the tag `testing` resolved to
+  # nothing and a posting asking for it read as a GAP on a profile with six
+  # bullets of evidence. Adding the tag as an alias changes no claim, no
+  # confidence and no evidence — it only lets the matcher find what was already
+  # there. Derived from bullet tags, not invented.
+
+  # ───────────────────────── row 1 · programming languages ─────────────────────────
+  - {id: skill.python, name: Python, row: row.programming, category: programming, confidence: high, years: 4, years_basis: "since BSc start Sep 2022", pin: true, printable: true, aliases: [python3], evidence: [ophis.b1, proj.pitwall.b1, proj.rl_sepsis.b1, proj.ga_image.b1]}
+  - {id: skill.sql, name: SQL, row: row.programming, category: programming, confidence: high, years: 3, pin: true, printable: true, evidence: [proj.wwc_sql.b1, proj.wwc_sql.b2, proj.f1_warehouse.b2]}
+  - {id: skill.tsql, name: T-SQL, row: row.programming, category: programming, confidence: medium, years: 1, printable: true, aliases: [transact-sql, triggers], evidence: [proj.wwc_sql.b2]}
+  - {id: skill.kotlin, name: Kotlin, row: row.programming, category: programming, confidence: medium, years: 1, printable: true, aliases: [android], evidence: [proj.conference_android.b1]}
+  - {id: skill.javascript, name: JavaScript, row: row.programming, category: programming, confidence: medium, years: 1, printable: true, evidence: [proj.socialhire.b1, proj.socialhire.b2]}
+  - {id: skill.dart, name: Dart, row: row.programming, category: programming, confidence: medium, years: 1, printable: true, aliases: [flutter], evidence: [beesurfing.b1]}
+  - {id: skill.prolog, name: Prolog, row: row.programming, category: programming, confidence: medium, years: 1, printable: true, aliases: [logic programming, swi-prolog], evidence: [proj.prolog_europe.b1, proj.prolog_europe.b2]}
+  - {id: skill.dax, name: DAX, row: row.programming, category: programming, confidence: medium, years: 1, printable: true, evidence: [proj.powerbi_health.b2]}
+  - {id: skill.powerquery, name: Power Query (M), row: row.programming, category: programming, confidence: medium, years: 1, printable: true, aliases: [m language], evidence: [proj.powerbi_health.b1]}
+  - {id: skill.latex, name: LaTeX, row: row.programming, category: programming, confidence: medium, years: 2, printable: true, evidence: [proj.rl_sepsis.b1]}
+  - id: skill.typst
+    name: Typst
+    row: row.programming
+    category: programming
+    confidence: low
+    printable: false
+    low_phrasing: "wrote project reports in Typst alongside LaTeX"
+    evidence: []
+  - id: skill.assembly8085
+    name: Assembly (8085)
+    aliases: [assembly]
+    row: row.programming
+    category: programming
+    confidence: low
+    printable: false
+    low_phrasing: "wrote a known-plaintext Caesar-cipher attack in Intel 8085 assembly for a systems course"
+    note: "Real work (team of four, Jan 2024) but not written up as a project entry, so it has no bullet id to cite. Add the project if you want this at medium."
+    evidence: []
+
+  # ── on the CV today, unsupported. See OPEN_QUESTIONS Q2. ──
+  - {id: skill.r, name: "R", row: row.programming, category: programming, confidence: medium, printable: true, evidence_private: true, note: "Simon 2026-09-24: real, evidenced in work not published in the public portfolio.", evidence: []}
+  - {id: skill.typescript, name: TypeScript, row: row.programming, category: programming, confidence: medium, printable: true, evidence_private: true, note: "Simon 2026-09-24: real, evidenced in work not published in the public portfolio.", evidence: []}
+  - {id: skill.csharp, name: "C#", row: row.programming, category: programming, confidence: medium, printable: true, evidence_private: true, note: "Simon 2026-09-24: real, evidenced in work not published in the public portfolio.", evidence: []}
+
+  # ───────────────────────── row 2 · methods & techniques ─────────────────────────
+  - {id: skill.machine_learning, name: Machine Learning, row: row.methods, category: ml, confidence: high, pin: true, printable: true, evidence: [proj.tweet_sentiment.b1, proj.f1_warehouse.b2, proj.marketing_analytics.b1, ophis.b1]}
+  - {id: skill.reinforcement_learning, name: Reinforcement Learning, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [rl, mdp, q-learning, sarsa, double q-learning, dqn, ppo, policy gradient, value iteration, reward shaping, temporal difference], evidence: [proj.rl_sepsis.b1, proj.rl_sepsis.b2]}
+  - {id: skill.deep_learning, name: Deep Learning, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [cnn, bilstm, lstm, batch normalization, dropout, weight decay, data augmentation], evidence: [proj.painter_cnn.b1, proj.tweet_sentiment.b1, proj.rl_sepsis.b1]}
+  - {id: skill.monte_carlo, name: Monte Carlo Simulation, row: row.methods, category: quant, confidence: high, printable: true, aliases: [monte_carlo, stochastic simulation, path generation, geometric brownian motion, bootstrap resampling], evidence: [ophis.b2, proj.montecarlo_risk.b1]}
+  - {id: skill.risk_modelling, name: Risk Modelling, row: row.methods, category: quant, confidence: high, printable: true, aliases: [value at risk, var, cvar, expected shortfall, kelly criterion, position sizing, probability of loss, sharpe ratio, profit factor], evidence: [ophis.b2, proj.montecarlo_risk.b2, proj.breakout_v1.b2]}
+  - {id: skill.optimization, name: Optimisation, row: row.methods, category: optimization, confidence: high, printable: true, aliases: [optimization, metaheuristics, black-box optimization, premature convergence], evidence: [proj.ga_image.b1, proj.ga_image.b2, proj.montecarlo_risk.b2]}
+  - {id: skill.genetic_algorithms, name: Genetic Algorithms, row: row.methods, category: optimization, confidence: medium, printable: true, aliases: [evolutionary computation, selection, crossover, mutation, elitism, fitness sharing], evidence: [proj.ga_image.b1, proj.ga_image.b2]}
+  - {id: skill.simulated_annealing, name: Simulated Annealing, row: row.methods, category: optimization, confidence: medium, printable: true, evidence: [proj.ga_image.b2]}
+  - {id: skill.hyperparameter_tuning, name: Hyperparameter Optimisation, row: row.methods, category: ml, confidence: high, printable: true, aliases: [optuna, tpe, bayesian optimization, grid search, importance analysis], evidence: [proj.ga_image.b2, proj.rl_sepsis.b1, proj.montecarlo_risk.b2]}
+  - {id: skill.time_series, name: Time Series Analysis, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [time_series, ohlc, intraday, rolling windows, walk-forward, look-ahead bias, non-repainting], evidence: [ophis.b1, proj.market_structure_ml.b1, proj.breakout_v1.b1]}
+  - {id: skill.walk_forward, name: Walk-Forward Validation, row: row.methods, category: quant, confidence: medium, printable: true, aliases: [out-of-sample, time-split validation, backtesting], evidence: [proj.breakout_v1.b2, proj.montecarlo_risk.b2]}
+  - {id: skill.feature_engineering, name: Feature Engineering, row: row.methods, category: ml, confidence: high, printable: true, aliases: [feature selection, causal features, online-safe features], evidence: [ophis.b1, proj.market_structure_ml.b1, proj.tweet_sentiment.b1]}
+  - {id: skill.nlp, name: NLP, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [natural language processing, text mining, tf-idf, bag-of-words, n-grams, word2vec, embeddings, sentiment analysis], evidence: [proj.tweet_sentiment.b1, proj.marketing_analytics.b2]}
+  - {id: skill.transformers, name: Transformers, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [bert, roberta, finbert, minilm, fine-tuning, transfer learning], evidence: [proj.tweet_sentiment.b1, proj.tweet_sentiment.b2, proj.marketing_analytics.b2]}
+  - {id: skill.llm, name: LLMs, row: row.methods, category: ai, confidence: medium, printable: true, aliases: [llm, large language models, generative ai, prompt engineering, zero-shot classification, structured json output, context window], evidence: [proj.pitwall.b1, proj.pitwall.b2, proj.tweet_sentiment.b2]}
+  - {id: skill.llm_agents, name: LLM Agents, row: row.methods, category: ai, confidence: medium, printable: true, aliases: [tool calling, langchain agents, model cascade, escalation policy, multi-model voting], evidence: [proj.tweet_sentiment.b2, proj.pitwall.b1]}
+  - {id: skill.mlops, name: MLOps, row: row.methods, category: engineering, confidence: medium, printable: true, aliases: [model serving, model registry, experiment tracking, train-serve consistency, model contracts], evidence: [proj.covid_mlops.b1, proj.covid_mlops.b2]}
+  - {id: skill.drift_monitoring, name: Drift Monitoring, row: row.methods, category: engineering, confidence: medium, printable: true, aliases: [psi, ks test, jensen-shannon, data drift, concept drift, model monitoring], evidence: [proj.covid_mlops.b2]}
+  - {id: skill.etl, name: Data Pipelines & ETL, row: row.methods, category: engineering, confidence: high, printable: true, aliases: [data_engineering, pipelines, etl, medallion architecture, ingestion, batch pipelines], evidence: [proj.f1_warehouse.b1, proj.covid_mlops.b1, freedomcode.b2]}
+  - {id: skill.data_quality, name: Data Quality & Validation, row: row.methods, category: engineering, confidence: high, printable: true, aliases: [data_quality, schema enforcement, referential integrity, data contracts], evidence: [proj.f1_warehouse.b1, proj.covid_mlops.b1, proj.wwc_sql.b2]}
+  - {id: skill.dimensional_modelling, name: Dimensional Modelling, row: row.methods, category: engineering, confidence: high, printable: true, aliases: [star schema, fact table, dimension table, scd-2, grain], evidence: [proj.f1_warehouse.b2, proj.powerbi_health.b2]}
+  - {id: skill.data_modelling, name: Data Modelling, row: row.methods, category: engineering, confidence: high, printable: true, aliases: [er modelling, normalization, schema design, embedding vs referencing], evidence: [proj.wwc_sql.b1, proj.airbnb_mongo.b1, proj.socialhire.b2]}
+  - {id: skill.query_optimization, name: Query Optimisation, row: row.methods, category: engineering, confidence: medium, printable: true, aliases: [query_optimization, indexing, compound index, explain plan, execution plan], evidence: [proj.airbnb_mongo.b2]}
+  - {id: skill.statistics, name: Statistical Analysis, row: row.methods, category: stats, confidence: medium, printable: true, aliases: [statistics, hypothesis testing, mann-whitney u, wilcoxon, probability, variance analysis], evidence: [proj.ga_image.b2, proj.rl_sepsis.b2]}
+  - {id: skill.experimental_design, name: Experimental Design, row: row.methods, category: stats, confidence: high, printable: true, aliases: [ablation study, one-at-a-time, multi-seed, pre-registered criteria, fair budget, controlled comparison], evidence: [proj.ga_image.b2, proj.painter_cnn.b2, proj.rl_sepsis.b1]}
+  - {id: skill.model_evaluation, name: Model Evaluation, row: row.methods, category: ml, confidence: high, printable: true, aliases: [macro-f1, balanced accuracy, mcc, roc-auc, pr curve, average precision, rmse, r2, silhouette, top-k accuracy, error analysis], evidence: [proj.tweet_sentiment.b2, proj.painter_cnn.b2, proj.f1_warehouse.b2]}
+  - {id: skill.cross_validation, name: Cross-Validation, row: row.methods, category: ml, confidence: high, printable: true, aliases: [stratified k-fold, model selection, leakage-free pipelines, train validation test], evidence: [proj.tweet_sentiment.b1, proj.painter_cnn.b2]}
+  - {id: skill.class_imbalance, name: Class Imbalance Handling, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [class_imbalance, class weights, oversampling, stratification], evidence: [proj.tweet_sentiment.b1, proj.painter_cnn.b2]}
+  - {id: skill.threshold_tuning, name: Decision Threshold Tuning, row: row.methods, category: ml, confidence: high, printable: true, aliases: [threshold_tuning, precision-recall trade-off, operating point, recall constraint, max-f1], evidence: [ophis.b1, proj.pitwall.b2, proj.market_structure_ml.b2]}
+  - {id: skill.explainability, name: Model Explainability, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [explainability, shap, feature importance, interpretability], evidence: [proj.covid_mlops.b1]}
+  - {id: skill.clustering, name: Clustering, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [k-means, segmentation, rfm, silhouette], evidence: [proj.marketing_analytics.b1, proj.f1_warehouse.b2]}
+  - {id: skill.predictive_modeling, name: Predictive Modelling, row: row.methods, category: ml, confidence: high, printable: true, aliases: [classification, regression, churn prediction, gradient boosting, random forest, logistic regression, svm, knn, xgboost, lightgbm], evidence: [proj.marketing_analytics.b1, proj.f1_warehouse.b2, proj.tweet_sentiment.b1]}
+  - {id: skill.association_rules, name: Association Rule Mining, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [association_rules, apriori, market basket analysis, support, confidence, lift], evidence: [proj.marketing_analytics.b2]}
+  - {id: skill.decision_making, name: Decision Modelling, row: row.methods, category: quant, confidence: high, printable: true, aliases: [decision_making, decision under uncertainty, sequential decision-making, accept reduce reject, graded decision rules, robustness testing, worst-case assumptions], evidence: [proj.montecarlo_risk.b2, proj.rl_sepsis.b2, proj.pitwall.b2]}
+  - {id: skill.multi_objective, name: Multi-Objective Optimisation, row: row.methods, category: optimization, confidence: medium, printable: true, aliases: [multi_objective, pareto frontier, trade-off analysis, sensitivity analysis], evidence: [proj.rl_sepsis.b2]}
+  - {id: skill.big_data, name: Distributed Computing, row: row.methods, category: engineering, confidence: medium, printable: true, aliases: [big data, partitioning, broadcast join, catalyst, tungsten], evidence: [proj.f1_warehouse.b1, proj.f1_warehouse.b2]}
+  - {id: skill.system_design, name: System Design, row: row.methods, category: engineering, confidence: medium, printable: true, aliases: [modular design, layered configuration, fallback chains, graceful degradation, resumable pipelines], evidence: [proj.pitwall.b1, proj.ga_image.b1]}
+  - {id: skill.testing, name: Testing & QA, row: row.methods, category: engineering, confidence: medium, printable: true, aliases: [testing, pytest, unit testing, hermetic tests, api parity testing, coverage], evidence: [proj.pitwall.b2, proj.covid_mlops.b2, freedomcode.b3]}
+  - {id: skill.eda, name: Exploratory Data Analysis, row: row.methods, category: analytics, confidence: high, printable: true, aliases: [eda, data profiling], evidence: [freedomcode.b3, proj.marketing_analytics.b1, proj.f1_warehouse.b1]}
+  - {id: skill.bi, name: Business Intelligence, row: row.methods, category: analytics, confidence: medium, printable: true, aliases: [reporting, dashboards, kpi], evidence: [proj.powerbi_health.b1, proj.powerbi_health.b2]}
+  - {id: skill.process_modelling, name: Process Modelling, row: row.methods, category: analytics, confidence: medium, printable: true, aliases: [bpmn, as-is modelling, bottleneck analysis, process optimization], evidence: [proj.bpmn_o2c.b1, proj.bpmn_o2c.b2]}
+  - {id: skill.requirements, name: Requirements Analysis, row: row.methods, category: professional, confidence: medium, printable: true, aliases: [requirements, problem framing, consulting-style framing, stakeholder management], evidence: [proj.wwc_sql.b1, proj.bpmn_o2c.b1, freedomcode.b1]}
+  - {id: skill.privacy, name: Privacy-by-Design (GDPR), row: row.methods, category: professional, confidence: medium, printable: true, aliases: [gdpr, data retention, compliance], evidence: [proj.pitwall.b1]}
+  - {id: skill.knowledge_representation, name: Knowledge Representation, row: row.methods, category: ai, confidence: medium, printable: true, aliases: [symbolic ai, logic programming, inference], evidence: [proj.prolog_europe.b1, proj.prolog_europe.b2]}
+  - {id: skill.entity_resolution, name: Entity Resolution, row: row.methods, category: ai, confidence: medium, printable: true, aliases: [deduplication, disambiguation, record linkage], evidence: [proj.pitwall.b1]}
+  - {id: skill.ux, name: Usability Testing, row: row.methods, category: professional, confidence: low, printable: false, low_phrasing: "ran think-aloud usability tests on a prototype in an HCI course", evidence: []}
+
+  # ── on the CV today, thin. See OPEN_QUESTIONS Q2. ──
+  - id: skill.forecasting
+    name: Forecasting
+    row: row.methods
+    category: ml
+    confidence: medium
+    printable: true
+    evidence_private: true
+    note: "Simon 2026-09-24: real, evidenced in work not published in the public portfolio."
+    evidence: []
+
+  # ───────────────────────── row 3 · tools & libraries ─────────────────────────
+  - {id: skill.pandas, name: pandas, row: row.tools, category: tools, confidence: high, pin: true, printable: true, evidence: [proj.marketing_analytics.b1, proj.market_structure_ml.b1, proj.breakout_v1.b1]}
+  - {id: skill.sklearn, name: scikit-learn, row: row.tools, category: tools, confidence: high, pin: true, printable: true, evidence: [proj.tweet_sentiment.b1, proj.marketing_analytics.b1, proj.market_structure_ml.b2]}
+  - {id: skill.numpy, name: NumPy, row: row.tools, category: tools, confidence: high, printable: true, evidence: [proj.ga_image.b1, proj.montecarlo_risk.b1, proj.rl_sepsis.b1]}
+  - {id: skill.scipy, name: SciPy, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.ga_image.b2]}
+  - {id: skill.pytorch, name: PyTorch, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [deep learning, neural networks, torch, autograd], evidence: [proj.tweet_sentiment.b1, proj.tweet_sentiment.b2]}
+  - {id: skill.tensorflow, name: TensorFlow/Keras, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [deep learning, tensorflow, keras], evidence: [proj.painter_cnn.b1, proj.painter_cnn.b2]}
+  - {id: skill.huggingface, name: Hugging Face, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [transformers, sentence-transformers], evidence: [proj.tweet_sentiment.b1, proj.marketing_analytics.b2]}
+  - {id: skill.xgboost, name: XGBoost, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [boosted trees, gradient boosted trees], evidence: [proj.tweet_sentiment.b1]}
+  - {id: skill.lightgbm, name: LightGBM, row: row.tools, category: tools, confidence: low, printable: false, low_phrasing: "used LightGBM alongside XGBoost in the MLOps model-selection stage", evidence: []}
+  - {id: skill.optuna, name: Optuna, row: row.tools, category: tools, confidence: high, printable: true, evidence: [proj.ga_image.b2, proj.rl_sepsis.b1, proj.montecarlo_risk.b2]}
+  - {id: skill.gymnasium, name: Gymnasium, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [reinforcement learning, gym, openai gym, rl environments, vectorised environments], evidence: [proj.rl_sepsis.b1]}
+  - {id: skill.sb3, name: Stable-Baselines3, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [reinforcement learning, stable baselines, sb3], evidence: [proj.rl_sepsis.b1]}
+  - {id: skill.langchain, name: LangChain, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [llm, llm orchestration, agent framework], evidence: [proj.tweet_sentiment.b2]}
+  - {id: skill.ollama, name: Ollama, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [local llm, qwen], evidence: [proj.pitwall.b1]}
+  - {id: skill.azure_openai, name: Azure OpenAI, row: row.tools, category: tools, confidence: medium, printable: true, note: "The inference API only. This is NOT Azure cloud experience - see skill.azure below.", evidence: [proj.tweet_sentiment.b2]}
+  - {id: skill.groq, name: Groq, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [deepseek], evidence: [proj.pitwall.b1]}
+  - {id: skill.shap, name: SHAP, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [shapley, shapley values], evidence: [proj.covid_mlops.b1]}
+  - {id: skill.pyspark, name: PySpark, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [spark, apache spark, rdd, dataframe], evidence: [proj.f1_warehouse.b1, proj.f1_warehouse.b2]}
+  - {id: skill.sparksql, name: Spark SQL, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.f1_warehouse.b2]}
+  - {id: skill.mllib, name: Spark MLlib, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.f1_warehouse.b2]}
+  - {id: skill.parquet, name: Parquet, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.f1_warehouse.b1, proj.covid_mlops.b1]}
+  - {id: skill.kedro, name: Kedro, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.covid_mlops.b1]}
+  - {id: skill.mlflow, name: MLflow, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.covid_mlops.b2]}
+  - {id: skill.fastapi, name: FastAPI, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [rest api], evidence: [proj.covid_mlops.b2]}
+  - {id: skill.docker, name: Docker, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [docker-compose, containerisation], evidence: [proj.covid_mlops.b2]}
+  - {id: skill.evidently, name: Evidently, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.covid_mlops.b2]}
+  - {id: skill.streamlit, name: Streamlit, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.pitwall.b1]}
+  - {id: skill.pytest, name: pytest, row: row.tools, category: tools, confidence: high, printable: true, evidence: [proj.pitwall.b2, proj.covid_mlops.b2]}
+  - {id: skill.mypy, name: mypy, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [type checking], evidence: [proj.pitwall.b2]}
+  - {id: skill.ruff, name: ruff, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [linting], evidence: [proj.pitwall.b2]}
+  - {id: skill.mongodb, name: MongoDB, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [pymongo, nosql, aggregation pipeline], evidence: [proj.airbnb_mongo.b1, proj.airbnb_mongo.b2]}
+  - {id: skill.sqlserver, name: SQL Server, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.wwc_sql.b1, proj.wwc_sql.b2]}
+  - {id: skill.sqlite, name: SQLite, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.pitwall.b1]}
+  - {id: skill.firebase, name: Firebase/Firestore, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [firebase, cloud firestore, security rules, cloud functions], evidence: [proj.socialhire.b1, beesurfing.b1, proj.conference_android.b1]}
+  - {id: skill.powerdesigner, name: PowerDesigner, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [sap powerdesigner], evidence: [proj.wwc_sql.b1]}
+  - {id: skill.powerbi, name: Power BI, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.powerbi_health.b1, proj.powerbi_health.b2]}
+  - {id: skill.git, name: Git/GitHub, row: row.tools, category: tools, confidence: high, printable: true, aliases: [version control, pull requests, git lfs], evidence: [proj.socialhire.b2, proj.marketing_analytics.b1]}
+  - {id: skill.github_actions, name: GitHub Actions, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [ci/cd, continuous integration], evidence: [proj.socialhire.b2]}
+  - {id: skill.matplotlib, name: matplotlib, row: row.tools, category: tools, confidence: high, printable: true, aliases: [seaborn, data visualization], evidence: [proj.ga_image.b2, proj.rl_sepsis.b1]}
+  - {id: skill.jupyter, name: Jupyter, row: row.tools, category: tools, confidence: high, printable: true, evidence: [proj.ga_image.b1, proj.f1_warehouse.b1]}
+  - {id: skill.quantconnect, name: QuantConnect, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [backtesting engine], evidence: [proj.breakout_v1.b1, proj.breakout_v1.b2]}
+  - {id: skill.react, name: React, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.socialhire.b1]}
+  - {id: skill.flutter, name: Flutter, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [flutterflow], evidence: [beesurfing.b1]}
+  - {id: skill.vercel, name: Vercel, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.socialhire.b2]}
+  - {id: skill.bizagi, name: Bizagi, row: row.tools, category: tools, confidence: medium, printable: true, evidence: [proj.bpmn_o2c.b1]}
+  - {id: skill.figma, name: Figma, row: row.tools, category: tools, confidence: low, printable: false, low_phrasing: "built an interactive high-fidelity prototype in Figma for an HCI course", evidence: []}
+  - {id: skill.pygame, name: Pygame, row: row.tools, category: tools, confidence: low, printable: false, low_phrasing: "built an object-oriented Pygame game as a programming course project", evidence: []}
+  - {id: skill.nltk, name: NLTK, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [nlp, gensim, word2vec], evidence: [proj.tweet_sentiment.b1]}
+  - {id: skill.pdm, name: PDM/Conda, row: row.tools, category: tools, confidence: medium, printable: true, aliases: [dependency management, reproducible environments], evidence: [proj.marketing_analytics.b1]}
+
+  # ═══════════════════════ GAP MAP — confidence: none ═══════════════════════
+  # These never print. More importantly, when a posting asks for one, the system adds
+  # it to that run's forbidden list and the fact checker rejects any letter mentioning
+  # it. "No match found" is a softer signal than an active block. This list doubles as
+  # your learning roadmap - your own coverage notes call out the first four as the gaps
+  # worth closing (a small forecasting project and a small OR-Tools project would close
+  # the two biggest).
+  - {id: skill.arima, name: ARIMA/Prophet, row: row.methods, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.lp_mip, name: LP/MIP Solvers, row: row.methods, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, note: "No OR-Tools / Gurobi / CPLEX / PuLP. Metaheuristics and dynamic programming only.", evidence: []}
+  - {id: skill.bayesian, name: Bayesian Inference, row: row.methods, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, note: "Bayesian hyperparameter search via Optuna TPE is not Bayesian modelling. Do not let a letter blur the two.", evidence: []}
+  - {id: skill.causal, name: Causal Inference / A-B Testing, row: row.methods, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.aws, name: AWS, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.azure, name: Azure, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, note: "Azure OpenAI is an inference API. It is not Azure cloud experience and must never be presented as such.", evidence: []}
+  - {id: skill.gcp, name: GCP, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.kubernetes, name: Kubernetes, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.airflow, name: Airflow, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, note: "Kedro is pipeline orchestration but it is not Airflow. Do not substitute.", evidence: []}
+  - {id: skill.dbt, name: dbt, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.snowflake, name: Snowflake, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.databricks, name: Databricks, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, note: "PySpark experience is local/academic, not on Databricks.", evidence: []}
+  - {id: skill.kafka, name: Kafka, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, note: "A teammate built the Spark Structured Streaming notebook in the F1 project - not you.", evidence: []}
+  - {id: skill.tableau, name: Tableau, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.terraform, name: Terraform, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.scala, name: Scala, row: row.tools, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.java, name: Java, row: row.programming, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+  - {id: skill.cpp, name: "C++", row: row.programming, category: gap, confidence: none, printable: false, status: NOT_SUPPORTED, evidence: []}
+
+  # ─────────── added 24 Sep 2026, from bullet tags, Simon's decisions ───────────
+  # Every `evidence:` here is the list of bullets that actually carry the tag.
+  # Nothing is inferred and no confidence is guessed: 2+ bullets is high, 1 is
+  # medium, which is the same ladder the rest of this file uses.
+  #
+  # `printable: false` on the last four is deliberate. Finance and Quantitative
+  # Methods are DOMAINS, Communication and Teamwork are soft skills, and all four
+  # are real. But the four CV rows are technical and stay that way — these exist
+  # so a posting asking for them finds the evidence and counts it, never so they
+  # take a slot next to Machine Learning.
+  #
+  # 'Application Development' rather than 'Software Engineering': same nine
+  # bullets, but it describes what they show — four shipped apps — instead of
+  # implying general engineering seniority.
+  - {id: skill.databases, name: Databases, row: row.methods, category: ml, confidence: high, printable: true, aliases: [databases], evidence: [beesurfing.b1, proj.f1_warehouse.b1, proj.pitwall.b1, proj.airbnb_mongo.b1, proj.airbnb_mongo.b2]}
+  - {id: skill.software, name: Application Development, row: row.methods, category: ml, confidence: high, printable: true, aliases: [software], evidence: [beesurfing.b1, proj.socialhire.b1, proj.conference_android.b1, proj.conference_android.b2, proj.car_racer.b1]}
+  - {id: skill.analytics, name: Analytics, row: row.methods, category: ml, confidence: high, printable: true, aliases: [analytics], evidence: [freedomcode.b3, proj.marketing_analytics.b1, proj.marketing_analytics.b2, proj.powerbi_health.b1, proj.bpmn_o2c.b2]}
+  - {id: skill.simulation, name: Simulation, row: row.methods, category: ml, confidence: high, printable: true, aliases: [simulation], evidence: [ophis.b2, ophis.b3, proj.montecarlo_risk.b1]}
+  - {id: skill.mobile, name: Mobile Development, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [mobile], evidence: [beesurfing.b1, proj.conference_android.b1]}
+  - {id: skill.uml, name: UML / Class Modelling, row: row.methods, category: ml, confidence: medium, printable: true, aliases: [uml], evidence: [proj.car_racer.b1, proj.car_racer.b2]}
+  - {id: skill.finance, name: Finance, category: ml, confidence: high, printable: false, aliases: [finance], evidence: [ophis.b1, ophis.b2, proj.montecarlo_risk.b1, proj.market_structure_ml.b1, proj.breakout_v1.b1]}
+  - {id: skill.quantitative, name: Quantitative Methods, category: ml, confidence: high, printable: false, aliases: [quantitative], evidence: [ophis.b2, proj.montecarlo_risk.b2, proj.breakout_v1.b2]}
+  - {id: skill.communication, name: Communication, category: ml, confidence: high, printable: false, aliases: [communication], evidence: [freedomcode.b1, freedomcode.b3, proj.bpmn_o2c.b2, proj.figma_hci.b2]}
+  - {id: skill.teamwork, name: Teamwork, category: ml, confidence: medium, printable: false, aliases: [teamwork], evidence: [proj.socialhire.b2, proj.car_racer.b2]}

@@ -1,0 +1,247 @@
+# taxonomy.yaml — the canonical tag vocabulary.
+#
+# Tags are the matching mechanism, not decoration. Matching works on exact strings, so
+# `ML` in one file and `machine learning` in another simply fails to match. Every tag
+# used anywhere in profile/ appears below; validate_profile.py can be extended to reject
+# anything that does not.
+#
+# ⚠ RECONCILE THIS WITH THE DEVELOPER. The build spec tells you to ask for taxonomy.py's
+# canonical list. That file does not exist yet, so this is a proposal derived from your
+# actual work rather than invented up front. When the developer has theirs, diff the two
+# and settle on one - do not let both exist.
+#
+# Spelling convention: British -modelling, -ise where it appears in prose; but -ization
+# and -ize forms are kept for tags that are conventionally spelled that way in the field
+# (optimization, normalization, regularization). Consistency matters more than correctness here.
+
+aliases:
+  # left-hand side is REJECTED, right-hand side is canonical
+  ML: machine_learning
+  machine learning: machine_learning
+  deep learning: deep_learning
+  RL: reinforcement_learning
+  time series: time_series
+  er_modelling: data_modelling
+  risk_modeling: risk_modelling
+  NLP: nlp
+  LLM: llm
+
+# A tag with "0 uses — posting vocabulary" is deliberately not used by any record
+# in profile/. It exists so that a POSTING naming that thing resolves to something:
+# `matcher.canonical_tags` is a direct lookup, so a term outside this file
+# contributes nothing to the signal, and the skill it names can never be ranked
+# up. Before these were added, `row.tools` could only ever react to 14 of its 46
+# entries — a posting demanding PyTorch printed Bizagi and Flutter instead.
+# Do not delete them for being unused; unused is the point.
+
+canonical:
+  ml_core:
+    - scikit-learn   # 0 uses — posting vocabulary
+    - xgboost   # 0 uses — posting vocabulary
+    - gradient_boosting   # 0 uses — posting vocabulary
+    - shap   # 0 uses — posting vocabulary
+    - optuna   # 0 uses — posting vocabulary
+    - hyperparameter_optimization   # 0 uses — posting vocabulary
+    - calibration   # 0 uses — posting vocabulary
+    - data_mining   # 0 uses — posting vocabulary
+    - recommender_systems   # 0 uses — posting vocabulary
+    - machine_learning   # 6 use(s)
+    - classification   # 2 use(s)
+    - regression   # 1 use(s)
+    - clustering   # 2 use(s)
+    - model_evaluation   # 9 use(s)
+    - model_selection   # 1 use(s)
+    - cross_validation   # 1 use(s)
+    - class_imbalance   # 2 use(s)
+    - feature_engineering   # 2 use(s)
+    - threshold_tuning   # 3 use(s)
+    - explainability   # 1 use(s)
+    - churn_prediction   # 1 use(s)
+    - rfm   # 1 use(s)
+    - association_rules   # 1 use(s)
+    - labelling   # 1 use(s)
+    - benchmarking   # 1 use(s)
+    - ablation   # 1 use(s)
+  deep_learning:
+    - pytorch   # 0 uses — posting vocabulary
+    - neural_networks   # 0 uses — posting vocabulary
+    - fine_tuning   # 0 uses — posting vocabulary
+    - deep_learning   # 4 use(s)
+    - cnn   # 2 use(s)
+    - computer_vision   # 1 use(s)
+    - transformers   # 3 use(s)
+    - tensorflow   # 2 use(s)
+    - regularization   # 1 use(s)
+  nlp_llm:
+    - huggingface   # 0 uses — posting vocabulary
+    - langchain   # 0 uses — posting vocabulary
+    - nltk   # 0 uses — posting vocabulary
+    - ollama   # 0 uses — posting vocabulary
+    - groq   # 0 uses — posting vocabulary
+    - azure_openai   # 0 uses — posting vocabulary
+    - tool_calling   # 0 uses — posting vocabulary
+    - rag   # 0 uses — posting vocabulary
+    - prompt_engineering   # 0 uses — posting vocabulary
+    - nlp   # 4 use(s)
+    - text_classification   # 2 use(s)
+    - llm   # 3 use(s)
+    - agents   # 1 use(s)
+  rl_decision:
+    - gymnasium   # 0 uses — posting vocabulary
+    - stable-baselines3   # 0 uses — posting vocabulary
+    - policy_optimization   # 0 uses — posting vocabulary
+    - reinforcement_learning   # 2 use(s)
+    - mdp   # 1 use(s)
+    - reward_shaping   # 1 use(s)
+    - decision_making   # 3 use(s)
+    - multi_objective   # 1 use(s)
+  simulation_optimisation:
+    - simulated_annealing   # 0 uses — posting vocabulary
+    - scipy   # 0 uses — posting vocabulary
+    - monte_carlo   # 2 use(s)
+    - simulation   # 3 use(s)
+    - probability   # 3 use(s)
+    - optimization   # 4 use(s)
+    - genetic_algorithms   # 2 use(s)
+    - metaheuristics   # 2 use(s)
+    - grid_search   # 1 use(s)
+    - walk_forward   # 1 use(s)
+    - risk_modelling   # 3 use(s)
+  stats:
+    - forecasting   # 0 uses — posting vocabulary
+    - causal_inference   # 0 uses — posting vocabulary
+    - bayesian   # 0 uses — posting vocabulary
+    - statistics   # 2 use(s)
+    - hypothesis_testing   # 2 use(s)
+    - experimental_design   # 1 use(s)
+    - eda   # 2 use(s)
+    - validation   # 0 uses - reserved (kept deliberately: too vague to tag with, listed so it is visibly discouraged)
+  time_series_quant:
+    - time_series   # 5 use(s)
+    - look_ahead_bias   # 1 use(s)
+    - signal_design   # 1 use(s)
+    - backtesting   # 1 use(s)
+    - finance   # 5 use(s)
+    - quantitative   # 3 use(s)
+  data_engineering:
+    - data_pipelines   # 0 uses — posting vocabulary
+    - spark   # 0 uses — posting vocabulary
+    - spark_sql   # 0 uses — posting vocabulary
+    - spark_mllib   # 0 uses — posting vocabulary
+    - airflow   # 0 uses — posting vocabulary
+    - dbt   # 0 uses — posting vocabulary
+    - entity_resolution   # 0 uses — posting vocabulary
+    - streaming   # 0 uses — posting vocabulary
+    - data_engineering   # 4 use(s)
+    - etl   # 6 use(s)
+    - pipelines   # 3 use(s)
+    - data_quality   # 5 use(s)
+    - dimensional_modelling   # 2 use(s)
+    - data_modelling   # 4 use(s)
+    - normalization   # 2 use(s)
+    - big_data   # 1 use(s)
+    - pyspark   # 3 use(s)
+    - parquet   # 1 use(s)
+    - feature_store   # 1 use(s)
+    - kedro   # 1 use(s)
+  databases:
+    - sqlite   # 0 uses — posting vocabulary
+    - sql_server   # 0 uses — posting vocabulary
+    - postgresql   # 0 uses — posting vocabulary
+    - snowflake   # 0 uses — posting vocabulary
+    - bigquery   # 0 uses — posting vocabulary
+    - redis   # 0 uses — posting vocabulary
+    - databases   # 11 use(s)
+    - sql   # 4 use(s)
+    - t_sql   # 1 use(s)
+    - mongodb   # 3 use(s)
+    - nosql   # 3 use(s)
+    - indexing   # 1 use(s)
+    - query_optimization   # 1 use(s)
+    - performance   # 1 use(s)
+    - business_rules   # 1 use(s)
+    - firebase   # 3 use(s)
+  mlops:
+    - kubernetes   # 0 uses — posting vocabulary
+    - aws   # 0 uses — posting vocabulary
+    - gcp   # 0 uses — posting vocabulary
+    - azure   # 0 uses — posting vocabulary
+    - github_actions   # 0 uses — posting vocabulary
+    - evidently   # 0 uses — posting vocabulary
+    - drift_monitoring   # 0 uses — posting vocabulary
+    - model_serving   # 0 uses — posting vocabulary
+    - experiment_tracking   # 0 uses — posting vocabulary
+    - terraform   # 0 uses — posting vocabulary
+    - mlops   # 2 use(s)
+    - mlflow   # 1 use(s)
+    - docker   # 1 use(s)
+    - fastapi   # 1 use(s)
+    - monitoring   # 1 use(s)
+    - drift_detection   # 1 use(s)
+    - deployment   # 1 use(s)
+    - train_serve_consistency   # 2 use(s)
+    - ci_cd   # 1 use(s)
+  software:
+    - software_engineering   # 0 uses — posting vocabulary
+    - pytest   # 0 uses — posting vocabulary
+    - mypy   # 0 uses — posting vocabulary
+    - ruff   # 0 uses — posting vocabulary
+    - version_control   # 0 uses — posting vocabulary
+    - cpp   # 0 uses — posting vocabulary
+    - typescript   # 0 uses — posting vocabulary
+    - latex   # 0 uses — posting vocabulary
+    - c#   # 0 uses — posting vocabulary
+    - r   # 0 uses — posting vocabulary
+    - jupyter   # 0 uses — posting vocabulary
+    - streamlit   # 0 uses — posting vocabulary
+    - api_design   # 0 uses — posting vocabulary
+    - linux   # 0 uses — posting vocabulary
+    - git/github   # 0 uses — posting vocabulary
+    - scala   # 0 uses — posting vocabulary
+    - java   # 0 uses — posting vocabulary
+    - go   # 0 uses — posting vocabulary
+    - rust   # 0 uses — posting vocabulary
+    - software   # 4 use(s)
+    - system_design   # 7 use(s)
+    - testing   # 4 use(s)
+    - python   # 11 use(s)
+    - numpy   # 1 use(s)
+    - pandas   # 1 use(s)
+    - caching   # 1 use(s)
+    - uml   # 1 use(s)
+    - access_control   # 1 use(s)
+    - react   # 1 use(s)
+    - javascript   # 1 use(s)
+    - kotlin   # 1 use(s)
+    - mobile   # 2 use(s)
+    - web_development   # 1 use(s)
+    - teamwork   # 1 use(s)
+  analytics_bi:
+    - data_visualization   # 0 uses — posting vocabulary
+    - matplotlib   # 0 uses — posting vocabulary
+    - tableau   # 0 uses — posting vocabulary
+    - looker   # 0 uses — posting vocabulary
+    - ab_testing   # 0 uses — posting vocabulary
+    - experimentation   # 0 uses — posting vocabulary
+    - analytics   # 5 use(s)
+    - business_intelligence   # 1 use(s)
+    - power_bi   # 2 use(s)
+    - dax   # 1 use(s)
+    - visualization   # 1 use(s)
+  symbolic:
+    - symbolic_ai   # 2 use(s)
+    - prolog   # 3 use(s)
+    - logic_programming   # 1 use(s)
+    - knowledge_representation   # 1 use(s)
+    - assembly   # 1 use(s)
+  professional:
+    - gdpr   # 0 uses — posting vocabulary
+    - mentoring   # 0 uses — posting vocabulary
+    - agile   # 0 uses — posting vocabulary
+    - documentation   # 0 uses — posting vocabulary
+    - communication   # 3 use(s)
+    - stakeholder_management   # 3 use(s)
+    - requirements   # 3 use(s)
+    - process_optimization   # 5 use(s)
+    - bpmn   # 2 use(s)
+    - bottleneck_analysis   # 1 use(s)

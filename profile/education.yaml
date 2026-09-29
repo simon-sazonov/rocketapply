@@ -1,0 +1,81 @@
+# education.yaml — FIXED block, transcribed verbatim from the CV PDF. Never varies.
+# Tags exist so the matcher can find real support for a requirement instead of
+# returning "missing" - they are not printed.
+
+- id: edu.nova
+  institution: Nova University of Lisbon | Information Management School
+  location: Lisbon, Portugal
+  degrees:
+    - id: edu.msc
+      degree: Master's Degree in Data Science and Advanced Analytics
+      start: 2025-09
+      end: 2027-07
+      end_label: "expected Jul 2027"
+      concentrations: "Big Data Analytics; Machine Learning; Deep Learning; Optimization"
+      coursework: "Data Mining; Statistics for Data Science; Programming for Data Science; Text Mining; Storing & Retrieving Data"
+      relevant_courses:
+        - {name: Big Data Analytics,            tags: [pyspark, big_data, etl, data_engineering]}
+        - {name: Machine Learning,              tags: [machine_learning, model_evaluation, python]}
+        - {name: Deep Learning,                 tags: [deep_learning, cnn, tensorflow]}
+        - {name: Optimization,                  tags: [optimization, genetic_algorithms, metaheuristics]}
+        - {name: Data Mining,                   tags: [machine_learning, clustering, eda]}
+        - {name: Statistics for Data Science,   tags: [statistics, hypothesis_testing, probability]}
+        - {name: Programming for Data Science,  tags: [python, pandas, numpy]}
+        - {name: Text Mining,                   tags: [nlp, transformers, text_classification]}
+        - {name: Storing & Retrieving Data,     tags: [databases, sql, mongodb]}
+      thesis:
+        # Answered 23 Sep 2026 from /Users/Simon/Documents/Projects/thesis.
+        # Week-0 feasibility probe complete (8 Sep 2026); supervisor outreach in progress.
+        status: proposal_stage
+        title: "Risk-Aware Race Strategy Under Disruption"
+        title_plain: "Making decisions when something can suddenly go wrong"
+        subtitle: "An agent that protects against bad outcomes, tested on Formula 1 race strategy"
+        supervisor: "not yet confirmed - proposals out to NOVA IMS staff, Sep 2026"
+        start: 2026-09
+        summary: >
+          Models Formula 1 safety-car and virtual-safety-car deployment as a discrete-time
+          hierarchical hazard function fitted to FastF1 race-control messages across seasons
+          2018-2026, then couples the fitted hazard to a pit-stop strategy agent optimised
+          for the bad tail rather than the expected case.
+        # Measured before the first supervisor meeting, not estimated. Reproducible from src/.
+        measured_findings:
+          - "3,510 race-lap risk sets and 83 SC/VSC deployments across the three strictly complete seasons (2018-2020, 59 races); base hazard 2.36% per race-lap"
+          - "circuit FIXED effects collapse out of sample (hold-out calibration slope -0.007 on 26 free parameters over 55 training events) while circuit RANDOM effects fit (tau = 0.241) - the partial pooling is load-bearing, not a refinement"
+          - "per-lap hazard appears to shift at the 2022 regulation boundary (0.023 -> 0.036, p = 0.018), so the pooling window straddles a structural break"
+          - "got TUMFTM/race-simulation (pinned to a 2020 stack) running on Python 3.13 with two shims; 200 Monte Carlo races in 21.9 s, 110 ms/race single-process"
+          - "DRS telemetry is silently degenerate in the 2026 feed, not absent: ~427,000 samples across 22 cars, every value zero - a naive transfer reads that as 'DRS never deployed' instead of failing loudly"
+          - "citation audit corrected the proposal's own pitch: the two ETH papers share three of four authors, so they are one lab's paper N and N+1, not two independent groups"
+        honesty_notes:
+          - "Supervisor not yet agreed. Never write or imply that the thesis is supervised, approved or under way as formal MSc work until it is."
+          - "The 'GO' verdict is your own feasibility assessment, not a committee's."
+          - "Model A's calibration slope (0.756) sits below the [0.8, 1.2] band - mild overfitting on three seasons. You already wrote that caveat down; keep it."
+        tags: [probability, statistics, simulation, reinforcement_learning, risk_modelling,
+               decision_making, time_series, optimization, experimental_design, python]
+    - id: edu.bsc
+      degree: Bachelor's Degree in Information Systems and Technologies
+      start: 2022-09
+      end: 2025-01
+      concentrations: "Data Engineering; Systems Analysis; App and Web Development"
+      coursework: "Data Integration and Management; Database Systems; Big Data Analytics; Information Systems Design; Programming Languages; Business Process Modeling"
+      relevant_courses:
+        - {name: Database Systems,              tags: [sql, databases, data_modelling]}
+        - {name: Data Integration and Management, tags: [etl, data_engineering, data_quality]}
+        - {name: Information Systems Design,    tags: [system_design, uml]}
+        - {name: Business Process Modeling,     tags: [bpmn, process_optimization]}
+        - {name: Programming Languages,         tags: [python, prolog, assembly]}
+
+- id: edu.milano
+  institution: University of Milano-Bicocca (Erasmus Exchange Program)
+  location: Milan, Italy
+  start: 2025-01
+  end: 2025-07
+  note: "Courseworks in Deep Learning and Data Science"
+  tags: [deep_learning, machine_learning]
+
+- id: edu.lyceum
+  institution: Dnipro Scientific Lyceum of Information Technologies
+  location: Dnipro, Ukraine
+  start: 2019-09
+  end: 2022-06
+  note: "Graduated with Distinction (Top 5% of class) from a top-3 ranked academic lyceum in Ukraine"
+  tags: []
