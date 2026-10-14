@@ -2484,3 +2484,65 @@ def open_repos(settings: Settings | None = None, *, path: Path | str | None = No
     conn = get_conn(settings, path=path)
     init_schema(conn)
     return Repos(conn)
+
+
+# ───────────────────────── resetting the people side ─────────────────────
+
+#: What "Reset database" on PitWall's Setup page clears, children first: the
+#: people found, everything said about them, and the search queue that found
+#: them. The CRM notes go too (that is what a reset is), but only after a backup.
+NETWORKING_RESET_TABLES = (
+    "candidate_sources", "scores", "crm", "contact_emails", "candidates",
+    "search_results", "queries",
+)
+#: Left alone on purpose: the job search, applications and everything else
+#: RocketApply owns; `blocklist` (the GDPR erasure path — clearing it would let
+#: an erased person be found again); `companies`/`roles` (the inputs, and
+#: deleting a company cascades into its job sources); the paid email-domain
+#: corpus and `enrichment_log`/`quota`, which the credit budgets are counted from.
+
+
+class ResetRefused(RuntimeError):
+    """The reset did not start: nothing was deleted."""
+
+
+def reset_networking(conn: sqlite3.Connection, db_file: Path,
+                     backups: Path | None = None) -> tuple[Path, dict[str, int]]:
+    """Back up the whole file, then clear the networking tables only.
+
+    The backup is SQLite's online backup (consistent even with a WAL open),
+    checked before anything is deleted; if it cannot be made or does not read
+    back, nothing is touched. Refuses while a networking run is going, since
+    that run is writing the very rows this deletes.
+    Returns the backup's path and the rows deleted per table.
+    """
+    if RunRepo(conn).active(commands=NETWORKING_COMMANDS):
+        raise ResetRefused("a PitWall run is going on right now — stop it first")
+    folder = backups if backups is not None else Path(db_file).parent / "backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{Path(db_file).stem}-before-reset-{datetime.now():%Y-%m-%d-%H%M%S}.db"
+    dest = sqlite3.connect(target)
+    try:
+        conn.backup(dest)
+        ok = dest.execute("PRAGMA quick_check").fetchone()[0]
+        copied = dest.execute("SELECT COUNT(*) FROM candidates").fetchone()[0]
+    finally:
+        dest.close()
+    live = conn.execute("SELECT COUNT(*) FROM candidates").fetchone()[0]
+    if ok != "ok" or copied != live:
+        raise ResetRefused(f"the backup at {target} did not check out ({ok}); nothing deleted")
+
+    deleted: dict[str, int] = {}
+    kinds = ",".join("?" * len(NETWORKING_COMMANDS))
+    with transaction(conn):
+        for table in NETWORKING_RESET_TABLES:
+            deleted[table] = conn.execute(f"DELETE FROM {table}").rowcount or 0
+        for table in ("run_events", "run_progress"):
+            deleted[table] = conn.execute(
+                f"DELETE FROM {table} WHERE run_id IN"
+                f" (SELECT id FROM runs WHERE command IN ({kinds}))", NETWORKING_COMMANDS,
+            ).rowcount or 0
+        deleted["runs"] = conn.execute(
+            f"DELETE FROM runs WHERE command IN ({kinds})", NETWORKING_COMMANDS,
+        ).rowcount or 0
+    return target, deleted
