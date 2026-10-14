@@ -71,6 +71,13 @@ def load_job(job_id: int, conn: sqlite3.Connection | None = None) -> dict[str, A
     )
     if job is None:
         return None
+    # A job added by hand (`intake.add_posting`) says which language its letter
+    # is written in; one the search found leaves it to the planner.
+    forced = conn.execute(
+        "SELECT json_extract(raw_json, '$.letter_language') FROM jobs WHERE id = ?"
+        " AND json_valid(raw_json)", (job_id,)).fetchone()
+    if forced and forced[0]:
+        job["letter_language"] = str(forced[0])
 
     match = _row(
         conn.execute("SELECT * FROM job_matches WHERE job_id = ?", (job_id,)).fetchone()

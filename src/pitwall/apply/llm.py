@@ -85,6 +85,10 @@ TASK_ROUTING: dict[str, tuple[str, ...]] = {
     # A LinkedIn note for RocketApply's People panel. Prose, so capable-only
     # like the letter: a small local model copies rather than writes.
     "outreach_note": ("groq",),
+    # A job added by hand (RocketApply's "add a job from a link"): name the
+    # title, employer and place, and quote where the posting starts and ends on
+    # a page with no structured data. Short, quoted, checked by `intake.cut`.
+    "job_intake": ("groq", "ollama"),
 }
 
 #: Groq's free tier allows 8,000 tokens a minute. The letter prompt is about

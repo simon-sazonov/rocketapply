@@ -17,7 +17,7 @@ import streamlit as st
 
 from pitwall.apply.budget import MODE_LABELS
 from pitwall.apply.pipeline import STAGES
-from rocket import components, runner
+from rocket import components, data, runner
 from rocket import format as fmt
 from rocket.runner import STAGE_KEYS, GenerationRun, JobTrack
 
@@ -207,6 +207,108 @@ def live(run: GenerationRun) -> None:
         st.page_link("views/review.py", label="Go to Review", icon=":material/rate_review:")
 
 
+def _read_posting(url: str, pasted: str) -> None:
+    """Read the link (or the pasted text) into `intake_posting`, or say why not."""
+    from pitwall.apply import intake
+
+    st.session_state.pop("intake_posting", None)
+    st.session_state.pop("intake_error", None)
+    try:
+        with st.spinner("Reading the posting…"):
+            posting = (intake.from_text(pasted, url) if pasted.strip()
+                       else intake.fetch_posting(url))
+    except intake.IntakeError as exc:
+        st.session_state["intake_error"] = str(exc)
+        # The toggle is already drawn this run; it opens on the next one.
+        st.session_state["intake_open_paste"] = True
+        st.rerun()
+    st.session_state["intake_posting"] = posting
+    for key in ("title", "company", "location", "description"):
+        st.session_state[f"intake_{key}"] = getattr(posting, key)
+
+
+def _application_status(job_id: int) -> str:
+    from pitwall.jobsearch import tracker
+
+    cluster = tracker.cluster_for_job(data.conn(), job_id)
+    app = tracker.for_cluster(data.conn(), int(cluster["cluster_id"])) if cluster else None
+    return str((app or {}).get("status") or "")
+
+
+def add_from_link(*, open_: bool) -> None:
+    """A job found somewhere else: paste its link (or its text), check what was
+    read, and generate it like any other."""
+    from pitwall.apply import intake
+
+    with st.expander("Add a job you found elsewhere", expanded=open_,
+                     icon=":material/add_link:"):
+        st.caption("Paste the posting's link. If the site will not be read (LinkedIn, a login "
+                   "wall, a page built by JavaScript), paste the posting's text instead. A "
+                   "posting in Ukrainian or any other language is fine: the CV and the letter "
+                   "are written in English.")
+        url = st.text_input("Link to the posting", key="intake_url",
+                            placeholder="https://…")
+        pasted = ""
+        if st.session_state.pop("intake_open_paste", False):
+            st.session_state["intake_paste"] = True
+        if st.toggle("Paste the text instead", key="intake_paste"):
+            pasted = st.text_area("The posting's text", key="intake_text", height=220,
+                                  placeholder="Select everything in the posting, copy, paste.")
+        if st.button("Read the posting", icon=":material/travel_explore:",
+                     disabled=not (url.strip() or pasted.strip())):
+            _read_posting(url, pasted)
+        if st.session_state.get("intake_error"):
+            st.warning(_cap(st.session_state["intake_error"]) + ".",
+                       icon=":material/link_off:")
+        posting = st.session_state.get("intake_posting")
+        if posting is None:
+            return
+
+        lang = intake.LANGUAGE_NAMES.get(posting.language, posting.language or "unknown")
+        st.html(f"<span class='ra-dim'>Read from the {_esc(posting.method)} · posting in "
+                f"<b>{_esc(lang)}</b> · CV and letter in <b>English</b></span>")
+        for note in posting.notes:
+            st.caption("⚠️ " + _cap(note))
+        a, b, c = st.columns([1.4, 1, 1])
+        posting.title = a.text_input("Job title", key="intake_title")
+        posting.company = b.text_input("Employer", key="intake_company")
+        posting.location = c.text_input("Where", key="intake_location")
+        posting.description = st.text_area(
+            "The posting, as the engine will read it", key="intake_description", height=260,
+            help="Kept in the posting's own language: every skill the engine finds is checked "
+                 "against these exact words. Cut anything that is not the posting.")
+        missing = posting.missing
+        if missing:
+            st.caption("Still missing: " + ", ".join(missing))
+        m, go, save = st.columns([1.4, 1, 1], vertical_alignment="bottom")
+        mode = m.selectbox("Documents", ["cv_letter", "cv", "cv_letter_audit"],
+                           format_func=lambda k: MODE_LABELS[k], key="intake_mode")
+        busy = runner.generation_active()
+        if go.button("Generate now", type="primary", icon=":material/bolt:",
+                     disabled=bool(missing) or busy, width="stretch",
+                     help="Another generation is running; save it to Selected for now."
+                     if busy else None):
+            job_id = data.write(intake.add_posting, posting)
+            started = runner.start_generation([job_id], mode=mode, workers=1)
+            if started is None:
+                st.warning("Saved to Selected, but it could not start: another generation "
+                           "is running.")
+            else:
+                st.session_state.pop("intake_posting", None)
+                st.rerun()
+        if save.button("Save to Selected", icon=":material/checklist:",
+                       disabled=bool(missing), width="stretch"):
+            job_id = data.write(intake.add_posting, posting)
+            st.session_state.pop("intake_posting", None)
+            status = _application_status(job_id)
+            if status in ("", "SHORTLISTED"):
+                st.success(f"{posting.company} · {posting.title} is on Selected.")
+            else:
+                st.info(f"{posting.company} · {posting.title} was added before and is already "
+                        f"past Selected ({status.replace('_', ' ').lower()}); its posting text "
+                        "was refreshed.")
+
+
 components.header(
     "Generate",
     "Each application, stage by stage: what the model read in the posting, what your profile "
@@ -215,9 +317,11 @@ components.header(
 )
 run = runner.registry().generation
 runner.sync(run)
+add_from_link(open_=run is None or not run.alive)
 if run is None:
     components.empty("Nothing generated yet.",
-                     "Choose jobs on Selected and press Generate — this page then shows the work.")
+                     "Choose jobs on Selected and press Generate, or add a job from a link "
+                     "above. This page then shows the work.")
     st.page_link("views/selected.py", label="Go to Selected", icon=":material/checklist:")
     st.stop()
 

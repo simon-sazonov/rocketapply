@@ -268,7 +268,7 @@ def plan_letter(
         opening_strategy=str(raw.get("opening_strategy") or "problem_first"),
         # The truth layer's list is the authority; the model's is a restatement.
         avoid=sorted({*(str(a) for a in raw.get("avoid") or []), *truth.forbidden_claims[:20]}),
-        language=_letter_language(profile, analysis),
+        language=str(job.get("letter_language") or "") or _letter_language(profile, analysis),
         target_words=max(240, min(int(raw.get("target_words") or 300), 340)),
         company_notes_source=notes_origin,
         company_sources=notes_urls,
