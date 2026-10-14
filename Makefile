@@ -36,7 +36,7 @@ test:  ## run the test suite (no network needed)
 	$(PY) -m pytest
 
 lint:  ## ruff
-	$(PY) -m ruff check src app scripts tests
+	$(PY) -m ruff check src apps scripts tests
 
 typecheck:  ## mypy
 	$(PY) -m mypy
