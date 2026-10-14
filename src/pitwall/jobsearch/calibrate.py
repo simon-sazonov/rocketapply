@@ -3,7 +3,8 @@
 The weights in `config/job_search.yaml` were set by reasoning, not by data.
 This module measures them against what the owner has actually done:
 
-* **good**: 👍 "good match", or an application made
+* **good**: 👍 "good match", or an application that went out (APPLIED and
+  later; an explicit 👎 still wins)
 * **bad**: 👎 "poor match", or a dismissal for a reason about fit ("Too
   senior", "Wrong role", "Poor match", …). "Duplicate", "Closed" and
   "Already applied" say nothing about fit and are left out.
@@ -38,6 +39,10 @@ import math
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
+
+from .tracker import SUBMITTED
+
+SUBMITTED_ORDERED = tuple(sorted(SUBMITTED))
 
 #: Dismissal reasons that are a judgement about fit.
 NEGATIVE_REASONS = frozenset({"Too senior", "Wrong country", "No sponsorship", "Wrong role",
@@ -76,27 +81,38 @@ class Report:
 
 
 def examples(conn: sqlite3.Connection) -> list[Example]:
-    """One example per judged vacancy, from its canonical posting's match."""
+    """One example per judged vacancy, from its canonical posting's match.
+
+    An explicit 👍/👎 always wins. Otherwise an application counts as good only
+    once it went out (`SUBMITTED`): SHORTLISTED, CV_READY and IN_PROCESS are
+    intentions, not judgements.
+    """
+    sent = ", ".join("?" * len(SUBMITTED_ORDERED))
     rows = conn.execute(
-        """
+        f"""
         SELECT r.cluster_id, r.feedback, r.dismissed_at, r.dismissed_reason,
-               (SELECT COUNT(*) FROM applications a WHERE a.cluster_id = r.cluster_id) AS applied,
+               (SELECT COUNT(*) FROM applications a WHERE a.cluster_id = r.cluster_id
+                   AND a.status IN ({sent})) AS applied,
                m.components, m.score
           FROM job_review r
           JOIN job_matches m ON m.job_id = r.cluster_id
          WHERE m.passed = 1
         UNION ALL
-        SELECT a.cluster_id, NULL, NULL, NULL, 1, m.components, m.score
+        SELECT DISTINCT a.cluster_id, NULL, NULL, NULL, 1, m.components, m.score
           FROM applications a
           JOIN job_matches m ON m.job_id = a.cluster_id
          WHERE a.cluster_id NOT IN (SELECT cluster_id FROM job_review) AND m.passed = 1
-        """
+           AND a.status IN ({sent})
+        """,
+        (*SUBMITTED_ORDERED, *SUBMITTED_ORDERED),
     ).fetchall()
     out: dict[int, Example] = {}
     for cid, feedback, dismissed, reason, applied, comps, score in rows:
-        if feedback == "good_match" or applied:
+        if feedback in ("good_match", "bad_match"):
+            good = feedback == "good_match"
+        elif applied:
             good = True
-        elif feedback == "bad_match" or (dismissed and reason in NEGATIVE_REASONS):
+        elif dismissed and reason in NEGATIVE_REASONS:
             good = False
         else:
             continue

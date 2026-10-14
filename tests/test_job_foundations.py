@@ -788,6 +788,36 @@ def test_dismissing_as_a_duplicate_says_nothing_about_fit(repos):
     assert only.good is False
 
 
+def test_only_a_sent_application_counts_and_an_explicit_rating_wins(repos):
+    from pitwall.jobsearch.calibrate import examples
+    from pitwall.sources.jobs import JobPosting
+
+    src = repos.job_sources.upsert("t", "job_board")
+    cases = {  # status, explicit feedback -> expected label (None = not an example)
+        "cv_ready_no_rating": ("CV_READY", None, None),
+        "shortlisted": ("SHORTLISTED", None, None),
+        "in_process": ("IN_PROCESS", None, None),
+        "applied": ("APPLIED", None, True),
+        "rejected": ("REJECTED", None, True),
+        "cv_ready_thumbs_down": ("CV_READY", "bad_match", False),
+        "applied_thumbs_down": ("APPLIED", "bad_match", False),
+        "shortlisted_thumbs_up": ("SHORTLISTED", "good_match", True),
+    }
+    ids = {}
+    for i, (name, (status, feedback, _)) in enumerate(cases.items()):
+        job = repos.jobs.upsert(src, JobPosting(title=name, url=f"https://t.test/{i}")).job_id
+        ids[job] = name
+        repos.conn.execute("INSERT INTO job_matches (job_id, config_hash, passed, score, label,"
+                           " components) VALUES (?, 'x', 1, 60, 'good', '{}')", (job,))
+        repos.conn.execute("INSERT INTO applications (cluster_id, job_id, company_name, title,"
+                           " status) VALUES (?, ?, 'Co', ?, ?)", (job, job, name, status))
+        if feedback:
+            repos.conn.execute("INSERT INTO job_review (cluster_id, feedback) VALUES (?, ?)",
+                               (job, feedback))
+    got = {ids[e.cluster_id]: e.good for e in examples(repos.conn)}
+    assert got == {n: want for n, (_, _, want) in cases.items() if want is not None}
+
+
 # ─────────────────────── Phase 4: searches that pay ──────────────────────
 
 
