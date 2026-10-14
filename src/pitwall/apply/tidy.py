@@ -13,6 +13,7 @@ So this does two things, both reversible:
         1_ready_to_send/   complete, every gate passed, current prompt
         2_needs_changes/   the best run for a job that is not sendable yet
         3_archive/         superseded runs, kept
+        4_already_sent/    applications marked applied, out of the way
 
   For each job the best run goes to one of the first two; the rest go to the
   archive. Nothing is deleted, because the older letters are the record of how
@@ -44,9 +45,9 @@ from .history import Generation, scan
 from .letter import PROMPT_VERSION
 
 __all__ = [
-    "READY_DIR", "CHANGES_DIR", "ARCHIVE_DIR", "BUCKETS", "TidyPlan", "rank",
+    "READY_DIR", "CHANGES_DIR", "ARCHIVE_DIR", "SENT_DIR", "BUCKETS", "TidyPlan", "rank",
     "build_plan", "apply_plan", "archived", "index_markdown", "bucket_for",
-    "file_generation", "move_into",
+    "file_generation", "file_sent", "move_into", "supersede_job",
     "complete", "current", "sendable",
 ]
 
@@ -57,7 +58,10 @@ __all__ = [
 READY_DIR = "1_ready_to_send"
 CHANGES_DIR = "2_needs_changes"
 ARCHIVE_DIR = "3_archive"
-BUCKETS = (READY_DIR, CHANGES_DIR, ARCHIVE_DIR)
+#: Where an application goes once it is marked applied, so `1_ready_to_send/`
+#: only ever holds what is still to be sent.
+SENT_DIR = "4_already_sent"
+BUCKETS = (READY_DIR, CHANGES_DIR, ARCHIVE_DIR, SENT_DIR)
 
 #: Directories that are not applications and never were — `apply preview` output
 #: and leftovers from development runs. They have no `provenance.json`, so
@@ -141,6 +145,7 @@ def build_plan(output_dir: pathlib.Path | str = "output", *,
     held = {str(pathlib.Path(p).resolve()) for p in pinned if p}
 
     archive = (root / ARCHIVE_DIR).resolve()
+    sent = (root / SENT_DIR).resolve()
 
     by_job: dict[object, list[Generation]] = {}
     for generation in scan(root):
@@ -149,6 +154,10 @@ def build_plan(output_dir: pathlib.Path | str = "output", *,
         # already in the archive — and without this an archived run could win
         # its group and be promoted back out.
         if archive in generation.directory.resolve().parents:
+            continue
+        # SENT RUNS STAY SENT, for the same reason: a clean, current letter in
+        # `4_already_sent/` would otherwise be filed back into "ready to send".
+        if sent in generation.directory.resolve().parents:
             continue
         if str(generation.directory.resolve()) in held:
             plan.pinned.append(generation)
@@ -230,8 +239,17 @@ def move_into(source: pathlib.Path, into: pathlib.Path) -> pathlib.Path | None:
 def file_generation(
     directory: pathlib.Path, *, state: str, prompt_version: str, has_cv: bool,
     has_letter: bool, root: pathlib.Path | str = "output",
+    job_id: int | str | None = None,
 ) -> pathlib.Path:
     """File one finished run into its bucket. Returns where it ended up.
+
+    ONE FOLDER PER JOB. With a `job_id`, every other run of that job still in
+    `1_ready_to_send/` or `2_needs_changes/` goes to the archive first. Without
+    this, regenerating a job left the old run beside the new one — a batch of
+    49 jobs produced 50 folders in `1_ready_to_send/`, two of them the same
+    posting — which is the "which one do I send" problem the buckets exist
+    to remove. The newest run wins, not the best-ranked: the Studio's
+    application row points at the run it just made, and the folder must agree.
 
     Called at the very end of `generate_application`, once the letter's state is
     known — `packager.output_dir` claims the directory BEFORE the letter exists,
@@ -244,11 +262,45 @@ def file_generation(
     filed here and a run filed by `apply tidy` land in the same place.
     """
     root = pathlib.Path(root)
+    if directory.parent.name == SENT_DIR:
+        return directory
+    if job_id:
+        supersede_job(root, job_id, keep=directory)
     ready = (
         has_cv and has_letter and state == "clean"
         and _version_of(prompt_version) >= _version_of(PROMPT_VERSION)
     )
     return move_into(directory, root / (READY_DIR if ready else CHANGES_DIR)) or directory
+
+
+def file_sent(directory: pathlib.Path | str) -> pathlib.Path | None:
+    """The application in `directory` went out: move it to `4_already_sent/`.
+
+    Returns where it ended up, or `None` when nothing moved — the folder is
+    gone, is already there, or sits in the archive (a superseded run is not the
+    one that was sent). Never raises on a missing folder: marking a job applied
+    must not fail because its documents were moved or deleted by hand.
+    """
+    directory = pathlib.Path(directory)
+    if not directory.is_dir() or directory.parent.name in (ARCHIVE_DIR, SENT_DIR):
+        return None
+    root = directory.parent.parent if directory.parent.name in BUCKETS else directory.parent
+    return move_into(directory, root / SENT_DIR)
+
+
+def supersede_job(root: pathlib.Path | str, job_id: int | str,
+                  keep: pathlib.Path) -> list[pathlib.Path]:
+    """Archive every run of `job_id` in the live buckets except `keep`."""
+    root = pathlib.Path(root)
+    moved: list[pathlib.Path] = []
+    for bucket in (READY_DIR, CHANGES_DIR):
+        for generation in scan(root / bucket):
+            if (str(generation.job_id) == str(job_id)
+                    and generation.directory.resolve() != keep.resolve()):
+                done = move_into(generation.directory, root / ARCHIVE_DIR)
+                if done is not None:
+                    moved.append(done)
+    return moved
 
 
 def _needs(generation: Generation) -> str:
@@ -290,12 +342,17 @@ def index_markdown(plan: TidyPlan, *, output_dir: pathlib.Path | str = "output")
     Written for the question actually being asked when this folder is opened:
     which of these can I send right now, and what is wrong with the rest.
     """
-    ready = [g for g in plan.keep if sendable(g)]
+    # Pinned runs are applications too — held in place for the CSV, not
+    # hidden. Leaving them out made a batch of 49 exported jobs index as
+    # "2 job(s) · 0 ready to send".
+    listed = plan.keep + [g for g in plan.pinned
+                          if g.directory.parent.name != ARCHIVE_DIR]
+    ready = [g for g in listed if sendable(g)]
     older = plan.supersede or archived(output_dir)
     lines = [
         "# Applications",
         "",
-        f"{len(plan.keep)} job(s) · **{len(ready)} ready to send** · "
+        f"{len(listed)} job(s) · **{len(ready)} ready to send** · "
         f"{len(older)} older run(s) in `{ARCHIVE_DIR}/`",
         "",
         f"- `{READY_DIR}/` — complete, every gate passed, written by the current "
@@ -303,6 +360,7 @@ def index_markdown(plan: TidyPlan, *, output_dir: pathlib.Path | str = "output")
         f"- `{CHANGES_DIR}/` — the best run for a job that is not sendable yet. "
         f"The last column says why.",
         f"- `{ARCHIVE_DIR}/` — superseded runs, kept.",
+        f"- `{SENT_DIR}/` — applications marked applied. Nothing left to do.",
         "",
         "Regenerate with `pitwall apply generate --job <id>`, or from the "
         "Applications Studio. Rerun `pitwall apply tidy` to refile and rebuild "
@@ -311,8 +369,8 @@ def index_markdown(plan: TidyPlan, *, output_dir: pathlib.Path | str = "output")
     ]
 
     for folder, group in (
-        (READY_DIR, [g for g in plan.keep if sendable(g)]),
-        (CHANGES_DIR, [g for g in plan.keep if not sendable(g)]),
+        (READY_DIR, ready),
+        (CHANGES_DIR, [g for g in listed if not sendable(g)]),
     ):
         if not group:
             continue

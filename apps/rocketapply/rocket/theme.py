@@ -1,7 +1,7 @@
 """The light theme, finished off.
 
 Streamlit's own widgets take the palette from `.streamlit/config.toml`; this
-adds what config cannot reach — the process strip, stage dots, cards, the
+adds what config cannot reach — stage dots, cards, the
 width of the page — and nothing more. Minimal on purpose: one accent, soft
 borders, generous space.
 """
@@ -35,19 +35,6 @@ _CSS = f"""
 .block-container {{ max-width: 1480px; padding-top: 4.4rem; padding-bottom: 4rem; }}
 h1 {{ letter-spacing: -0.02em; }}
 [data-testid="stCaptionContainer"] {{ color: var(--ra-dim); }}
-
-/* ── the process strip: five page links in one bordered row ── */
-.st-key-ra_strip {{ border: 1px solid var(--ra-line); border-radius: 0.8rem;
-  background: var(--ra-surface); overflow: hidden; margin: 0.1rem 0 1.2rem; }}
-.st-key-ra_strip [data-testid="stPageLink"] {{ flex: 1 1 0; }}
-.st-key-ra_strip [data-testid="stPageLink"] a {{ border-radius: 0; padding: 0.55rem 0.9rem;
-  border-right: 1px solid var(--ra-line); justify-content: center; }}
-.st-key-ra_strip [data-testid="stPageLink"]:last-child a {{ border-right: none; }}
-.st-key-ra_strip [data-testid="stPageLink"] a p {{ font-size: 0.92rem; color: var(--ra-dim); }}
-.st-key-ra_strip [data-testid="stPageLink"] a p strong {{ font-size: 1.1rem; color: var(--ra-fg);
-  font-variant-numeric: tabular-nums; }}
-.st-key-ra_strip [data-testid="stPageLink"] a[aria-current="page"],
-.st-key-ra_strip [data-testid="stPageLink"] a:hover {{ background: var(--ra-muted); }}
 
 /* ── cards and small text ── */
 .ra-card {{ border: 1px solid var(--ra-line); border-radius: 0.8rem; padding: 1rem 1.1rem;

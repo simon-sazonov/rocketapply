@@ -23,7 +23,7 @@ VISA_NAMES = {"ok": "No sponsorship needed", "explicit": "Sponsorship offered",
               "no": "No sponsorship"}
 LABEL_NAMES = {"strong": "Strong fit", "good": "Good fit", "fair": "Fair fit", "weak": "Weak fit"}
 STATUS_NAMES = {
-    "SHORTLISTED": "Selected", "CV_READY": "Documents ready", "IN_PROCESS": "In process",
+    "SHORTLISTED": "Selected", "CV_READY": "In review", "IN_PROCESS": "In process",
     "APPLIED": "Applied", "ONLINE_ASSESSMENT": "Online assessment", "INTERVIEW": "Interview",
     "FINAL_INTERVIEW": "Final interview", "OFFER": "Offer", "REJECTED": "Rejected",
     "WITHDRAWN": "Withdrawn", "CLOSED": "Closed", "SKIPPED": "Removed",

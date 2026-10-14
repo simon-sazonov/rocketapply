@@ -163,6 +163,23 @@ def _reasons(raw: Any) -> str:
     return " | ".join(str(r).lstrip("+?- ").strip() for r in items or [])
 
 
+#: Job boards you cannot apply through from abroad. MyCareersFuture takes
+#: applications only through Singpass, which only Singapore citizens and
+#: permanent residents hold — four jobs in the first batch went unapplied
+#: because the CSV's link led to a login that could never succeed.
+SINGPASS_ONLY = ("mycareersfuture.gov.sg",)
+
+
+def _route_concern(posting_url: str, apply_link: str) -> str:
+    """A warning for a posting whose board you cannot apply through, or ""."""
+    if not any(host in (posting_url or "") for host in SINGPASS_ONLY):
+        return ""
+    if any(host in (apply_link or "") for host in SINGPASS_ONLY):
+        return ("MyCareersFuture: applying needs Singpass (Singapore citizens/PRs "
+                "only) — find the company's own posting or HR email")
+    return "MyCareersFuture needs Singpass — apply_link is the company's own route"
+
+
 def batch_rows(conn: sqlite3.Connection, batch_id: int) -> list[dict[str, Any]]:
     import pathlib
 
@@ -180,6 +197,8 @@ def batch_rows(conn: sqlite3.Connection, batch_id: int) -> list[dict[str, Any]]:
         folder = item.get("exported_dir") or item.get("generation_dir") or ""
         generation = read(folder) if folder else None
 
+        apply_link = item.get("application_url") or match.get("url") or ""
+
         def path(value: Any) -> str:
             return str(pathlib.Path(value).resolve()) if value else ""
 
@@ -190,8 +209,11 @@ def batch_rows(conn: sqlite3.Connection, batch_id: int) -> list[dict[str, Any]]:
             "location": item.get("location") or match.get("location") or "",
             "score": round(match["score"], 1) if match.get("score") is not None else "",
             "why_matched": _reasons(match.get("reasons_plus")),
-            "concerns": _reasons(match.get("reasons_minus")),
-            "apply_link": item.get("application_url") or match.get("url") or "",
+            "concerns": " | ".join(c for c in (
+                _route_concern(match.get("url") or "", apply_link),
+                _reasons(match.get("reasons_minus")),
+            ) if c),
+            "apply_link": apply_link,
             "cv_pdf": path(generation.cv_pdf) if generation else "",
             "letter_pdf": path(generation.letter_pdf) if generation else "",
             "letter_txt": path(generation.letter_path) if generation else "",

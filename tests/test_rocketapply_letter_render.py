@@ -59,7 +59,7 @@ def test_the_letterhead_is_the_cvs_own(profile, frame, tmp_path):
 def test_the_words_are_the_letters_words(profile, frame, tmp_path):
     out = render_letter_files(tmp_path, "X", LETTER, profile=profile, frame=frame)
     assert out.page_count == 1 and out.pdf.is_file() and out.docx.is_file()
-    printed = "\n\n".join(out.sections["letter"][1:])     # after the date line
+    printed = "\n\n".join(out.sections["letter"])
     assert printed == LETTER
     from docx import Document
 
@@ -114,3 +114,14 @@ def test_tidy_leaves_an_exported_folder_where_the_csv_says_it_is(tmp_path):
     assert [g.name for g in plan.pinned] == ["Apex_ML"]
     apply_plan(plan, root)
     assert pathlib.Path(exported).is_dir(), "an exported folder must not move"
+
+
+def test_the_date_and_the_role_never_share_a_line(profile, frame, tmp_path):
+    """A long role title ran into the date on one line. The date now sits on
+    the Email line; company and role each get their own, with no separator."""
+    role = "2027 Summer Intern, MS/PhD, Machine Learning, Simulator Evaluation"
+    out = render_letter_files(tmp_path, "X", LETTER, profile=profile, frame=frame,
+                              company="Waymo", title=role, date="29 September 2026")
+    assert out.sections["date"] == ["29 September 2026"]
+    assert out.sections["recipient"] == ["Waymo", role]
+    assert not any("·" in line for line in out.sections["recipient"])

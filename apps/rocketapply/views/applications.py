@@ -72,27 +72,31 @@ def in_process() -> None:
                          icon=":material/done_all:", disabled=not len(sent),
                          key=f"apply_{batch['id']}"):
                 moved = data.write(tracker.mark_batch_applied, int(batch["id"]), exclude=unsent)
-                st.toast(f"{moved} application(s) marked applied — today's date recorded.")
+                st.toast(f"{moved} application(s) marked applied — today's date recorded, "
+                         "documents moved to 4_already_sent.")
                 st.rerun()
 
 
 # ─────────────────────────────── people ──────────────────────────────────
 
 
-def _person_card(person: dict[str, Any], app: dict[str, Any]) -> None:
+def _person_card(person: dict[str, Any], app: dict[str, Any], profile: Any = None) -> None:
+    from pitwall.apply.outreach import clean_title, concerns, template_texts
     from pitwall.jobsearch.people import employer_repos, employer_settings
 
     pid = int(person["id"])
     with st.container(border=True):
         top = st.columns([3, 1.1], vertical_alignment="center")
         email = person.get("email")
-        about = person.get("current_title") or person.get("headline") or ""
-        about = about if len(about) <= 110 else about[:107].rsplit(" ", 1)[0] + "…"
+        about = clean_title(person)[0] or "no clear title"
+        flags = concerns(person, app["company_name"])[0]
         top[0].html(
             f"<b>{html.escape(person.get('full_name') or '?')}</b> · "
             f"<span class='ra-dim'>{html.escape(about)}</span>"
             + (f"<br><span class='ra-chip {'ok' if person.get('email_status') == 'verified' else 'accent'}'>"
-               f"{html.escape(email)} · {person.get('email_status')}</span>" if email else ""))
+               f"{html.escape(email)} · {person.get('email_status')}</span>" if email else "")
+            + (f"<br><span class='ra-dim'>⚠ {html.escape('; '.join(flags))}</span>"
+               if flags else ""))
         if person.get("profile_url"):
             top[1].link_button("LinkedIn", person["profile_url"], icon=":material/open_in_new:",
                                width="stretch")
@@ -120,9 +124,16 @@ def _person_card(person: dict[str, Any], app: dict[str, Any]) -> None:
                                                   steps=enrich.escalation_chain("finder"))
                 st.toast(enrich.summary(ctx).get("email") or "Hunter found nothing.")
                 st.rerun()
-        if b[2].button("Draft a note", key=f"nt_{pid}", icon=":material/edit_note:",
+        note, message = template_texts(person, app["company_name"], [app], profile=profile)
+        with st.expander("Note and message, ready to paste"):
+            st.caption(f"With the connection request · {len(note)} characters")
+            st.code(note, language=None, wrap_lines=True)
+            st.caption("Once they accept")
+            st.code(message, language=None, wrap_lines=True)
+        if b[2].button("Personalise with AI", key=f"nt_{pid}", icon=":material/edit_note:",
                        width="stretch", help="Two short LinkedIn notes (≤200 characters) from "
-                       "this application's own evidence. About 1.5k tokens. Never sent."):
+                       "this application's own evidence, instead of the template. About 1.5k "
+                       "tokens. The one you save goes into the outreach CSV. Never sent."):
             from pitwall.apply.outreach import draft_note
 
             with st.spinner("Drafting…"):
@@ -167,7 +178,7 @@ def _people_progress(company: str) -> None:
 
 
 def people_panel(app: dict[str, Any]) -> None:
-    company, title = app["company_name"], app["title"]
+    company, title = app["company_name"], (app["title"] or "").strip()
     st.markdown(f"#### People at {company}")
     st.caption(f"For your application to **{title}**"
                + (f", sent {app['date_applied']}" if app.get("date_applied") else ""))
@@ -225,19 +236,114 @@ def people_panel(app: dict[str, Any]) -> None:
                 st.error(str(exc))
             st.rerun()
 
+    from pitwall.apply.outreach import concerns
+
     for group in GROUPS:
-        people = [p for p in found if p["group"] == group]
+        # The order the CSV picks in: nothing to check first, then best score.
+        people = sorted((p for p in found if p["group"] == group),
+                        key=lambda p: concerns(p, company)[1])
         if not people:
             continue
         st.markdown(f"**{GROUP_LABELS[group]}** · {len(people)}")
         for person in people[:8]:
-            _person_card(person, app)
+            _person_card(person, app, profile)
 
     known = known_in_pitwall(data.conn(), company)
     if known:
         with st.expander(f"Already in PitWall · {len(known)}"):
             for p in known:
                 st.markdown(f"- [{p['full_name']}]({p['profile_url']}) — {p.get('headline') or ''}")
+
+
+@st.fragment(run_every=1.5)
+def _bulk_progress() -> None:
+    run = runner.outreach_run()
+    if run is None or not run.alive:
+        st.rerun(scope="app")
+        return
+    st.progress(min(run.current / max(run.total, 1), 1.0),
+                text=f"Company {run.current} of {run.total} · "
+                     + (run.messages[-1] if run.messages else "starting"))
+    if st.button("Stop after this company", icon=":material/stop_circle:", key="bulk_stop"):
+        run.stop = True
+
+
+def bulk_panel(apps: list[dict[str, Any]]) -> None:
+    """People for many applications at once: one run, one CSV, one row a person."""
+    from pitwall.apply.outreach import OUTREACH_COLUMNS, BulkPlan, outreach_rows
+    from pitwall.jobsearch.export import _csv
+
+    plan = BulkPlan(applications=apps)
+    companies = plan.companies()
+    st.markdown(f"#### People for {len(apps)} applications")
+    st.caption(f"At {len(companies)} companies. Each company is searched once, and each person "
+               "gets one row however many roles you applied to there. Nothing is ever sent.")
+
+    run = runner.outreach_run()
+    busy = run is not None and run.alive
+
+    o = st.columns([1, 1], vertical_alignment="bottom")
+    per_company = o[0].number_input(
+        "People per company", 1, 6, 3, key="bulk_per_company",
+        help="Picked one from each group in turn: a recruiter, the hiring manager, a peer, "
+        "then alumni — and within a group, the ones with nothing to check first.")
+    emails = o[1].toggle("Find emails (free)", value=True, key="bulk_emails",
+                         help="The company's address pattern and public sources. Never Hunter "
+                         "— that stays a per-person click.")
+    research = st.checkbox("Search companies again even if people were already found",
+                           key="bulk_research")
+
+    # What is there already, per company — the same `people_at` the panel uses.
+    from pitwall.jobsearch.people import people_at
+
+    found = {name: people_at(name) for name in companies}
+    summary = pd.DataFrame([{
+        "Company": name, "Roles": len(group), "People": len(found[name]),
+        "With email": sum(1 for p in found[name] if p.get("email")),
+    } for name, group in companies.items()])
+    to_search = sum(1 for name in companies if research or not found[name])
+
+    label = (f"Find people at {to_search} compan{'y' if to_search == 1 else 'ies'}"
+             if to_search else "Update emails")
+    if st.button(label, type="primary", icon=":material/travel_explore:", disabled=busy,
+                 width="stretch", key="bulk_go",
+                 help="About a minute per company searched. Runs in the background — you can "
+                 "keep using the app; the People panel of each application fills in as it goes."):
+        runner.start_outreach(apps, per_company=int(per_company), emails=emails,
+                              research=research)
+        time.sleep(0.4)
+        st.rerun()
+    st.caption(f"{to_search} to search, {len(companies) - to_search} already searched · "
+               "no AI tokens.")
+    if busy:
+        _bulk_progress()
+    elif run is not None and run.status in ("done", "stopped"):
+        c = run.counts
+        st.success(f"{'Stopped' if run.status == 'stopped' else 'Done'}: {c.get('searched', 0)} "
+                   f"searched, {c.get('emails', 0)} emails found"
+                   + (f", {c['failed']} compan(ies) skipped" if c.get("failed") else ""),
+                   icon=":material/check_circle:")
+    elif run is not None and run.error:
+        st.error(f"The run stopped: {run.error}")
+
+    st.dataframe(summary, hide_index=True, width="stretch",
+                 height=min(420, 35 * (len(summary) + 1) + 3))
+
+    by_name = {name.casefold(): people for name, people in found.items()}
+    rows = outreach_rows(data.conn(), apps, per_company=int(per_company),
+                         people=lambda company: by_name.get(company.strip().casefold(), []))
+    st.download_button(
+        f"Outreach CSV · {len(rows)} people", _csv(rows, OUTREACH_COLUMNS).encode("utf-8-sig"),
+        file_name=f"outreach_{time.strftime('%Y_%m_%d')}.csv", mime="text/csv",
+        icon=":material/download:", disabled=not rows, width="stretch", key="bulk_csv",
+        help="One row per person: LinkedIn, email if found, a note for the connection request "
+        "(≤200 characters) and a message for after they accept. The wording is in "
+        "config/outreach_templates.yaml; a note you save in a People panel replaces it.")
+    if rows:
+        flagged = sum(1 for r in rows if r["check"])
+        with st.expander(f"Preview · {len(rows)} people, {flagged} to check before sending"):
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                         column_order=["company", "name", "group", "note", "check"])
 
 
 def applied() -> None:
@@ -253,17 +359,23 @@ def applied() -> None:
     } for a in sorted(apps, key=lambda a: a.get("date_applied") or "", reverse=True)])
     left, right = st.columns([1, 1.9], gap="medium")
     with left:
+        st.caption("Pick one to work on it, or tick several — the box in the header ticks all "
+                   "— to find people for every one at once.")
         event = st.dataframe(frame, key="applied_list", on_select="rerun",
-                             selection_mode="single-row", hide_index=True,
+                             selection_mode="multi-row", hide_index=True,
                              height=min(620, 60 + 35 * len(frame)),
                              column_order=["Company", "Role", "Applied", "Fit"],
                              column_config={"Fit": st.column_config.ProgressColumn(
                                  "Fit", min_value=0, max_value=100, format="%.0f",
                                  width="small")})
-        rows = event.selection.rows if event else []
-        chosen = int(frame.iloc[rows[0] if rows else 0]["id"])
+        rows = list(event.selection.rows) if event else []
+    by_id = {int(a["id"]): a for a in apps}
+    chosen = [by_id[int(frame.iloc[r]["id"])] for r in rows]
     with right:
-        people_panel(next(a for a in apps if int(a["id"]) == chosen))
+        if len(chosen) > 1:
+            bulk_panel(chosen)
+        else:
+            people_panel(chosen[0] if chosen else by_id[int(frame.iloc[0]["id"])])
 
 
 # ─────────────────────────────── outcomes ────────────────────────────────
@@ -326,7 +438,7 @@ def exports() -> None:
 
 components.header(
     "Applications",
-    "Mark what went out, then reach the people behind each role. Nothing is ever sent "
+    "Mark what went out, then reach the people behind each role — one at a time, or all at once. Nothing is ever sent "
     "from this app — it finds, drafts and hands you the text.",
 )
 wanted = st.query_params.get("tab", "in_process")

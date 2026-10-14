@@ -131,10 +131,16 @@ if bar[0].button(label, type="primary", icon=":material/bolt:", disabled=disable
     else:
         st.switch_page("views/generate.py")
 unticked = edited[~edited["Make"]]
-if bar[1].button(f"Remove {len(unticked)} unticked", icon=":material/remove_done:",
+if bar[1].button(f"Dismiss {len(unticked)} unticked", icon=":material/block:",
                  disabled=not len(unticked), width="stretch",
-                 help="Off the shortlist, kept on record. Select them again from Search."):
-    data.write(lambda c: [tracker.skip(c, int(a)) for a in unticked["app_id"]])
+                 help="Not interested: they leave the pipeline and a later search does not "
+                      "bring them back. Undo from Search → Filters → Include dismissed."):
+    job_ids = [int(j) for j in unticked["job_id"].dropna()]
+    data.reject(job_ids, "Not interested")
+    manual = [int(a) for a, j in zip(unticked["app_id"], unticked["job_id"], strict=True)
+              if pd.isna(j)]
+    if manual:
+        data.write(lambda c: [tracker.skip(c, a) for a in manual])
     st.rerun()
 if over:
     bar[2].caption(f"{over} ticked job(s) are past today's budget and will wait.")

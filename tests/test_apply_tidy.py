@@ -15,8 +15,10 @@ from pitwall.apply.tidy import (
     ARCHIVE_DIR,
     CHANGES_DIR,
     READY_DIR,
+    SENT_DIR,
     apply_plan,
     build_plan,
+    file_sent,
     index_markdown,
     rank,
     sendable,
@@ -294,3 +296,65 @@ def test_two_runs_of_one_job_in_different_buckets_get_distinct_widget_keys(tmp_p
     assert len(generations) == 2
     assert len({g.key for g in generations}) == 2
     assert len({g.name for g in generations}) == 1   # the collision itself
+
+
+def test_regenerating_a_job_archives_its_previous_run(tmp_path):
+    """A batch of 49 jobs left 50 folders in `1_ready_to_send/`: regenerating
+    a job filed the new run beside the old one. One folder per job."""
+    from pitwall.apply.tidy import file_generation
+
+    out = tmp_path / "output"
+    make(out / READY_DIR, "930_Anthropic", job_id=930, when="2026-09-28T12:00:00+00:00")
+    make(out / CHANGES_DIR, "930_Anthropic_old", job_id=930, state="review")
+    make(out / READY_DIR, "931_Anthropic", job_id=931)
+    fresh = make(out, "930_Anthropic", job_id=930, when="2026-09-29T12:00:00+00:00")
+
+    filed = file_generation(
+        fresh, state="clean", prompt_version=PROMPT_VERSION,
+        has_cv=True, has_letter=True, root=out, job_id=930,
+    )
+    assert filed == out / READY_DIR / "930_Anthropic"
+    assert sorted(p.name for p in (out / READY_DIR).iterdir()) == ["930_Anthropic", "931_Anthropic"]
+    assert not any((out / CHANGES_DIR).iterdir())
+    assert sorted(p.name for p in (out / ARCHIVE_DIR).iterdir()) == ["930_Anthropic", "930_Anthropic_old"]
+
+
+def test_output_dir_is_named_by_job_id(tmp_path):
+    from pitwall.apply.packager import output_dir
+
+    assert output_dir(tmp_path, "Wayve", "Software Engineer, Simulation", job_id=301).name == "301_Wayve"
+    assert output_dir(tmp_path, "Wayve", "Software Engineer").name == "Wayve_Software_Engineer"
+
+
+def test_the_index_lists_runs_an_export_pinned(tmp_path):
+    """Pinned runs stay where they are for the CSV, but they are still the
+    applications to send — the index called a batch of 49 "0 ready"."""
+    out = tmp_path / "output"
+    held = make(out / READY_DIR, "930_Anthropic", job_id=930)
+    make(out / CHANGES_DIR, "13_Helsing", job_id=13, state="review")
+
+    text = index_markdown(build_plan(out, pinned=[str(held)]), output_dir=out)
+    assert "2 job(s) · **1 ready to send**" in text
+    assert "`930`" in text
+
+
+def test_a_sent_application_moves_out_of_ready_and_stays_out(tmp_path):
+    """Marked applied: the folder goes to `4_already_sent/`, a second call is a
+    no-op, a missing folder is not an error, and tidy never files it back."""
+    out = tmp_path / "output"
+    ready = make(out / READY_DIR, "helsing", job_id=13)
+    moved = file_sent(ready)
+    assert moved == out / SENT_DIR / "helsing" and not ready.exists()
+    assert sorted(p.name for p in moved.iterdir()) == [
+        "Simon_Sazonov_helsing_CV.pdf", "Simon_Sazonov_helsing_Cover_Letter.txt",
+        "provenance.json"]
+
+    assert file_sent(moved) is None
+    assert file_sent(ready) is None, "already moved"
+    assert file_sent(out / READY_DIR / "never_existed") is None
+
+    assert apply_plan(build_plan(out), out) == []
+    assert (out / SENT_DIR / "helsing").is_dir()
+
+    old = make(out / ARCHIVE_DIR, "helsing_old", job_id=13)
+    assert file_sent(old) is None and old.is_dir(), "a superseded run was not the one sent"

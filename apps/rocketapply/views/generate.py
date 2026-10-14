@@ -180,10 +180,11 @@ def live(run: GenerationRun) -> None:
     st.progress(len(done) / max(1, len(jobs)))
 
     if run.status == "interrupted":
-        st.warning("This run stopped when the app restarted. Finished jobs are kept; resume to "
+        st.warning("This run stopped before it finished. Finished jobs are kept; resume to "
                    "make the rest.", icon=":material/pause_circle:")
         if st.button("Resume", type="primary", icon=":material/play_arrow:"):
-            runner.start_generation(run.job_ids, mode=run.mode, hints=run.hints, resume_of=run)
+            runner.start_generation(run.job_ids, mode=run.mode, hints=run.hints, resume_of=run,
+                                    workers=getattr(run, "workers", 3))
             st.rerun()
     if run.error:
         st.error(run.error)
@@ -213,6 +214,7 @@ components.header(
     "checks it passed.",
 )
 run = runner.registry().generation
+runner.sync(run)
 if run is None:
     components.empty("Nothing generated yet.",
                      "Choose jobs on Selected and press Generate — this page then shows the work.")
@@ -225,11 +227,12 @@ def watch() -> None:
     current = runner.registry().generation
     if current is None:
         return
+    runner.sync(current)
     was_alive = st.session_state.get("gen_alive", False)
     live(current)
     st.session_state["gen_alive"] = current.alive
     if was_alive and not current.alive:
-        st.rerun(scope="app")      # refresh the strip's counts
+        st.rerun(scope="app")      # refresh the counts in the navigation
 
 
 if run.alive:

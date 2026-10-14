@@ -31,9 +31,16 @@ def slug(value: str, limit: int = 40) -> str:
 
 
 def output_dir(
-    root: pathlib.Path | str, company: str, role: str, *, claim: bool = False
+    root: pathlib.Path | str, company: str, role: str, *, claim: bool = False,
+    job_id: int | str | None = None,
 ) -> pathlib.Path:
-    """`output/<Company>_<Role>/`, never reusing a directory that has content.
+    """`output/<job id>_<Company>/`, never reusing a directory that has content.
+
+    Named by job id when there is one, because the id is what the tracker, the
+    CSV and the Studio all show, and a slug truncated at forty characters made
+    distinct postings collide — "Cybersecurity RL" and "Cybersecurity RL
+    (Reinforcement Learning)" both became `..._Cybersecurity_RL_Reinf`. Without
+    an id (previews, tests) it falls back to `<Company>_<Role>`.
 
     A collision is a second application, not a mistake to silently overwrite —
     what went out the first time is the record of what was sent.
@@ -52,7 +59,7 @@ def output_dir(
     two runs writing one directory is lost work.
     """
     root = pathlib.Path(root)
-    base = f"{slug(company)}_{slug(role)}"
+    base = f"{job_id}_{slug(company)}" if job_id else f"{slug(company)}_{slug(role)}"
     candidate = root / base
     version = 2
     while True:

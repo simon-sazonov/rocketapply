@@ -291,11 +291,13 @@ def generate_application(
     # workers cannot both take the same name — and it CREATES the directory,
     # which nothing else did when `--no-cv` skipped the CV render. The letter
     # write then failed on a directory that was never made.
-    directory = output_dir(out, result.company, result.title, claim=True)
+    directory = output_dir(out, result.company, result.title, claim=True, job_id=job_id)
     result.directory = directory
-    # The owner's name from the profile, so the app is not one person's. For
-    # "Simon Sazonov" this is byte-for-byte the stem it always was.
-    stem = f"{slug(profile.personal.name)}_{directory.name}"
+    # The owner's name from the profile, so the app is not one person's. Built
+    # from the company and role, not the folder: the folder is named by job id
+    # for Simon, while these files go to a recruiter, who should see
+    # `Simon_Sazonov_Wayve_Software_Engineer_CV.pdf`, never an id or a `_v2`.
+    stem = f"{slug(profile.personal.name)}_{slug(result.company)}_{slug(result.title)}"
     divergences: list[str] = []
     if cv:
         pdf = render_cv(profile, frame, config, directory / f"{stem}_CV.pdf")
@@ -506,6 +508,7 @@ def generate_application(
         has_cv=result.cv_pdf is not None,
         has_letter=result.letter_path is not None,
         root=out,
+        job_id=job_id,
     )
     if filed != directory:
         for field in ("directory", "cv_pdf", "cv_docx", "letter_path", "letter_pdf",

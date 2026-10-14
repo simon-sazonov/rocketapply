@@ -13,7 +13,7 @@ SXNG_URL := http://localhost:8888
 .PHONY: help venv test lint typecheck searxng searxng-env searxng-check \
         searxng-stop searxng-logs searxng-pull groq-check app pitwall rocketapply cli \
         coverage sweep relabel domains domains-apply domains-show \
-        job-search job-rerank job-calibrate job-targets-ats fonts validate-profile calibrate
+        job-search job-rerank job-calibrate job-audit job-targets-ats fonts validate-profile calibrate
 
 help:  ## show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -129,6 +129,9 @@ job-rerank:  ## re-rank stored jobs after editing the profile (no network)
 
 job-calibrate:  ## how well the score agrees with your ratings (proposes weights)
 	$(PY) scripts/run_pipeline.py job-calibrate
+
+job-audit:  ## is the Search list worth reading? measured against the audit labels
+	$(PY) scripts/run_pipeline.py job-audit
 
 job-targets-ats:  ## find the public ATS board of each target company
 	$(PY) scripts/discover_ats.py --targets

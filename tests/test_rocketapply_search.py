@@ -132,6 +132,18 @@ def test_hide_tracked_drops_what_is_already_in_the_pipeline(searched):
     assert row["application_status"] == "SHORTLISTED"
 
 
+def test_hide_tracked_drops_closed_but_not_removed(searched):
+    """A job closed out before you applied is done with; one you took off the
+    selection yourself may be wanted again."""
+    q = JobQuery(include_filtered=True, include_closed=True, hide_tracked=True)
+    closed, removed = search_ids(searched, JobQuery(include_filtered=True), limit=2)
+    tracker.set_status(searched, tracker.ensure_for_job(searched, closed), "CLOSED")
+    [app_id] = tracker.select_jobs(searched, [removed])
+    tracker.skip(searched, app_id)
+    shown = {r["id"] for r in search_jobs(searched, q, limit=1000).rows}
+    assert closed not in shown and removed in shown
+
+
 def test_the_process_strip_counts_each_stage(searched):
     ids = search_ids(searched, JobQuery(include_filtered=True), limit=3)
     tracker.select_jobs(searched, ids)

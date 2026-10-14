@@ -129,8 +129,16 @@ def mark_seen(conn: sqlite3.Connection, cluster_ids: list[int]) -> int:
 
 
 def dismiss(conn: sqlite3.Connection, cluster_id: int, reason: str | None) -> None:
+    """Done with this vacancy, everywhere. The review row is keyed on the cluster,
+    so Search stops showing it whichever source posts it again, and an application
+    that has not gone out yet leaves Selected, Review and In process. One that
+    went out stays: it is history, not a queue."""
+    from . import tracker
+
     _review(conn, int(cluster_id), dismissed_at=_now(conn), dismissed_reason=reason,
             seen_at=_now(conn))
+    tracker.skip_cluster(conn, int(cluster_id),
+                         note=f"not interested: {reason}" if reason else "not interested")
 
 
 def restore(conn: sqlite3.Connection, cluster_id: int) -> None:

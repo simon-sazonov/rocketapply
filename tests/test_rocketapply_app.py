@@ -66,13 +66,29 @@ def test_every_screen_opens_on_an_empty_database(rocket, view):
     _ok(_app(view))
 
 
-def test_search_lists_the_collected_jobs_and_the_strip_counts_them(rocket):
+def test_search_lists_the_collected_jobs(rocket):
     _populate()
     at = _app()
     _ok(at)
     assert any(df.value.shape[0] > 0 for df in at.dataframe), "the results table has rows"
-    labels = " ".join(str(link.label) for link in at.get("page_link"))
-    assert "Found" in labels and "Applied" in labels
+
+
+def test_the_navigation_carries_each_stage_count():
+    from rocket.components import nav_titles
+
+    titles = nav_titles({"found": 10907, "selected": 8, "docs_ready": 41, "in_process": 2,
+                         "applied": 1}, generating=(44, 49))
+    assert titles == {"search": "Search · 10,907", "selected": "Selected · 8",
+                      "generate": "Generate · 44/49", "review": "Review · 41",
+                      "applications": "Applications · 3"}
+    assert nav_titles({})["review"] == "Review", "no count when nothing waits"
+
+
+def test_a_status_is_named_after_the_page_it_is_on():
+    from rocket.format import STATUS_NAMES
+
+    assert [STATUS_NAMES[s] for s in ("SHORTLISTED", "CV_READY", "IN_PROCESS", "APPLIED")] \
+        == ["Selected", "In review", "In process", "Applied"]
 
 
 def test_select_the_top_n_moves_jobs_to_selected(rocket):
@@ -135,6 +151,14 @@ def test_approve_export_and_mark_applied_from_the_screens(rocket):
         ["SHORTLISTED", "CV_READY", "IN_PROCESS", "APPLIED"]
     other = next(a for a in apps if a != approved[0]["id"])
     assert tracker.get(conn, other)["status"] == "CV_READY", "unapproved stays in Review"
+
+    # The sent application's documents leave the "ready" pile; the other's stay.
+    sent = pathlib.Path(app["generation_dir"])
+    assert sent.parent.name == "4_already_sent" and (sent / "provenance.json").is_file()
+    assert not pathlib.Path(approved[0]["generation_dir"]).exists()
+    [item] = tracker.batch_items(conn, int(batch["id"]))
+    assert item["exported_dir"] == str(sent)
+    assert pathlib.Path(tracker.get(conn, other)["generation_dir"]).is_dir()
 
 
 def test_the_applied_screen_offers_the_people_panel(rocket):

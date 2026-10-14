@@ -13,10 +13,14 @@ the cluster and on the normalised company name, not on one source's URL.
 
 from __future__ import annotations
 
+import logging
+import pathlib
 import sqlite3
 from typing import Any
 
 from .companies import normalize_company
+
+log = logging.getLogger(__name__)
 
 STATUSES = (
     "SHORTLISTED", "CV_READY", "IN_PROCESS", "APPLIED", "ONLINE_ASSESSMENT", "INTERVIEW",
@@ -152,6 +156,37 @@ def set_status(conn: sqlite3.Connection, app_id: int, status: str,
     conn.execute(f"UPDATE applications SET {assignments}, updated_at = datetime('now')"
                  " WHERE id = ?", (*fields.values(), app_id))
     _event(conn, app_id, app["status"], status, note)
+    if status in SUBMITTED and app["status"] not in SUBMITTED:
+        file_sent(conn, app_id)
+
+
+def file_sent(conn: sqlite3.Connection, app_id: int) -> str | None:
+    """The application went out: move its folder (CV, letter, everything) from
+    `1_ready_to_send/` to `4_already_sent/` and point the application — and any
+    export batch that froze the old path — at the new place. Returns the new
+    folder, or None when nothing moved.
+
+    Never raises over the files: a folder already moved, deleted by hand, or
+    not movable right now must not stop the job being marked applied."""
+    app = get(conn, app_id)
+    old = (app or {}).get("generation_dir")
+    if not old:
+        return None
+    from ..apply.tidy import file_sent as move_to_sent
+
+    try:
+        moved = move_to_sent(pathlib.Path(old))
+    except OSError as exc:
+        log.warning("could not move %s to already sent: %s", old, exc)
+        return None
+    if moved is None:
+        return None
+    new = str(moved.resolve()) if pathlib.Path(old).is_absolute() else str(moved)
+    conn.execute("UPDATE applications SET generation_dir = ?, updated_at = datetime('now')"
+                 " WHERE generation_dir = ?", (new, old))
+    conn.execute("UPDATE export_batch_items SET generation_dir = ? WHERE generation_dir = ?",
+                 (new, old))
+    return new
 
 
 def update(conn: sqlite3.Connection, app_id: int, **fields: Any) -> None:
@@ -267,8 +302,17 @@ def ensure_for_job(conn: sqlite3.Connection, job_id: int, status: str = "SHORTLI
 
 
 def select_jobs(conn: sqlite3.Connection, job_ids: list[int]) -> list[int]:
-    """Search → Selected, for many postings at once. A SKIPPED one comes back."""
-    return [ensure_for_job(conn, int(j), "SHORTLISTED", note="selected") for j in job_ids]
+    """Search → Selected, for many postings at once. A SKIPPED one comes back, and
+    so does a dismissed one: selecting it again is the undo."""
+    out = []
+    for job_id in job_ids:
+        cluster = cluster_for_job(conn, int(job_id))
+        if cluster is not None:
+            conn.execute("UPDATE job_review SET dismissed_at = NULL, dismissed_reason = NULL,"
+                         " updated_at = datetime('now') WHERE cluster_id = ?",
+                         (int(cluster["cluster_id"]),))
+        out.append(ensure_for_job(conn, int(job_id), "SHORTLISTED", note="selected"))
+    return out
 
 
 def skip(conn: sqlite3.Connection, app_id: int, *, note: str | None = None) -> None:
@@ -276,13 +320,43 @@ def skip(conn: sqlite3.Connection, app_id: int, *, note: str | None = None) -> N
     set_status(conn, app_id, "SKIPPED", note=note or "removed from the selection")
 
 
+def skip_cluster(conn: sqlite3.Connection, cluster_id: int, *, note: str | None = None) -> int:
+    """Every application for this vacancy that has not gone out yet, off the
+    pipeline. Returns how many moved."""
+    rows = conn.execute(
+        "SELECT id FROM applications WHERE cluster_id = ? AND status IN"
+        " ('SHORTLISTED', 'CV_READY', 'IN_PROCESS')", (int(cluster_id),)).fetchall()
+    for r in rows:
+        skip(conn, int(r["id"]), note=note)
+    return len(rows)
+
+
+def is_dismissed(conn: sqlite3.Connection, job_id: int) -> bool:
+    cluster = cluster_for_job(conn, int(job_id))
+    return cluster is not None and conn.execute(
+        "SELECT 1 FROM job_review WHERE cluster_id = ? AND dismissed_at IS NOT NULL",
+        (int(cluster["cluster_id"]),)).fetchone() is not None
+
+
 def record_generation(conn: sqlite3.Connection, *, job_id: int, directory: str | None,
                       cv_version: str | None = None, letter_version: str | None = None,
                       letter_state: str = "", mode: str = "cv_letter") -> int:
     """A CV (and maybe a letter) exists for this posting: remember where, and
     move the application to CV_READY. Clears any earlier review, because the
-    documents it approved are not these ones."""
-    app_id = ensure_for_job(conn, job_id, "SHORTLISTED")
+    documents it approved are not these ones.
+
+    A job dismissed while its documents were being made stays dismissed: the
+    files are remembered, the status does not move. Returns 0 when there is no
+    application to remember them on."""
+    dismissed = is_dismissed(conn, job_id)
+    if dismissed:
+        cluster = cluster_for_job(conn, job_id)
+        existing = for_cluster(conn, int(cluster["cluster_id"])) if cluster else None
+        if existing is None:
+            return 0
+        app_id = int(existing["id"])
+    else:
+        app_id = ensure_for_job(conn, job_id, "SHORTLISTED")
     conn.execute(
         """
         UPDATE applications SET generation_dir = ?, generation_mode = ?,
@@ -294,7 +368,8 @@ def record_generation(conn: sqlite3.Connection, *, job_id: int, directory: str |
         """,
         (directory, mode, letter_state or "", cv_version, letter_version, app_id),
     )
-    advance(conn, app_id, "CV_READY", note=f"documents generated ({mode})")
+    if not dismissed:
+        advance(conn, app_id, "CV_READY", note=f"documents generated ({mode})")
     return app_id
 
 
@@ -380,7 +455,7 @@ def batches(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         SELECT b.*, COUNT(i.application_id) AS size,
                SUM(CASE WHEN a.status = 'IN_PROCESS' THEN 1 ELSE 0 END) AS in_process,
                SUM(CASE WHEN a.status NOT IN ('IN_PROCESS', 'CV_READY', 'SHORTLISTED',
-                   'SKIPPED') THEN 1 ELSE 0 END) AS applied
+                   'SKIPPED', 'CLOSED') THEN 1 ELSE 0 END) AS applied
           FROM export_batches b
           LEFT JOIN export_batch_items i ON i.batch_id = b.id
           LEFT JOIN applications a ON a.id = i.application_id

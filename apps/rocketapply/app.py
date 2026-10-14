@@ -5,8 +5,9 @@ the engine writes `output/`, `run/` and `data/` relative to the working
 directory, and this app shares them with PitWall. Its light theme is in
 `.streamlit/config.toml` beside this file.
 
-One process, left to right, with the count at every step on the strip under
-the navigation:
+One process, left to right, and the navigation is that process — each page
+carries the number of jobs waiting there, and a job's status anywhere in the
+app is the name of the page it is on:
 
     Search → Selected → Generate → Review → Applications (in process → applied → people)
 
@@ -25,20 +26,31 @@ if str(HERE) not in sys.path:
 
 import streamlit as st  # noqa: E402
 
-from rocket import components, theme  # noqa: E402
+from rocket import components, data, runner, theme  # noqa: E402
 
 st.set_page_config(page_title="RocketApply", page_icon="🚀", layout="wide",
                    initial_sidebar_state="collapsed")
 theme.inject()
 
+try:
+    counts = data.stage_counts()
+except Exception:  # noqa: BLE001 - a fresh install with no jobs yet
+    counts = {}
+gen = runner.registry().generation
+runner.sync(gen)
+titles = components.nav_titles(
+    counts, (len(gen.finished_jobs), len(gen.job_ids)) if gen is not None and gen.alive else None)
+
 PAGES = [
-    st.Page("views/search.py", title="Search", icon=":material/search:", url_path="search",
-            default=True),
-    st.Page("views/selected.py", title="Selected", icon=":material/checklist:",
+    st.Page("views/search.py", title=titles["search"], icon=":material/search:",
+            url_path="search", default=True),
+    st.Page("views/selected.py", title=titles["selected"], icon=":material/checklist:",
             url_path="selected"),
-    st.Page("views/generate.py", title="Generate", icon=":material/bolt:", url_path="generate"),
-    st.Page("views/review.py", title="Review", icon=":material/rate_review:", url_path="review"),
-    st.Page("views/applications.py", title="Applications", icon=":material/send:",
+    st.Page("views/generate.py", title=titles["generate"], icon=":material/bolt:",
+            url_path="generate"),
+    st.Page("views/review.py", title=titles["review"], icon=":material/rate_review:",
+            url_path="review"),
+    st.Page("views/applications.py", title=titles["applications"], icon=":material/send:",
             url_path="applications"),
     st.Page("views/engine.py", title="How it works", icon=":material/insights:",
             url_path="how-it-works"),
@@ -46,5 +58,4 @@ PAGES = [
 ]
 
 page = st.navigation(PAGES, position="top")
-components.process_strip()
 page.run()

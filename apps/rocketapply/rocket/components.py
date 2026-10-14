@@ -1,4 +1,4 @@
-"""Pieces every screen shares: the process strip, headers, cards, the stage track."""
+"""Pieces every screen shares: the navigation titles, headers, cards, the stage track."""
 
 from __future__ import annotations
 
@@ -8,33 +8,28 @@ from typing import Any
 
 import streamlit as st
 
-from . import data
 from .format import tokens
 
-#: (key in stage_counts, label, page, query) — the process, in order.
-STRIP = (
-    ("found", "Found", "views/search.py", None),
-    ("selected", "Selected", "views/selected.py", None),
-    ("docs_ready", "Documents ready", "views/review.py", None),
-    ("in_process", "In process", "views/applications.py", {"tab": "in_process"}),
-    ("applied", "Applied", "views/applications.py", {"tab": "applied"}),
-)
 
+def nav_titles(counts: dict[str, int], generating: tuple[int, int] | None = None
+               ) -> dict[str, str]:
+    """Each workflow page's name in the navigation, with how many jobs wait there.
 
-def process_strip() -> None:
-    """Found → Selected → Documents ready → In process → Applied, each a link.
+    The navigation is the process: a job's status anywhere in the app (Selected,
+    In review, In process, Applied) is the name of the page it sits on, so there
+    is one vocabulary, not a second row of stages repeating the first."""
+    def titled(name: str, n: int) -> str:
+        return f"{name} · {n:,}" if n else name
 
-    Page links rather than anchors: an anchor reloads the browser tab, which
-    starts a new session and forgets the search filters."""
-    try:
-        counts = data.stage_counts()
-    except Exception:  # noqa: BLE001 - a fresh install with no jobs yet
-        counts = {}
-    with st.container(key="ra_strip", horizontal=True, gap=None):
-        for i, (key, label, page, query) in enumerate(STRIP):
-            arrow = "" if i == len(STRIP) - 1 else ""
-            st.page_link(page, label=f"**{counts.get(key, 0):,}** · {label}{arrow}",
-                         query_params=query, width="stretch")
+    return {
+        "search": titled("Search", counts.get("found", 0)),
+        "selected": titled("Selected", counts.get("selected", 0)),
+        "generate": (f"Generate · {generating[0]}/{generating[1]}" if generating
+                     else "Generate"),
+        "review": titled("Review", counts.get("docs_ready", 0)),
+        "applications": titled("Applications", counts.get("in_process", 0)
+                               + counts.get("applied", 0)),
+    }
 
 
 def header(title: str, subtitle: str = "") -> None:
@@ -85,8 +80,13 @@ def budget_line(b: Any) -> str:
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
-def pdf_page_png(path: str, mtime: float, scale: float = 1.3) -> bytes | None:
-    """First page of a PDF as a PNG, cached by path and modification time."""
+def pdf_page_png(path: str, mtime: float, scale: float = 3.0) -> bytes | None:
+    """First page of a PDF as a PNG, cached by path and modification time.
+
+    The PDF itself is vector text; only this preview has a resolution. At 3x
+    (216 DPI) the page is ~1800 px wide, enough to stay sharp when a Retina
+    screen stretches it across the column — 1.3x (94 DPI) read as blurry.
+    """
     try:
         import io
 
@@ -100,13 +100,14 @@ def pdf_page_png(path: str, mtime: float, scale: float = 1.3) -> bytes | None:
         return None
 
 
-def pdf_preview(path: str | pathlib.Path | None, *, caption: str = "") -> None:
+def pdf_preview(path: str | pathlib.Path | None, *, caption: str = "",
+                width: int | str = "stretch") -> None:
     if not path or not pathlib.Path(path).is_file():
         st.caption("No PDF yet.")
         return
     p = pathlib.Path(path)
     png = pdf_page_png(str(p), p.stat().st_mtime)
     if png:
-        st.image(png, caption=caption or p.name, width="stretch")
+        st.image(png, caption=caption or p.name, width=width)
     else:
         st.caption(f"Preview unavailable — {p.name}")

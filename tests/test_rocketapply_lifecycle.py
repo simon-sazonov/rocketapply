@@ -15,7 +15,7 @@ import pytest
 
 from pitwall.db import SCHEMA_VERSION, init_schema
 from pitwall.jobsearch import tracker
-from pitwall.jobsearch.store import load_inbox
+from pitwall.jobsearch.store import JobQuery, dismiss, load_inbox, search_jobs
 
 from .test_jobsearch_pipeline import (  # noqa: F401, F811, TID252
     Stub,
@@ -107,6 +107,58 @@ def test_a_skipped_job_comes_back_when_selected_again(jobs):
     assert tracker.get(conn, app_id)["status"] == "SKIPPED"
     assert tracker.select_jobs(conn, [job_id]) == [app_id]
     assert _statuses(conn, app_id) == ["SHORTLISTED", "SKIPPED", "SHORTLISTED"]
+
+
+def _cluster(conn, job_id):
+    return int(tracker.cluster_for_job(conn, job_id)["cluster_id"])
+
+
+def test_dismissing_a_job_takes_it_out_of_every_stage(jobs):
+    conn, ids = jobs
+    job_id = next(iter(ids.values()))
+    app_id = tracker.record_generation(conn, job_id=job_id, directory="output/x", mode="cv")
+    assert tracker.get(conn, app_id)["status"] == "CV_READY"
+    before = search_jobs(conn, JobQuery(), limit=100)
+    assert job_id in {r["id"] for r in before.rows}
+
+    dismiss(conn, _cluster(conn, job_id), "Closed")
+
+    assert tracker.get(conn, app_id)["status"] == "SKIPPED"
+    assert not tracker.by_status(conn, ("SHORTLISTED", "CV_READY", "IN_PROCESS"))
+    after = search_jobs(conn, JobQuery(), limit=100)
+    assert job_id not in {r["id"] for r in after.rows}
+    assert after.total == before.total - 1
+
+
+def test_a_dismissed_job_stays_out_when_its_documents_finish(jobs):
+    """A generation that was already running must not bring it back."""
+    conn, ids = jobs
+    job_id = next(iter(ids.values()))
+    app_id = tracker.select_jobs(conn, [job_id])[0]
+    dismiss(conn, _cluster(conn, job_id), "Not interested")
+    assert tracker.record_generation(conn, job_id=job_id, directory="output/y",
+                                     mode="cv") == app_id
+    app = tracker.get(conn, app_id)
+    assert app["status"] == "SKIPPED"
+    assert app["generation_dir"] == "output/y", "the files are still remembered"
+
+
+def test_an_application_that_went_out_is_not_touched_by_a_dismissal(jobs):
+    conn, ids = jobs
+    job_id = next(iter(ids.values()))
+    app_id = tracker.ensure_for_job(conn, job_id, "APPLIED")
+    dismiss(conn, _cluster(conn, job_id), "Closed")
+    assert tracker.get(conn, app_id)["status"] == "APPLIED"
+
+
+def test_selecting_a_dismissed_job_again_undoes_the_dismissal(jobs):
+    conn, ids = jobs
+    job_id = next(iter(ids.values()))
+    dismiss(conn, _cluster(conn, job_id), "Poor match")
+    app_id = tracker.select_jobs(conn, [job_id])[0]
+    assert tracker.get(conn, app_id)["status"] == "SHORTLISTED"
+    assert not tracker.is_dismissed(conn, job_id)
+    assert job_id in {r["id"] for r in search_jobs(conn, JobQuery(), limit=100).rows}
 
 
 def test_generation_moves_to_documents_ready_and_clears_an_old_review(jobs):

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import io
+import pathlib
 
 import pandas as pd
 import streamlit as st
@@ -48,6 +49,27 @@ CODES = sorted(COUNTRIES, key=country_name)
 
 def _lines(text: str) -> list[str]:
     return [t.strip() for t in text.replace(",", "\n").splitlines() if t.strip()]
+
+
+def _language_mismatch(cfg: JobSearchConfig) -> list[str]:
+    """Levels the search profile and `profile/personal.yaml` disagree on. The
+    search scores with the first; the CV and letters are written from the second."""
+    from pitwall.apply.loader import load_profile
+    from pitwall.jobsearch.scoring import LANGUAGE_NAMES
+
+    try:
+        spoken = load_profile().personal.languages or []
+    except Exception:  # noqa: BLE001 - the Your documents tab reports a broken profile
+        return []
+    codes = {name.lower(): code for code, name in LANGUAGE_NAMES.items()}
+    out = []
+    for item in spoken:
+        code = codes.get(str(item.get("name", "")).lower())
+        mine = cfg.language_level(code) if code else None
+        theirs = str(item.get("level", ""))
+        if mine and mine.casefold() != theirs.casefold():
+            out.append(f"{item.get('name')}: {mine} here, {theirs} in profile/personal.yaml")
+    return out
 
 
 def _saved_rerank() -> None:
@@ -159,6 +181,9 @@ def profile_tab(cfg: JobSearchConfig) -> None:
                                       ", ".join(q for q in cfg.sources.queries
                                                 if core(q) not in generated))
         saved = st.form_submit_button("Save", type="primary")
+    for line in _language_mismatch(cfg):
+        st.warning(f"{line}. The search uses the first, your CV and letters the second — "
+                   "change both so they agree.", icon=":material/translate:")
     if saved:
         d = cfg.model_dump()
         d["locations"].update(countries=countries, home_country=home,
@@ -337,15 +362,12 @@ def documents_tab() -> None:
     st.markdown("Your CV and letters are built only from `profile/` — every line on the CV is "
                 "a record there, and every claim in a letter must trace to one. This checks it.")
     report = validate()
-    c = st.columns(3)
-    with c[0]:
-        components.card("Errors", str(len(report.errors)), "must be fixed" if report.errors
-                        else "none")
-    with c[1]:
-        components.card("Warnings", str(len(report.warnings)), "worth a look")
-    with c[2]:
-        components.card("Numbers you may use", str(len(report.allowed_numbers)),
-                        "anything else in a letter is rejected")
+    st.html(components.chips(
+        [f"{len(report.errors)} error(s)" + (" — must be fixed" if report.errors else "")],
+        "fail" if report.errors else "ok")
+        + components.chips([f"{len(report.warnings)} warning(s)"],
+                           "warn" if report.warnings else "")
+        + components.chips([f"{len(report.allowed_numbers)} numbers a letter may use"]))
     for e in report.errors:
         st.error(e)
     if report.warnings:
@@ -356,8 +378,16 @@ def documents_tab() -> None:
 
     latest = next((g for g in scan("output") if g.cv_pdf), None)
     if latest:
-        st.markdown(f"**The most recent CV** · {latest.company} · {latest.title}")
-        components.pdf_preview(latest.cv_pdf)
+        with st.container(border=True):
+            thumb, info = st.columns([1, 4], vertical_alignment="center")
+            with thumb:
+                components.pdf_preview(latest.cv_pdf, caption=" ", width=150)
+            with info:
+                pdf = pathlib.Path(latest.cv_pdf)
+                st.markdown(f"**The most recent CV** · {latest.company} · {latest.title}")
+                st.caption(pdf.name)
+                st.download_button("Open the PDF", pdf.read_bytes(), file_name=pdf.name,
+                                   mime="application/pdf", icon=":material/picture_as_pdf:")
 
 
 components.header(

@@ -127,9 +127,14 @@ def detail(app: dict) -> None:
                     hints={int(app["job_id"]): hint} if hint else None, fresh=True)
                 if run:
                     st.switch_page("views/generate.py")
-        if a3.button("Remove", icon=":material/delete:", width="stretch", key=f"rm_{app['id']}",
-                     help="Off the list, kept on record; the files stay in output/."):
-            data.write(tracker.skip, int(app["id"]), note="removed in review")
+        if a3.button("Not interested", icon=":material/block:", width="stretch",
+                     key=f"rm_{app['id']}",
+                     help="Dismisses the job everywhere, so a later search does not bring it "
+                          "back. The files stay in output/."):
+            if app.get("job_id"):
+                data.reject([int(app["job_id"])], "Not interested")
+            else:
+                data.write(tracker.skip, int(app["id"]), note="removed in review")
             st.rerun()
 
 
@@ -209,6 +214,8 @@ with left:
                                                               format="%.0f", width="small"),
                        "✓": st.column_config.TextColumn("✓", width="small")})
     rows = event.selection.rows if event else []
+    # The stored selection can outlive the list (an app left CV_READY), so drop stale indices.
+    rows = [r for r in rows if 0 <= r < len(frame)]
     chosen_id = int(frame.iloc[rows[0]]["id"]) if rows else int(frame.iloc[0]["id"])
     if not rows:
         st.caption("Showing the first one — click a row to switch.")

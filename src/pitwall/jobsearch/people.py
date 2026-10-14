@@ -66,8 +66,10 @@ _PARENS = re.compile(r"\s*[\(\[].*?[\)\]]\s*")
 #: is the stronger opening whatever their title.
 _TITLE_GROUPS = (
     ("recruiter", re.compile(r"recruit|talent|sourc(er|ing)|people partner|\bhr\b", re.I)),
-    ("hiring", re.compile(r"\b(manager|head|director|lead|vp|vice president|chief|founder)\b",
-                          re.I)),
+    # "Inventor, Entrepreneur, CEO" came up in a recruiter search and stayed a
+    # recruiter until CEO/CTO counted here.
+    ("hiring", re.compile(r"\b(manager|head|director|lead|vp|vice president|chief|founder|"
+                          r"ceo|cto|coo)\b", re.I)),
     ("peer", re.compile(r"engineer|scientist|researcher|developer|\bswe\b|analyst|"
                         r"member of technical staff|\bmts\b", re.I)),
 )
@@ -326,6 +328,10 @@ def people_at(company: str, *, settings: Settings | None = None) -> list[dict[st
         group = groups.get(str(r["role_title"] or "").casefold())
         if group:
             person["groups"].add(group)
+        if group == "alumni" and r["role_title"]:
+            # An alumni search's "role" is the school or employer you share —
+            # what an alumni note names.
+            person.setdefault("shared", str(r["role_title"]))
     emails = repos.contacts.for_candidates(list(people))
     out = []
     for pid, person in people.items():

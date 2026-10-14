@@ -26,7 +26,7 @@ from .sections import split_requirements
 from .skills import Vocabulary
 
 #: Bump when a rule changes; every open posting is re-normalised on the next run.
-NORMALIZER_VERSION = "js9"   # js2: qualitative seniority, decoded Greenhouse HTML
+NORMALIZER_VERSION = "js10"  # js2: qualitative seniority, decoded Greenhouse HTML
 #                              js3: remote_regions as a list; the source's own
 #                                   remote flag and search country used
 #                              js4: seven more posting languages; US level
@@ -42,6 +42,12 @@ NORMALIZER_VERSION = "js9"   # js2: qualitative seniority, decoded Greenhouse HT
 #                              js8: a degree line under "Nice to have" is a wish
 #                              js9: the lowest degree a posting requires decides;
 #                                   "Skills that will differentiate…" is a wish
+#                              js10: every years phrase in a sentence, softeners
+#                                   only where they govern the years; levels
+#                                   stated in the body; clause-bound language
+#                                   verbs; languages of short previews; how
+#                                   much of a posting was read (`text_depth`);
+#                                   courses and task platforms (`offer_kind`)
 
 # ───────────────────────────── canonical URL ─────────────────────────────
 
@@ -252,7 +258,8 @@ _STOPWORDS = {
     "es": {"y", "el", "los", "las", "una", "del", "con", "nuestro", "nuestra", "somos",
            "también", "equipo", "para", "más", "sus"},
     "it": {"il", "della", "delle", "degli", "gli", "sono", "siamo", "nostro", "nostra",
-           "che", "per", "nel", "anche", "una", "con"},
+           "che", "per", "nel", "anche", "una", "con", "di", "questa", "sarà", "tua", "tuo",
+           "cerchiamo", "offriamo", "nostri"},
     "nl": {"het", "een", "voor", "wij", "jij", "zijn", "onze", "ons", "bij", "ook",
            "naar", "van", "je", "met", "en"},
     "sv": {"och", "att", "är", "av", "ett", "till", "våra", "vår", "inom", "som", "med",
@@ -296,8 +303,15 @@ def posting_language(text: str | None) -> str | None:
     if len(words) < 20:
         return None
     counts = {lang: sum(1 for w in words if w in stop) for lang, stop in _STOPWORDS.items()}
-    lang, n = max(counts.items(), key=lambda kv: kv[1])
-    return lang if n >= 5 else None
+    ranked = sorted(counts.items(), key=lambda kv: -kv[1])
+    (lang, n), (_, runner_up) = ranked[0], ranked[1]
+    if len(words) >= 150:
+        return lang if n >= 5 else None
+    # A 500-character preview has a third of the words, so fewer stopwords
+    # decide — provided the winner is clear of the rest. "Entra nel nostro
+    # mondo… Quale sarà la tua sfida?" was undetected on 29 Sep 2026, so an
+    # Italian posting passed as English.
+    return lang if n >= 3 and n >= runner_up + 2 else None
 
 
 #: "Read and write French", "you speak Dutch", "able to write in German": the
@@ -315,10 +329,21 @@ _LANGUAGE_VERB = {
 }
 
 
+#: A wish right after the language: "German is an advantage", "Dutch a plus".
+_LANGUAGE_WISH = re.compile(
+    r"^[^;.\n]{0,25}?\b(?:is\s+|are\s+|would\s+be\s+)?(?:an?\s+)?(?:big\s+|strong\s+)?"
+    r"(?:plus|advantage|advantageous|bonus|asset|nice\s+to\s+have|beneficial|preferred|"
+    r"desirable|welcome|von\s+vorteil|wünschenswert|un\s+plus|atout)\b", re.I)
+
+
 def _stated(pattern: re.Pattern[str], text: str) -> bool:
-    """A match that stays inside one clause. "Fluency in English and Dutch"
-    asks for Dutch; "Fluent English required; German is nice to have" does not."""
-    return any(not re.search(r"[;.\n]", m.group(0)) for m in pattern.finditer(text))
+    """A match that stays inside one clause and is not then called a wish.
+    "Fluency in English and Dutch" asks for Dutch; "Fluent English required;
+    German is nice to have" does not, and neither does "You communicate
+    confidently in English; German is an advantage" (Quantum-Systems, read as
+    German required until 29 Sep 2026)."""
+    return any(not re.search(r"[;.\n]", m.group(0)) and not _LANGUAGE_WISH.match(text[m.end():])
+               for m in pattern.finditer(text))
 
 
 def languages_required(title: str | None, text: str | None, language: str | None) -> list[str]:
@@ -329,14 +354,15 @@ def languages_required(title: str | None, text: str | None, language: str | None
     found = [lang for lang, pattern in _LANGUAGE_REQUIRED.items()
              if any(word in lowered for word in _LANGUAGE_WORDS[lang]) and _stated(pattern, blob)]
     for lang, name in _LANGUAGE_NAMES_EN.items():
-        if lang not in found and name in lowered and _LANGUAGE_VERB[lang].search(blob):
+        if lang not in found and name in lowered and _stated(_LANGUAGE_VERB[lang], blob):
             found.append(lang)
     if language and language != "en" and language not in found:
         found.append(language)
     return found
 
 
-_PHD_TITLE = re.compile(r"\bph\.?\s?d\b|\bdoctoral\b|\bdoktorand\w*|\bdoctorant\w*", re.I)
+_PHD_TITLE = re.compile(r"\bph\.?\s?d\b|\b(?:post-?)?doctoral\b|\bpost-?docs?\b|\bdoktorand\w*|"
+                        r"\bdoctorant\w*", re.I)
 _PHD_OR_MASTERS = re.compile(
     r"\b(?:ms|m\.?sc|master'?s?|ma)\s*(?:/|or|and|&)\s*ph\.?\s?d\b|"
     r"\bph\.?\s?d\s*(?:/|or|&)\s*(?:ms|m\.?sc|master'?s?)\b", re.I)

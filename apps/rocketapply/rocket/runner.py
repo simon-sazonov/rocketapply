@@ -6,21 +6,29 @@ would be lost with it — inviting a second generation that spends the same
 Groq quota twice. The registry allows one generation at a time, full stop.
 
 Worker threads never touch `st.*`. They write to their run object (under its
-lock) and, for generation, append every event to
-`run/rocketapply/<run_id>/events.jsonl` with a heartbeat in `meta.json`. If the
-server restarts mid-run, the thread is gone but the files are not: the run
-shows as interrupted, and Resume continues it — the batch ledger skips every
-job that already finished.
+lock).
+
+A generation runs for an hour, longer than a Streamlit server can be counted on
+to live: a host that stops idle servers (the Claude app's preview stops one
+after 30 idle minutes), a closed terminal, a restart. So it runs in its own
+process (`worker.py`, in a session of its own), which appends every event to
+`run/rocketapply/<run_id>/events.jsonl` with a heartbeat and its pid in
+`meta.json`. The page follows those files (`sync`), and a server that starts
+while the worker is still going picks the run up where the files say it is. If
+the worker itself dies, the run shows as interrupted, and Resume continues it —
+the batch ledger skips every job that already finished.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import pathlib
+import subprocess
+import sys
 import threading
 import time
-import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,6 +41,7 @@ from . import data
 
 RUN_ROOT = pathlib.Path("run") / "rocketapply"
 STAGE_KEYS = [k for k, _ in STAGES]
+WORKER = pathlib.Path(__file__).resolve().parent / "worker.py"
 
 
 def _now() -> str:
@@ -90,6 +99,13 @@ class GenerationRun:
     research: list[str] = field(default_factory=list)
     thread: threading.Thread | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
+    #: The worker process, when this server started it (`proc`) or found it
+    #: still running (`pid` only), and how far into events.jsonl `sync` has read.
+    pid: int = 0
+    proc: subprocess.Popen[bytes] | None = None
+    offset: int = 0
+    workers: int = 3
+    fresh: bool = False
 
     @property
     def folder(self) -> pathlib.Path:
@@ -97,6 +113,10 @@ class GenerationRun:
 
     @property
     def alive(self) -> bool:
+        if self.proc is not None:
+            return self.proc.poll() is None
+        if self.pid:
+            return _pid_alive(self.pid)
         return self.thread is not None and self.thread.is_alive()
 
     @property
@@ -173,9 +193,21 @@ class GenerationRun:
         meta = {"run_id": self.run_id, "job_ids": self.job_ids, "mode": self.mode,
                 "hints": {str(k): v for k, v in self.hints.items()}, "status": self.status,
                 "started": self.started, "finished": self.finished, "heartbeat": time.time(),
-                "error": self.error}
+                "error": self.error, "pid": self.pid, "workers": self.workers,
+                "fresh": self.fresh}
         self.folder.mkdir(parents=True, exist_ok=True)
         (self.folder / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def _event(line: str) -> StageEvent | None:
+    try:
+        d = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return StageEvent(job_id=int(d.get("job_id") or 0), stage=d.get("stage", ""),
+                      status=d.get("status", ""), message=d.get("message", ""),
+                      fraction=float(d.get("fraction") or 0), seconds=float(d.get("seconds") or 0),
+                      tokens=int(d.get("tokens") or 0), data=d.get("data") or {})
 
 
 def _replay(run: GenerationRun) -> None:
@@ -184,15 +216,55 @@ def _replay(run: GenerationRun) -> None:
     if not path.exists():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
+        event = _event(line)
+        if event is not None:
+            run._apply(event)
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _read_meta(folder: pathlib.Path) -> dict[str, Any]:
+    try:
+        return json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def sync(run: GenerationRun | None) -> None:
+    """Bring a worker's run up to date from its folder: the events appended
+    since the last look, and how it ended once the process has gone. A run
+    from before workers (a thread in this server) has nothing to read."""
+    if run is None or not getattr(run, "pid", 0):
+        return
+    with run.lock:
         try:
-            d = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        event = StageEvent(job_id=int(d.get("job_id") or 0), stage=d.get("stage", ""),
-                           status=d.get("status", ""), message=d.get("message", ""),
-                           fraction=float(d.get("fraction") or 0), seconds=float(d.get("seconds") or 0),
-                           tokens=int(d.get("tokens") or 0), data=d.get("data") or {})
-        run._apply(event)
+            with (run.folder / "events.jsonl").open("rb") as fh:
+                fh.seek(run.offset)
+                chunk = fh.read()
+        except OSError:
+            chunk = b""
+        end = chunk.rfind(b"\n") + 1            # a half-written last line waits
+        for line in chunk[:end].decode("utf-8", "replace").splitlines():
+            event = _event(line)
+            if event is not None:
+                run._apply(event)
+        run.offset += end
+        if run.status != "running" or run.alive:
+            return
+        meta = _read_meta(run.folder)
+        ended = meta.get("status") in ("done", "error")
+        run.status = meta["status"] if ended else "interrupted"
+        run.error = meta.get("error", "") if ended else "The worker process stopped."
+        run.finished = float(meta.get("finished") or time.time())
+    data.bump()
 
 
 # ─────────────────────────────── people ──────────────────────────────────
@@ -212,6 +284,25 @@ class PeopleRun:
         return self.thread is not None and self.thread.is_alive()
 
 
+@dataclass
+class OutreachRun:
+    """People and emails for many applications at once."""
+
+    total: int
+    started: float = field(default_factory=time.time)
+    current: int = 0
+    messages: list[str] = field(default_factory=list)
+    counts: dict[str, int] = field(default_factory=dict)
+    status: str = "running"
+    error: str = ""
+    stop: bool = False
+    thread: threading.Thread | None = None
+
+    @property
+    def alive(self) -> bool:
+        return self.thread is not None and self.thread.is_alive()
+
+
 # ────────────────────────────── the registry ─────────────────────────────
 
 
@@ -220,6 +311,7 @@ class Registry:
     search: SearchRun | None = None
     generation: GenerationRun | None = None
     people: dict[str, PeopleRun] = field(default_factory=dict)
+    outreach: OutreachRun | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -244,8 +336,15 @@ def _latest_from_disk() -> GenerationRun | None:
                             mode=meta.get("mode", "cv_letter"),
                             hints={int(k): v for k, v in (meta.get("hints") or {}).items()},
                             status=meta.get("status", "done"), started=meta.get("started", 0),
-                            finished=meta.get("finished", 0), error=meta.get("error", ""))
+                            finished=meta.get("finished", 0), error=meta.get("error", ""),
+                            workers=int(meta.get("workers") or 3),
+                            fresh=bool(meta.get("fresh")))
         _seed_tracks(run)
+        pid = int(meta.get("pid") or 0)
+        if run.status == "running" and pid and _pid_alive(pid):
+            run.pid = pid                # the worker outlived the last server: follow it
+            sync(run)
+            return run
         _replay(run)
         if run.status == "running":
             run.status = "interrupted"
@@ -316,6 +415,7 @@ def start_search(*, rerank: bool = False) -> bool:
 
 def generation_active() -> bool:
     gen = registry().generation
+    sync(gen)
     return gen is not None and gen.alive
 
 
@@ -326,35 +426,24 @@ def start_generation(job_ids: list[int], *, mode: str, hints: dict[int, str] | N
     with reg.lock:
         if generation_active():
             return None
+        dismissed = data.dismissed_jobs(list(job_ids))
+        job_ids = [j for j in job_ids if j not in dismissed]
+        if not job_ids:
+            return None
         run_id = resume_of.run_id if resume_of else dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         run = GenerationRun(run_id=run_id, job_ids=list(job_ids), mode=mode,
-                            hints=dict(hints or {}))
+                            hints=dict(hints or {}), workers=max(1, workers), fresh=fresh,
+                            started=resume_of.started if resume_of else time.time())
         _seed_tracks(run)
-        if resume_of is not None:
-            _replay(run)
         run.write_meta()
-
-        def worker() -> None:
-            from pitwall.apply.batch import run_batch
-
-            try:
-                run_batch(
-                    run.job_ids, name=f"rocketapply-{run.run_id}",
-                    letter=mode != "cv", audit=mode == "cv_letter_audit",
-                    workers=max(1, workers), resume=True, record=True,
-                    on_event=run.on_event, hints=run.hints or None, fresh=fresh,
-                )
-                run.status = "done"
-            except Exception as exc:  # noqa: BLE001 - shown on the Generate page
-                run.status, run.error = "error", f"{exc}\n{traceback.format_exc(limit=3)}"
-            finally:
-                run.finished = time.time()
-                run.write_meta()
-                data.bump()
-
-        run.thread = threading.Thread(target=worker, daemon=True, name=f"ra-generate-{run_id}")
+        # Reading events.jsonl from the start replays a resumed run's history too.
+        with (run.folder / "worker.log").open("ab") as log:
+            run.proc = subprocess.Popen(
+                [sys.executable, str(WORKER), run_id], cwd=os.getcwd(), stdin=subprocess.DEVNULL,
+                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        run.pid = run.proc.pid
         reg.generation = run
-        run.thread.start()
+    sync(run)
     return run
 
 
@@ -392,3 +481,42 @@ def start_people(company: str, *, job_title: str = "", domain: str = "",
 
 def people_run(company: str) -> PeopleRun | None:
     return registry().people.get(company.strip().casefold())
+
+
+def start_outreach(applications: list[dict[str, Any]], *, per_company: int, emails: bool,
+                   research: bool) -> OutreachRun | None:
+    """One background run over many applications. None if one is already going."""
+    from pitwall.apply.outreach import BulkPlan
+
+    reg = registry()
+    plan = BulkPlan(applications=applications, per_company=per_company, emails=emails,
+                    research=research)
+    with reg.lock:
+        if reg.outreach is not None and reg.outreach.alive:
+            return None
+        run = OutreachRun(total=len(plan.companies()))
+
+        def progress(message: str, current: int = 0, total: int = 0) -> None:
+            run.current = current or run.current
+            run.messages = [*run.messages, message][-6:]
+
+        def worker() -> None:
+            from pitwall.apply.outreach import run_bulk
+
+            try:
+                run.counts = run_bulk(plan, data.conn(), on_progress=progress,
+                                      should_stop=lambda: run.stop)
+                run.status = "stopped" if run.stop else "done"
+            except Exception as exc:  # noqa: BLE001 - shown in the bulk panel
+                run.status, run.error = "error", str(exc)
+            finally:
+                data.bump()
+
+        run.thread = threading.Thread(target=worker, daemon=True, name="ra-outreach")
+        reg.outreach = run
+        run.thread.start()
+    return run
+
+
+def outreach_run() -> OutreachRun | None:
+    return registry().outreach

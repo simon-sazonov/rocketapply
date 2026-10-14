@@ -29,7 +29,7 @@ work_authorization: ""
 work_authorization_policy: never_mention
 
 languages:
-  - {name: English,    level: C2,     note: "MSc taught in English"}
+  - {name: English,    level: C1,     note: "MSc taught in English"}
   - {name: Ukrainian,  level: native}
   - {name: Russian,    level: native}
   - {name: Portuguese, level: B1}

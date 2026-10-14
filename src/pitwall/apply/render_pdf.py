@@ -184,6 +184,8 @@ def draw_header(canvas: _Canvas, profile: Profile, frame: Frame) -> float:
     y += f.name.size + header_gap
 
     # ── CONTACT: never varies, and no rule above it ──
+    #: Where the first contact line sits, so the letter can date itself on it.
+    canvas.contact_top = y
     canvas.section = "contact"
     _gutter(canvas, "CONTACT", y)
     for label, value in (

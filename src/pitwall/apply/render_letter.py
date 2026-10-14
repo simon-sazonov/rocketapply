@@ -75,17 +75,29 @@ def render_letter_pdf(profile: Profile, frame: Frame, text: str, path: pathlib.P
     pages = 1
 
     y = draw_header(canvas, profile, f)
+    # The date on the Email line, flush right — the right of the name line is
+    # the title, which the letterhead shares with the CV. It used to sit on the
+    # company line, and a long role title ran straight into it.
+    canvas.section = "date"
+    canvas.right_text(date or _today(), f.body, f.page_width - f.margin_right,
+                      canvas.contact_top)
     y += section_gap
     canvas.rule(y)
     y += gap + f.body.line_height()
 
-    canvas.section = "letter"
-    canvas.right_text(date or _today(), f.body, f.page_width - f.margin_right, y)
-    if company or title:
-        canvas.text(" · ".join(v for v in (company, title) if v), f.body_bold, f.content_x, y)
-    y += f.body.line_height() * 2
-
     style = paragraph_style(f.body.resolved(), f.body.size, f.body.line_height())
+    # Company, then role, a line each: no separator to misread, and a role of
+    # any length wraps inside the column instead of overprinting.
+    canvas.section = "recipient"
+    if company:
+        canvas.text(company, f.body_bold, f.content_x, y)
+        y += f.body.line_height()
+    if title:
+        y += canvas.para(title, f.body, f.content_x, y, width)
+    if company or title:
+        y += f.body.line_height()
+
+    canvas.section = "letter"
     spacing = f.body.line_height() * 0.8
     for block in letter_blocks(text):
         # One Paragraph per block; inner newlines become line breaks.
@@ -126,9 +138,15 @@ def render_letter_docx(profile: Profile, text: str, path: pathlib.Path | str, *,
         if v
     )
     document.add_paragraph(contact)
-    header = document.add_paragraph()
-    header.add_run(" · ".join(v for v in (company, title) if v)).bold = True
-    header.add_run(("    " if company or title else "") + (date or _today()))
+    document.add_paragraph(date or _today())
+    if company or title:
+        header = document.add_paragraph()
+        if company:
+            header.add_run(company).bold = True
+        if company and title:
+            header.add_run().add_break()
+        if title:
+            header.add_run(title)
     for block in letter_blocks(text):
         para = document.add_paragraph()
         for i, line in enumerate(block):

@@ -162,6 +162,7 @@ def save_edited_letter(directory: pathlib.Path | str, text: str, *, profile: Any
     filed = file_generation(
         directory, state=state, prompt_version=generation.prompt_version,
         has_cv=generation.cv_pdf is not None, has_letter=True, root=_root_of(directory),
+        job_id=generation.job_id,
     )
     moved = filed != directory
     return EditResult(

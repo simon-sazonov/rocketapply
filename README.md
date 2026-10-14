@@ -320,17 +320,31 @@ with its raw title and snippet. When a score looks wrong you can see exactly why
 ## RocketApply
 
 `make rocketapply` → http://localhost:8502. The job side as one process, left to
-right, with a strip under the navigation counting each step:
+right. The navigation *is* the process: each page carries how many jobs wait
+there, and a job's status anywhere in the app is the name of the page it is on:
 
-**Found → Selected → Documents ready → In process → Applied**
+**Search · 10,907 → Selected · 8 → Generate · 44/49 → Review · 41 → Applications**
+(statuses: Selected → In review → In process → Applied)
+
+*Not interested* (Search, Selected, Review) dismisses the vacancy, not one list
+row: it leaves every stage that has not gone out yet, and a later search does
+not bring it back from any source. Selecting it again (Filters → Include
+dismissed) is the undo.
+
+Generation runs in a process of its own (`apps/rocketapply/rocket/worker.py`),
+so closing the tab, restarting the server or a host that stops idle servers
+does not stop it; the Generate page follows its files in
+`run/rocketapply/<run>/`. Start the app from a terminal with `make rocketapply`
+for long runs, not as a Claude preview: the Claude app stops a preview server
+after its session has been idle 30 minutes.
 
 | screen | what it is for |
 |---|---|
 | **Search** | a search box over every collected job (answers in ~70 ms; no job board is called), a Filters popover with a count beside every option, removable filter chips, a table you tick, *Select the top N*, and a detail panel: the 8-part score, for / watch-out, skills, other sources, the posting. *Fetch new jobs* runs a collection with a live per-source table. |
 | **Selected** | CV only, or CV + letter (+ an independent fact-check under Advanced); **today's Groq budget** — how many fit, from the key ledger over the rolling 24 h; the best-scored ticked up to that cap; a hint per letter; Generate. |
-| **Generate** | every job's eight-stage track, and what each stage produced as it produced it: the posting's skills with their quotes, coverage, the claims the letter may not make, the chosen projects and why, the letter plan, **each draft as the model writes it**, the checks, the CV. A run survives a restart (*Resume*). |
-| **Review** | the letter, editable (saved edits go through the same gates, the model's text is kept), CV and letter previews, the review note; Approve / Regenerate (fresh, not cached) / Remove; **Export N approved → CSV**. |
-| **Applications** | *In process* by export batch with one **Mark N as applied**; *Applied* with the People panel — LinkedIn searches you click, PitWall's people search for that employer (recruiters, hiring managers, peers, alumni; kept out of the motorsport lead list in `data/pitwall_employers.db`), free email finding, Hunter only on a confirmed click, a drafted ≤200-character note (never sent); *Outcomes*; *Exports*. |
+| **Generate** | every job's eight-stage track, and what each stage produced as it produced it: the posting's skills with their quotes, coverage, the claims the letter may not make, the chosen projects and why, the letter plan, **each draft as the model writes it**, the checks, the CV. A run outlives the server; if the worker itself stops, *Resume* makes only what is left. |
+| **Review** | the letter, editable (saved edits go through the same gates, the model's text is kept), CV and letter previews, the review note; Approve / Regenerate (fresh, not cached) / Not interested; **Export N approved → CSV**. |
+| **Applications** | *In process* by export batch with one **Mark N as applied**; *Applied* with the People panel — LinkedIn searches you click, PitWall's people search for that employer (recruiters, hiring managers, peers, alumni; kept out of the motorsport lead list in `data/pitwall_employers.db`), free email finding, Hunter only on a confirmed click, a ready note (≤200 characters, with the request) and message (once they accept) per person from `config/outreach_templates.yaml`, or a note drafted by AI on a click (never sent). Tick several applications for one run and one **Outreach CSV**: a row per person, however many roles you applied to at that company, with a `check` column for anyone to look at before writing; *Outcomes*; *Exports*. |
 | **How it works** | the sources and their keys, run history, the score's parts and weights, what each hard rule removed, calibration against your ratings, the stages with the model at each, the gates, the key pool, quality numbers including your own letter ratings. |
 | **Settings** | the search profile, CV text for the AI, skills, target companies (the same files as PitWall's Job Setup), who to contact, and a check of `profile/`. |
 

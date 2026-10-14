@@ -100,3 +100,14 @@ def test_the_paths_are_still_true_after_apply_tidy(batch):
     apply_plan(plan, out)
     for row in _rows(batch_csv(conn, batch_id)):
         assert pathlib.Path(row["cv_pdf"]).exists(), "tidy moved a file the CSV points at"
+
+
+def test_a_mycareersfuture_posting_is_flagged_in_concerns():
+    """MyCareersFuture applies through Singpass only, so its link is a dead end
+    from abroad; the CSV says so before anyone clicks it."""
+    from pitwall.jobsearch.export import _route_concern
+
+    mcf = "https://www.mycareersfuture.gov.sg/job/engineering/data-scientist-x-1"
+    assert "Singpass" in _route_concern(mcf, mcf)
+    assert "company's own route" in _route_concern(mcf, "https://agilent.wd5.myworkdayjobs.com/x")
+    assert _route_concern("https://job-boards.greenhouse.io/anthropic/jobs/1", "") == ""

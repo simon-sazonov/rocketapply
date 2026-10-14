@@ -1,0 +1,73 @@
+# outreach_templates.yaml — what RocketApply's outreach CSV says to each person.
+#
+# Two texts per person, by who they are to you:
+#   note     sent WITH the connection request. LinkedIn cuts it at 200 characters on a
+#            free account, and allows only a few personalised notes a month (about 3
+#            in 2026), so most requests go without one.
+#   message  sent once they ACCEPT. No practical length limit: this is where you say
+#            something real.
+#
+# Edit the wording freely; the CSV picks it up on the next download. Placeholders:
+#   {first}    their first name ("there" when the profile gives only an initial)
+#   {company}  the company, short form ("NXP Semiconductors", not "... PTE. LTD.")
+#   {role}     your best-fit role there, shortened: "Research Engineer, Code RL role",
+#              "summer internship (ML, Simulator Evaluation)"
+#   {also}     ", along with a few related roles" when you applied to several there
+#   {about}    one line about you for this kind of role, from profile/summaries.yaml
+#   {shared}   alumni only: the school or past employer you share
+#
+# When a note does not fit, the role is shortened to its first part, then
+# `note_short` is used. Every note in the CSV fits.
+
+limit: 200
+
+recruiter:
+  note: >-
+    Hi {first}, I've applied for the {role} at {company}. I'm an MSc Data Science
+    student working as a contract ML engineer. Glad to connect.
+  note_short: >-
+    Hi {first}, I've applied to {company} and would be glad to connect. I'm an MSc
+    Data Science student working as a contract ML engineer.
+  message: >-
+    Thanks for connecting, {first}. I recently applied for the {role} at
+    {company}{also}. {about} If anything about my background would help with the
+    application, I'm happy to send it. Is there anything I should know about the
+    process or timeline?
+
+hiring:
+  note: >-
+    Hi {first}, I've applied for the {role} at {company} and would like to follow your
+    team's work. I'm an MSc Data Science student who builds and tests ML models.
+  note_short: >-
+    Hi {first}, I've applied to {company} and would like to follow your team's work.
+    I'm an MSc Data Science student who builds and tests ML models.
+  message: >-
+    Thanks for connecting, {first}. I applied for the {role} at {company} and wanted
+    to introduce myself briefly. {about} If it's useful for the team, I'd be glad to
+    share more.
+
+peer:
+  note: >-
+    Hi {first}, I've applied for the {role} at {company} and would love to hear what
+    the work is like from someone doing it. I'm an MSc Data Science student in ML.
+  note_short: >-
+    Hi {first}, I've applied to {company} and would love to hear what the work is like
+    from someone doing it. I'm an MSc Data Science student in ML.
+  message: >-
+    Thanks for connecting, {first}. I've applied for the {role} at {company}, and I'd
+    value your view of the team. Would you have 15 minutes in the next couple of weeks
+    for a quick call? I'd like to hear what the work looks like day to day and what
+    you wish you'd known before joining. Happy to fit around your schedule.
+
+alumni:
+  note: >-
+    Hi {first}, I noticed we both have a {shared} connection. I've applied for the
+    {role} at {company} and would love to hear how you found the move there.
+  note_short: >-
+    Hi {first}, I noticed we both have a {shared} connection. I've applied to
+    {company} and would love to hear how you found the move there.
+  message: >-
+    Thanks for connecting, {first}. It's good to find someone with a {shared}
+    background at {company}. I've applied for the {role} there, and I'd value your
+    view of the team. Would you have 15 minutes in the next couple of weeks for a
+    quick call? Happy to fit around your schedule.

@@ -14,7 +14,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from pitwall.jobsearch import store, tracker
+from pitwall.jobsearch import tracker
 from pitwall.jobsearch.store import DISMISS_REASONS, JobQuery
 from rocket import components, data, runner
 from rocket import format as fmt
@@ -36,7 +36,9 @@ def _defaults() -> None:
     ss.setdefault("f_min_score", 0)
     ss.setdefault("f_salary", 0)
     ss.setdefault("f_no_salary", True)
-    ss.setdefault("f_hide_tracked", False)
+    # On by default: a job you applied to, or closed out, is done with — it
+    # should not come back up the list as if it were new.
+    ss.setdefault("f_hide_tracked", True)
     ss.setdefault("f_include_filtered", False)
     ss.setdefault("f_include_dismissed", False)
     ss.setdefault("ra_limit", PAGE)
@@ -96,7 +98,7 @@ def _chips(q: JobQuery) -> dict[str, tuple[str, Any]]:
     if q.include_dismissed:
         out["Incl. dismissed"] = ("f_include_dismissed", None)
     if q.hide_tracked:
-        out["Hiding tracked"] = ("f_hide_tracked", None)
+        out["Hiding your applications"] = ("f_hide_tracked", None)
     return out
 
 
@@ -108,7 +110,9 @@ def _on_chips() -> None:
     for label, (key, value) in active.items():
         if label in kept:
             continue
-        if value is None:
+        if isinstance(ss.get(key), bool):
+            ss[key] = False          # popping would restore a default that is on
+        elif value is None:
             ss.pop(key, None)
         else:
             ss[key] = [v for v in (ss.get(key) or []) if v != value]
@@ -174,7 +178,10 @@ def filters_popover(q: JobQuery) -> None:
             st.toggle("Include jobs my rules filtered out", key="f_include_filtered",
                       help="Hard rules — countries, seniority, visa, degree — from Settings.")
             st.toggle("Include dismissed jobs", key="f_include_dismissed")
-            st.toggle("Hide jobs already selected or applied to", key="f_hide_tracked")
+            st.toggle("Hide jobs you selected, applied to or closed", key="f_hide_tracked",
+                      help="Anything in Selected, Generate, Review or Applications — "
+                           "including jobs marked Closed because the posting went down "
+                           "before you applied. Jobs you removed from Selected still show.")
         st.button("Clear all filters", on_click=_clear, icon=":material/restart_alt:",
                   type="tertiary")
 
@@ -237,14 +244,14 @@ def fetch_bar(total: int) -> None:
 # ───────────────────────────── the detail ─────────────────────────────
 
 
-def detail(job_id: int, ticked: int) -> None:
+def detail(job_id: int, ticked: list[int]) -> None:
     job = data.job(job_id)
     if job is None:
         st.caption("That job is no longer in the database.")
         return
     with st.container(border=True):
-        if ticked > 1:
-            st.caption(f"Showing the first of {ticked} ticked jobs")
+        if len(ticked) > 1:
+            st.caption(f"Showing the first of {len(ticked)} ticked jobs")
         st.markdown(f"#### {job['title']}")
         st.markdown(f"**{job['company']}** · {fmt.where(job)} · posted "
                     f"{fmt.age(job.get('posted_at') or job.get('first_seen_at')) or 'date unknown'}")
@@ -313,11 +320,17 @@ def detail(job_id: int, ticked: int) -> None:
         with st.expander("The posting"):
             text = job.get("description") or "No description was captured."
             st.markdown(text[:6000] + ("…" if len(text) > 6000 else ""))
-        with st.popover("Not interested", icon=":material/block:", type="tertiary"):
+        n = len(ticked)
+        with st.popover("Not interested" + (f" · {n} ticked" if n > 1 else ""),
+                        icon=":material/block:", type="tertiary"):
             reason = st.selectbox("Why?", DISMISS_REASONS, key=f"why_{job_id}")
-            if st.button("Dismiss this job", key=f"dismiss_{job_id}"):
-                data.write(store.dismiss, int(job["cluster_id"]), reason)
-                st.toast("Dismissed — it will not come back from another source.")
+            st.caption("Gone from Search, Selected, Review and In process, and it will not "
+                       "come back in a later search. Undo: Filters → Include dismissed, "
+                       "then Select it.")
+            if st.button(f"Dismiss {n} job(s)" if n > 1 else "Dismiss this job",
+                         key=f"dismiss_{job_id}"):
+                data.reject(ticked, reason)
+                st.toast(f"Dismissed {n} job(s)." if n > 1 else "Dismissed.")
                 st.rerun()
 
 
@@ -415,7 +428,7 @@ with table:
 
 with side:
     if ticked:
-        detail(ticked[0], len(ticked))
+        detail(ticked[0], ticked)
     else:
         components.empty("Tick a job to see why it scored what it did.",
                          "The breakdown, the concerns, the posting itself — and Select.")

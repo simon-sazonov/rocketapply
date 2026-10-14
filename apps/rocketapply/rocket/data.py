@@ -67,7 +67,7 @@ def search(q: JobQuery, *, limit: int, offset: int = 0) -> store.SearchPage:
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _facets(q: JobQuery, _v: int) -> dict[str, dict[str, int]]:
+def _facets(q: JobQuery, v: int) -> dict[str, dict[str, int]]:
     return store.search_facets(conn(), q)
 
 
@@ -75,8 +75,39 @@ def facets(q: JobQuery) -> dict[str, dict[str, int]]:
     return _facets(q, version())
 
 
-def stage_counts() -> dict[str, int]:
+@st.cache_data(ttl=20, show_spinner=False)
+def _stage_counts(v: int) -> dict[str, int]:
     return store.stage_counts(conn())
+
+
+def stage_counts() -> dict[str, int]:
+    """The counts in the navigation. Five seconds over 38,000 postings, and every
+    page shows them, so cached: a write refreshes them at once, a finished
+    generation (another thread) within 20 seconds."""
+    return _stage_counts(version())
+
+
+def reject(job_ids: list[int], reason: str) -> None:
+    """Not interested, from any stage: the vacancy is dismissed, so it leaves
+    Selected, Review and In process and never comes back in Search, whichever
+    source posts it again. Selecting it again (Search → Include dismissed) undoes it."""
+
+    def run(c: sqlite3.Connection) -> None:
+        for job_id in job_ids:
+            cluster = tracker.cluster_for_job(c, int(job_id))
+            if cluster is not None:
+                store.dismiss(c, int(cluster["cluster_id"]), reason)
+
+    write(run)
+
+
+def dismissed_jobs(job_ids: list[int]) -> set[int]:
+    if not job_ids:
+        return set()
+    marks = ",".join("?" * len(job_ids))
+    return {int(r[0]) for r in conn().execute(
+        f"SELECT j.id FROM jobs j JOIN job_review r ON r.cluster_id = j.cluster_id"
+        f" WHERE r.dismissed_at IS NOT NULL AND j.id IN ({marks})", list(job_ids))}
 
 
 def job(job_id: int) -> dict[str, Any] | None:

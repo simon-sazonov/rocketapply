@@ -713,6 +713,77 @@ def job_calibrate(
         console.print("[green]saved[/] the blended weights — run [bold]make job-rerank[/]")
 
 
+@app.command("job-audit")
+def job_audit(
+    labels: list[Path] = typer.Option(
+        [], "--labels", help="label CSVs, later ones winning (default: data/ratings/*-audit.csv)"),
+    draw: bool = typer.Option(False, "--sample", help="draw the frozen sample (once)"),
+    seed: int = typer.Option(29, "--seed", help="the sample's random seed"),
+    show: list[int] = typer.Option([], "--show", help="print these jobs' digests and stop"),
+    name: str | None = typer.Option(None, "--name", help="the report's file name"),
+    ratings: Path = typer.Option(Path("data/ratings"), "--dir",
+                                 help="where the sample, labels and reports live"),
+    verbose: bool = typer.Option(False, "-v", "--verbose"),
+) -> None:
+    """Is the list worth reading? Measures the default Search list against the
+    audit labels: how much of it breaks a hard requirement, how much is worth
+    applying to, and what the rules threw away. Writes data/ratings/audit-*.json."""
+    from datetime import date
+
+    from .jobsearch import audit
+
+    settings = _bootstrap(verbose)
+    conn = open_repos(settings).conn
+    if show:
+        for job_id in show:
+            console.print(audit.digest(conn, job_id), markup=False, highlight=False)
+        raise typer.Exit(0)
+    if draw:
+        rows = audit.sample(conn, seed=seed)
+        path = audit.write_sample(ratings / f"audit-{date.today().isoformat()}-sample.csv", rows)
+        counts: dict[str, int] = {}
+        for row in rows:
+            counts[f"{row['set']}/{row['stratum']}"] = counts.get(
+                f"{row['set']}/{row['stratum']}", 0) + 1
+        console.print(f"[green]wrote[/] {path} — " + ", ".join(
+            f"{k} {v}" for k, v in sorted(counts.items())))
+        raise typer.Exit(0)
+    files = labels or sorted(ratings.glob("*-audit.csv"))
+    report = audit.measure(conn, audit.load_labels(files))
+    path = audit.save_report(report, ratings, name=name)
+    sample = report["sample"]
+
+    def pct(x: float | None) -> str:
+        return "—" if x is None else f"{x:.0%}"
+
+    console.print(f"listed: [bold]{report['listed']:,}[/] (passing the rules: "
+                  f"{report['passing_rules']:,}) · by kind: {report['listed_by_stratum']}")
+    console.print(f"labels: {report['labels']} from {len(files)} file(s)")
+    console.print(f"random sample of the list → breaks a hard requirement: "
+                  f"[bold]{pct(sample['violation_rate'])}[/] (cannot tell from a preview: "
+                  f"{pct(sample['unknown_rate'])}) · worth applying to: "
+                  f"[bold]{pct(sample['precision'])}[/]")
+    console.print(f"  removed since the sample was drawn: {sample['removed']} — of the jobs "
+                  f"worth applying to {pct(sample['worth_it_removed_rate'])}, of the rest "
+                  f"{pct(sample['bad_removed_rate'])} · why: {sample['removed_why']}")
+    rej = report["rejected_sample"]
+    console.print(f"rejected by the rules, sampled: {rej['labelled']} — worth applying to: "
+                  f"{rej['worth_it']} ({pct(rej['wrongly_rejected_rate'])})")
+    table = Table(title="The top of the list")
+    for column in ("top", "labelled", "worth applying to", "good", "breaks a requirement"):
+        table.add_column(column)
+    for n, t in report["top"].items():
+        table.add_row(n, f"{t['labelled']}/{t['of']}", pct(t["precision"]), str(t["good"]),
+                      str(t["violations"]))
+    console.print(table)
+    simon = report["simon"]
+    console.print(f"your 👍: {simon['liked_listed']}/{simon['liked']} listed"
+                  + (f" — not listed: {simon['liked_not_listed']}" if simon["liked_not_listed"]
+                     else "")
+                  + f" · your 👎 still listed: {simon['disliked_listed']}/{simon['disliked']}")
+    console.print(f"[green]wrote[/] {path}")
+
+
 @app.command()
 def openings(
     company: str | None = typer.Option(None, help="one company name"),

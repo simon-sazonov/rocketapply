@@ -48,8 +48,12 @@ _WISH_SENTENCE = re.compile(rf"\b(?:{_WISH_WORDS})\b", re.I)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?;])\s+|\n+")
 
 
-def split_requirements(text: str | None) -> tuple[str, str]:
-    """(core, wishes). Pure. Everything in `text` lands in exactly one."""
+def split_requirements(text: str | None, *, by_sentence: bool = True) -> tuple[str, str]:
+    """(core, wishes). Pure. Everything in `text` lands in exactly one.
+
+    `by_sentence=False` leaves every sentence outside a wish section in the
+    core: the experience reader judges a wish word inside a sentence itself,
+    because "5+ years of experience, ideally in fintech" still asks for five."""
     if not text:
         return "", ""
     lines = text.splitlines()
@@ -64,6 +68,8 @@ def split_requirements(text: str | None) -> tuple[str, str]:
         if in_wish and _ANY_HEAD.match(line) and not line.lstrip().startswith(("•", "-", "*")):
             in_wish = False
         (wish_lines if in_wish else core_lines).append(line)
+    if not by_sentence:
+        return "\n".join(core_lines), "\n".join(wish_lines)
 
     core_sentences: list[str] = []
     for sentence in _SENTENCE_SPLIT.split("\n".join(core_lines)):
