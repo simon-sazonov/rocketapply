@@ -134,6 +134,49 @@ def test_the_active_run_is_the_newest_of_several(pipe, repos):
             assert repos.runs.active()["id"] == second.run_id
 
 
+def test_a_rocketapply_job_search_is_not_a_pitwall_run(repos):
+    """PitWall's checks ask about networking runs only, and RocketApply's about
+    job searches only: one app's run must not lock, or be stopped by, the other."""
+    from pitwall.db import JOB_SEARCH_COMMANDS, NETWORKING_COMMANDS
+
+    jobs = repos.runs.start({}, "job-search")
+    repos.runs.progress(jobs, "fetch", "Adzuna", 1, 9)
+    assert repos.runs.active(commands=NETWORKING_COMMANDS) is None
+    assert repos.runs.latest(1, commands=NETWORKING_COMMANDS) == []
+    assert repos.runs.active(commands=JOB_SEARCH_COMMANDS)["id"] == jobs
+
+    people = repos.runs.start({}, "resume-llm")
+    repos.runs.progress(people, "llm", "reading people", 1, 9)
+    assert repos.runs.active(commands=NETWORKING_COMMANDS)["id"] == people
+    assert repos.runs.active(commands=JOB_SEARCH_COMMANDS)["id"] == jobs
+    assert [r["id"] for r in repos.runs.latest(5, commands=JOB_SEARCH_COMMANDS)] == [jobs]
+    assert repos.runs.latest(1)[0]["id"] == people          # unfiltered, as before
+
+
+def test_every_run_kind_belongs_to_one_app():
+    """A new `tracked(..., "kind")` that is in neither list would be invisible to
+    both apps' "is anything running?" checks."""
+    import re
+    from pathlib import Path
+
+    from pitwall.db import JOB_SEARCH_COMMANDS, NETWORKING_COMMANDS
+    from pitwall.jobsearch.run import COMMAND
+
+    assert not set(NETWORKING_COMMANDS) & set(JOB_SEARCH_COMMANDS)
+    assert COMMAND in JOB_SEARCH_COMMANDS
+    root = Path(__file__).resolve().parents[1]
+    kinds = set()
+    for folder in ("src", "apps"):
+        for py in (root / folder).rglob("*.py"):
+            if "_archive" in py.parts:
+                continue
+            text = py.read_text(encoding="utf-8")
+            kinds |= set(re.findall(r'tracked\([^)]*?"([a-z-]+)"\)', text))
+            kinds |= set(re.findall(r'runs\.start\([^)]*?"([a-z-]+)"\)', text))
+    assert kinds, "the pattern found no run kinds at all"
+    assert kinds <= set(NETWORKING_COMMANDS) | set(JOB_SEARCH_COMMANDS)
+
+
 # ─────────────────── the double-read the guard prevents ──────────────────
 
 

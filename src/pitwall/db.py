@@ -1477,6 +1477,14 @@ class CRMRepo:
         }
 
 
+#: Run kinds, by the app that owns them. PitWall's "is anything running?" asks
+#: only about its own, so a RocketApply job search never shows as a PitWall run
+#: (or gets stopped by PitWall's Stop button), and the other way round.
+NETWORKING_COMMANDS = ("run", "resume-llm", "search", "extract", "score", "jobs",
+                       "enrich", "enrich-hunter")
+JOB_SEARCH_COMMANDS = ("job-search",)
+
+
 class RunRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
@@ -1635,11 +1643,15 @@ class RunRepo:
         ).fetchone()
         return bool(r and r["cancelled"])
 
-    def latest(self, n: int = 10) -> list[dict[str, Any]]:
-        return [
-            dict(r)
-            for r in self.conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT ?", (n,))
-        ]
+    def latest(self, n: int = 10, *,
+               commands: Sequence[str] | None = None) -> list[dict[str, Any]]:
+        """The newest `n` runs; `commands` narrows them to those kinds (None = any)."""
+        kinds, params = "", []
+        if commands:
+            kinds = f" WHERE command IN ({','.join('?' * len(commands))})"
+            params = list(commands)
+        sql = f"SELECT * FROM runs{kinds} ORDER BY id DESC LIMIT ?"
+        return [dict(r) for r in self.conn.execute(sql, (*params, n))]
 
     def get(self, run_id: int) -> dict[str, Any] | None:
         r = self.conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()

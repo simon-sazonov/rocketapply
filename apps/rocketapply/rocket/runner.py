@@ -381,9 +381,9 @@ def search_active() -> bool:
     reg = registry()
     if reg.search is not None and reg.search.alive:
         return True
-    from pitwall.db import RunRepo
+    from pitwall.db import JOB_SEARCH_COMMANDS, RunRepo
 
-    return RunRepo(data.conn()).active(30.0, commands=("job-search",)) is not None
+    return RunRepo(data.conn()).active(30.0, commands=JOB_SEARCH_COMMANDS) is not None
 
 
 def start_search(*, rerank: bool = False) -> bool:
