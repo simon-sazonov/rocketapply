@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pitwall"
+name = "rocketapply"
 version = "2.0.0"
-description = "PitWall — a motorsport networking lead finder"
+description = "RocketApply — find, rank and apply to jobs, with tailored CVs and letters"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
@@ -60,6 +60,7 @@ dev = ["pytest>=8.3", "pytest-cov>=5.0", "ruff>=0.7", "mypy>=1.13"]
 # installing, via `python scripts/run_pipeline.py`.
 [project.scripts]
 pitwall = "pitwall.cli:app"
+rocketapply = "pitwall.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -70,7 +71,7 @@ pitwall = ["scoring/prompts/*.txt", "scoring/prompts/*.j2", "apply/prompts/*.md"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "apps/pitwall", "apps/rocketapply", "scripts", "tests"]
+src = ["src", "apps/rocketapply", "scripts", "tests"]
 exclude = [".venv", "data"]
 
 [tool.ruff.lint]

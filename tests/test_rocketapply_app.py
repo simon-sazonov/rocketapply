@@ -18,8 +18,8 @@ from streamlit.testing.v1 import AppTest
 
 from pitwall.jobsearch import tracker
 
+from .job_app import _populate, job_app  # noqa: F401, TID252
 from .paths import ROCKET_APP, on_path  # noqa: TID252
-from .test_jobsearch_pages import _populate, job_app  # noqa: F401, TID252
 
 APP = ROCKET_APP / "app.py"
 VIEWS = ("search", "selected", "generate", "review", "applications", "engine", "settings")

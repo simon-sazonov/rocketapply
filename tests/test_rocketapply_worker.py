@@ -16,7 +16,7 @@ import sys
 from pitwall.apply.events import StageEvent
 from pitwall.jobsearch import store, tracker
 
-from .test_jobsearch_pages import _populate, job_app  # noqa: F401, TID252
+from .job_app import _populate, job_app  # noqa: F401, TID252
 from .test_rocketapply_app import _app, _conn, _ok, rocket  # noqa: F401, TID252
 
 

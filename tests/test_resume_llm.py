@@ -333,27 +333,6 @@ def _run_page():
     return AppTest.from_file(str(FIND_PAGE), default_timeout=60).run()
 
 
-def test_the_page_offers_to_resume_when_people_are_waiting(app_root):
-    _seed_ui_db(waiting=3)
-    at = _run_page()
-    assert not at.exception, [e.value for e in at.exception]
-
-    labels = [b.label for b in at.button]
-    assert any("Resume AI analysis" in label for label in labels)
-    text = " ".join(str(m.value) for m in at.markdown)
-    assert "3 people have been found but never read by an AI" in text
-
-
-def test_the_page_says_so_when_there_is_nothing_to_resume(app_root):
-    _seed_ui_db(waiting=0)
-    at = _run_page()
-    assert not at.exception, [e.value for e in at.exception]
-
-    assert not any("Resume AI analysis" in b.label for b in at.button)
-    text = " ".join(str(c.value) for c in at.caption)
-    assert "Nothing is waiting" in text
-
-
 PEOPLE_PAGE = PITWALL_PAGES / "3_👤_People.py"
 
 
@@ -363,48 +342,3 @@ def _run_people_page():
     return AppTest.from_file(str(PEOPLE_PAGE), default_timeout=60).run()
 
 
-def test_the_people_page_offers_to_read_the_backlog(app_root):
-    _seed_ui_db(waiting=3)
-    at = _run_people_page()
-    assert not at.exception, [e.value for e in at.exception]
-
-    text = " ".join(str(m.value) for m in at.subheader)
-    assert "3 people have never been read by an AI" in text
-    assert any("with AI now" in b.label for b in at.button)
-
-
-def test_the_offer_survives_a_filter_that_hides_them_from_the_table(app_root):
-    """The bug in one test: these people score low *because* no AI has read
-    them, so the default "Worth a look and up" filter hides them — and that is
-    exactly when the owner needs to be told they are there."""
-    _seed_ui_db(waiting=3)                      # final_score 30, below the filter
-    at = _run_people_page()
-    assert not at.exception, [e.value for e in at.exception]
-
-    assert at.session_state["flt_quality"] == "Worth a look and up"
-    text = " ".join(str(m.value) for m in at.subheader)
-    assert "never been read by an AI" in text
-
-
-def test_showing_only_the_waiting_people_drops_the_score_filter(app_root):
-    """The one-click "select all": a score filter left in place would hide the
-    very people the button just selected."""
-    _seed_ui_db(waiting=3)
-    at = _run_people_page()
-
-    button = next(b for b in at.button if "Show me only these people" in b.label)
-    button.click().run()
-
-    assert not at.exception, [e.value for e in at.exception]
-    assert at.session_state["flt_verdict"] == ["pending_llm"]
-    assert at.session_state["flt_quality"] == "Anyone"
-
-
-def test_nothing_is_offered_when_every_person_has_been_read(app_root):
-    _seed_ui_db(waiting=0, read=2)
-    at = _run_people_page()
-    assert not at.exception, [e.value for e in at.exception]
-
-    assert not any("with AI now" in b.label for b in at.button)
-    text = " ".join(str(m.value) for m in at.subheader)
-    assert "never been read by an AI" not in text

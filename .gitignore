@@ -42,3 +42,4 @@ run/*
 !run/voice_eval.csv
 # Generated applications. Personal, and regenerable from profile/ + the job id.
 output/
+output

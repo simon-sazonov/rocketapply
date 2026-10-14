@@ -1,321 +1,40 @@
-# 🏁 PitWall
+# 🚀 RocketApply
 
-**A networking lead finder.** Give it a list of companies and a list of roles; it
-gives you back a scored, filterable, note-taking pipeline of real people you can
-reach out to — and, since v2, the live job openings at those companies with the
-people you already know there attached to each one.
+Find the jobs worth applying to, rank them against your CV, generate a tailored
+CV and cover letter for each, track every application, and find who to write to
+at the companies you applied to.
 
-Job boards show you *openings*. They do not show you *people* — the engineers,
-analysts and heads of department who actually decide, who post about their work,
-and who answer a good message. PitWall finds those people, ranks them, and keeps
-track of who you already looked at.
-
-Motorsport is the default profile and the one it was built for; `PITWALL_PROFILE`
-points it at any other field. Pure Python: Streamlit, SQLite, free search, free
-LLMs. Runs locally, costs $0.
-
-**Two apps, one engine.** PitWall (`make pitwall`, dark, `apps/pitwall/`) finds
-people. **RocketApply** (`make rocketapply`, light, `apps/rocketapply/`) is the job
-application app — see [RocketApply](#rocketapply) below. They share `src/pitwall`
-and `data/pitwall.db`, and run side by side on :8501 and :8502.
-
----
+RocketApply used to live inside the PitWall repo (`networking_lead_finder`). It
+now has its own folder and repo; PitWall stays the motorsport networking /
+outreach app.
 
 ## Quickstart
 
 ```bash
-make venv                       # .venv + dependencies (Python 3.11+)
-.venv/bin/pitwall init          # config, .env, providers, validation
-make searxng                    # local search that supports operators (needs Docker)
-.venv/bin/pitwall validate      # check your two CSVs
-.venv/bin/pitwall run --max-queries 50
-make pitwall                    # the people finder   → http://localhost:8501
-make rocketapply                # the job application app → http://localhost:8502
+make venv           # .venv, requirements, and an editable install
+cp .env.example .env   # then add GROQ_API_KEY (and any other keys)
+make test           # the whole suite, no network
+make rocketapply    # the app, on http://localhost:8502
 ```
 
-That is the whole thing. Everything below explains a piece of it.
-
-> **Always use `.venv/bin/python`.** On macOS the system `python3` is often
-> Anaconda's, whose `pydantic-settings` is too old to import this package. `pitwall
-> init` checks for that and says so by name.
-
-## What it costs: nothing
-
-Every provider below has a free tier that needs **no credit card** and does not
-convert to paid. If one changes, the chain degrades to the next rather than
-breaking.
-
-| | what it does | sign-up |
-|---|---|---|
-| **SearXNG** | self-hosted search, and the only provider that supports `site:` and quoted phrases | `make searxng` — no account |
-| **ddgs** | keyless fallback search, no operators | nothing to do |
-| **Serper** | 2,500 one-time credits, held in reserve for bursts | [serper.dev](https://serper.dev) |
-| **Groq** | the LLM scoring, ~1 s per batch | [console.groq.com](https://console.groq.com) |
-| **Z.ai / DeepSeek** | permanent free tiers, optional fallbacks | [z.ai](https://z.ai) · [deepseek.com](https://platform.deepseek.com) |
-| **Ollama** | local, offline last resort; minutes per batch on CPU | [ollama.com](https://ollama.com) |
-
-Google's Custom Search JSON API is **not** an option: it is closed to new
-customers and shuts down on 1 January 2027.
-
-## What it does not do
-
-This list is deliberate, not a roadmap. None of it is coming.
-
-- **No phone numbers, ever.** Hunter returns them; PitWall does not request,
-  store or display one. There is no column for it and no code path to it.
-- **No SMTP verification.** No `RCPT TO`, no port-25 connections, no code that
-  could. This is an engineering finding as much as a policy one — residential
-  ISPs block port 25, Microsoft 365 answers `250` for addresses that do not
-  exist, and catch-all domains accept everything. Even done perfectly it yields
-  a graded guess. See `src/pitwall/enrich/checks.py`, which sets out all four
-  reasons at the top.
-- **No crawling for addresses.** Reading a page the search index already
-  pointed at is in scope; walking a domain harvesting `mailto:` links is not.
-- **No LinkedIn fetching.** No page requests, no login, no cookies, no headless
-  browser. Identity comes only from the title, URL and snippet a search engine
-  already publishes.
-- **No sending.** Drafting a message is fair game; sending one is not, and there
-  is no code that could.
-- **No scraping around a refusal.** `robots.txt` is enforced in code, and a site
-  that declines an honest User-Agent is left alone — `motorsportjobs.com` is
-  configured and disabled for exactly that reason.
-- **No multi-tenant hosting, no accounts.** One person, one machine, one SQLite
-  file.
-
-Retention is 180 days for people you never touched; anyone you saved, contacted
-or annotated is exempt. Delete & blocklist is permanent, prevents re-ingestion,
-and **hard-deletes any email address held for that person**. Addresses have a
-second, stricter clock of their own: past the window they go even when the
-person stays, unless you actually acted on them.
-
----
-
-## Finding an email address
-
-Added in v3, and off the critical path: nothing below runs during a search, and
-nothing runs over the whole table. You tick people on the **👤 People** page and
-press one button.
-
-**PitWall's own free logic runs first, and usually finishes the job.** There is
-no contact database to buy here — a local SearXNG index is a serviceable
-substitute at 25 people a month:
-
-```
-1. domain        the company's mail domain, from your CSV, its careers page,
-                 search results already stored, or one search — never a credit
-2. harvest       any addresses already published at that domain
-3. pattern       the format those addresses imply — first.last, flast, …
-4. corroborate   search for the exact address. Found published anywhere public?
-                 That is stronger evidence than an SMTP probe would be.
-```
-
-Every finding carries a status **and the evidence behind it**, always together:
-
-| | earned by |
-|---|---|
-| 🟢 **Confirmed** | the exact address is published somewhere public, or Hunter says it is deliverable |
-| 🟡 **Likely** | the company's format, agreed on by ≥2 real addresses, and the domain accepts mail |
-| ⚪ **Guess** | one example, or the format most companies use. A hypothesis |
-| ⚫ **Nothing found** | free search came up empty. Hunter may know, for a credit |
-
-`pattern first.last (n=3)` means three known addresses at that company agree.
-**n=1 and n=5 never render the same**, and there is no confidence percentage
-anywhere — a number invites you to trust a hypothesis.
-
-The expensive part is learning a company's format, and that answer is reusable:
-resolve Alpine once and every later Alpine candidate is free. If the domain is
-wrong — a car dealership rather than the race team, which really happens —
-correct it in the person's panel and it outranks every automatic source for good.
-
-**Fill the domains in once and that problem mostly disappears.**
-`companies.domain` is checked before any guessing:
-
-```bash
-make domains          # propose one per company, with the evidence. Writes nothing
-make domains-apply    # …once you have read the table
-make domains-show     # which are filled in
-```
-
-It probes which search engines are currently answering *and* honouring quoted
-phrases before it starts — they suspend each other's CAPTCHAs by the hour, and
-one that silently ignores quotes returns the open web. When none passes, it
-refuses to run rather than guess. Anything it gets wrong is one edit in
-`config/companies.csv`.
-
-**Hunter.io is optional, manual, and one credit at a time.** Free plan: 50
-credits a month, no card. It is never called by a search, never in bulk, and
-never without you clicking on one specific person. Live credits sit in the
-sidebar; at zero the buttons disable with the reset date rather than failing on
-click. A paid domain lookup feeds its results back into the free engine, so it
-permanently improves it.
-
-Addresses are **excluded from every export unless you tick the box**, and the
-evidence string travels with them when you do.
-
-```bash
-pitwall enrich -c 41 -c 88          # free engine only; cannot spend
-pitwall enrich -c 41 --github       # also read public commit emails
-pitwall enrich -c 41 --hunter       # allow the paid escalation
-pitwall export --include-contacts   # opt in, deliberately
-```
-
----
-
-## What it does
-
-```
-companies.csv + roles.csv
-        │
-        ▼  1. query builder      company × role × template, prioritized, budget-capped
-        ▼  2. search             searxng → ddgs → serper, concurrent, cached 7 days
-        ▼  3. extract & dedupe   SERP rows → distinct people, keyed on the LinkedIn slug
-        ▼  4. heuristics         free, deterministic, explainable — kills most of the noise
-        ▼  5. LLM filter         batched JSON verdicts with reasons and red flags
-        ▼  6. job openings       live postings × the people you already have there
-        ▼  7. dashboard          filter · ⭐ save · ❌ ignore · 📝 note · 📩 contacted · 🔄 follow-up
-```
-
-Every stage writes to SQLite and is independently resumable. If a run dies at
-stage 5, stages 1–4 do not repeat.
-
-**The hard part is not finding links — it is deciding which links are real.** A
-query for `McLaren "Data Scientist"` returns McLaren Racing engineers, McLaren
-Automotive engineers, McLaren Health Care analysts in Michigan, and people who
-left in 2019. Two scoring stages exist entirely to beat that problem, and every
-score is traceable back to the search-result snippet that produced it.
-
----
-
-## Install
-
-Requires Python 3.11+.
-
-```bash
-make venv                     # or: python3.11 -m venv .venv && pip install -r requirements.txt
-.venv/bin/pitwall init        # writes config/*.csv and .env, checks your setup
-```
-
-`pitwall init` is safe to run twice — it finishes an interrupted setup rather
-than resetting one.
-
-## First run
-
-```bash
-# 1. Your two CSVs. `pitwall init` writes commented samples; this fills them from
-#    the bundled motorsport research tables instead.
-.venv/bin/python scripts/seed.py                        # config/seed/motorsport_*.csv
-.venv/bin/python scripts/seed.py --source plan --force  # or the plan's §17 starter grid
-
-# 2. Create the database
-.venv/bin/pitwall init-db
-
-# 3. Search that supports operators. Without it, 8 of the 12 query templates
-#    never fire and coverage suffers badly.
-make searxng && make searxng-check
-
-# 4. The LLM. Free, and ~1 s per batch instead of a minute.
-#    Put GROQ_API_KEY in .env, then:
-make groq-check
-#    …or stay local and offline:
-.venv/bin/python scripts/setup_ollama.py
-
-# 5. See the plan, and the cost, without touching the network
-.venv/bin/pitwall build-queries --dry-run
-.venv/bin/pitwall preview
-
-# 6. Run it
-.venv/bin/pitwall run --max-queries 50 --max-results 15
-
-# 7. Live job openings, cross-referenced against the people you just found
-.venv/bin/python scripts/discover_ats.py    # once
-.venv/bin/pitwall jobs
-.venv/bin/pitwall openings
-
-# 8. Look at your leads
-make pitwall
-```
-
-Skip step 4 entirely and everything still works — you get heuristic scores
-without the LLM judgement layer.
-
----
-
-## The two files you edit
-
-Everything follows from `config/companies.csv` and `config/roles.csv`. You can
-edit them in a text editor or in the app's **⚙️ Setup** page.
-
-<!-- BEGIN generated: csv-columns -->
-<!-- generated by `pitwall columns`; edit src/pitwall/inputs.py, not this block -->
-
-#### `config/companies.csv`
-
-| column | type | rule | why it matters |
-|---|---|---|---|
-| `name` | text | required, unique (case-insensitive); a duplicate row is skipped | The canonical spelling. Everything keys on it. |
-| `aliases` | pipe-separated | warned about when empty | How the company is written in the wild — season names, sponsor names, the short form people type. The single biggest lever on RECALL. |
-| `negative_keywords` | pipe-separated | warned about when empty | Other organisations that share the name. The single biggest lever on PRECISION: 'McLaren Health Care' is a hospital network. |
-| `linkedin_slug` | text | optional | Unused by search; kept for your own reference. |
-| `domain` | text | optional | Used to guess the ATS board in `discover_ats.py`. |
-| `series` | text | optional | Free text, shown in the UI. |
-| `country` | text | optional | A candidate located here scores slightly higher. |
-| `tier` | 1-3 | must be 1, 2 or 3; anything else defaults to 2 | Search priority. Tier 1 is searched first and most. |
-| `active` | true/false | defaults to true | false keeps the row without searching it. |
-
-#### `config/roles.csv`
-
-| column | type | rule | why it matters |
-|---|---|---|---|
-| `title` | text | required, unique (case-insensitive); a duplicate row is skipped | The canonical spelling of the job. |
-| `aliases` | pipe-separated | warned about when empty | What the same job is called elsewhere. |
-| `family` | enum | required, and must be one of the active profile's role families | Groups roles for the coverage matrix and the heuristic layer. `pitwall validate` prints the legal values. |
-| `seniority` | pipe-separated | each value must be in the profile's seniority ladder | Empty means any level. |
-| `keywords` | pipe-separated | optional | Words that, in a snippet, suggest this really is the job — each is worth a few points in the heuristic layer. |
-| `priority` | 1-3 | must be 1, 2 or 3; anything else defaults to 2 | Search priority within a company. |
-| `active` | true/false | defaults to true | false keeps the row without searching it. |
-
-With the `motorsport` profile, `family` must be one of:
-
-> `data_science`, `data_engineering`, `strategy`, `performance`, `simulation`, `vehicle_dynamics`, `software`, `operations`, `leadership`
-
-and each `seniority` value one of:
-
-> `intern`, `graduate`, `junior`, `mid`, `senior`, `lead`, `head`, `executive`, `unknown`
-
-Pipe-separated columns use `|` as the separator: `McLaren F1|McLaren Applied|MTC`.
-<!-- END generated: csv-columns -->
-
-Both files are validated on load. Errors and warnings appear as a table on the
-Setup page — never as a stack trace.
-
-**Season names change every year.** That volatility belongs in `aliases`, which
-is why it is a CSV column and not code.
-
----
-
-## The dashboard
-
-`make pitwall` (`streamlit run apps/pitwall/Home.py`). The job side is moving to its own
-app, RocketApply (`make rocketapply`, `apps/rocketapply/`); until it covers everything, the
-job pages below stay in PitWall too.
-
-| page | what it is for |
-|---|---|
-| **🏁 Home** | headline metrics, the last run, follow-ups due, top unreviewed leads |
-| **⚙️ Setup** | edit both CSVs in a grid, validation report, provider/quota status, backup & reset |
-| **🔎 Run Search** | pick companies/roles/templates, **see the cost before you commit**, run in the background with live progress, and **resume the AI analysis** for anyone a stopped run or a triage budget never read |
-| **👤 Leads** | the table you live in: filter, sort, select a person, read the evidence, act |
-| **📋 Pipeline** | kanban by CRM status, with overdue follow-ups pinned in red |
-| **📊 Analytics** | coverage heatmap, score distribution, funnels, quota burn-down |
-| **🎯 Job Search** | the daily job inbox — new matches, filtered-out jobs with their reasons, save / dismiss / mark applied |
-| **📨 Applications** | the application tracker: status, dates, next actions, history |
-| **🧭 Job Setup** | your job-search profile, skills, target companies, and source health |
-
-On the Leads page, selecting a row shows **why this score**: the heuristic reasons,
-the LLM reasons, the red flags, and every search result that surfaced the person
-with its raw title and snippet. When a score looks wrong you can see exactly why.
-
----
+## Where the data lives
+
+- **Database:** `DB_PATH` in `.env` (default `data/pitwall.db`). For now this
+  still points at the shared file in `../networking_lead_finder/data/`, until
+  the two apps' databases are split.
+- **Generated applications:** `output/` (a link to the PitWall folder's `output/`
+  on Simon's Mac until the split is finished).
+- **Your profile:** `profile/` (tracked), plus `config/job_search.yaml`,
+  `config/my_skills.yaml` and `config/my_profile.md` (local, gitignored).
+- Nothing in `data/`, `output/` or `.env` is ever committed.
+
+## What is shared with PitWall
+
+The engine is still the `pitwall` Python package (`src/pitwall/`): the database,
+settings, job sources, search, email lookup and run tracking. RocketApply's
+"who to write to" panel runs that people search. This repo carries its own copy,
+so the two apps run and change independently, but a fix to that shared code has
+to be made in both repos.
 
 ## RocketApply
 
@@ -578,85 +297,6 @@ scores are Simon's; nothing in the loop grades itself. Ship at an edit burden
 consistently at or under 30%.
 
 ---
-
-## Command reference
-
-`pitwall` is installed by `pip install -e .`; `python scripts/run_pipeline.py` is
-the same program for anyone who has not.
-
-```bash
-# first run, and checking your inputs
-pitwall init                    # config, .env, providers, validation report
-pitwall validate                # what is wrong with your CSVs, and why
-pitwall columns                 # the CSV contract, generated from the rules
-
-# planning (no network)
-pitwall build-queries --dry-run
-pitwall preview
-
-# stages, individually — each is resumable
-pitwall search  --limit 50 --concurrency 4
-pitwall extract --reprocess
-pitwall score   --heuristic-only
-pitwall score   --triage-min 25 --triage-top 200   # spend the LLM where it counts
-
-# a full run, narrowed
-pitwall run --companies "AF Corse,PREMA Racing" \
-            --roles "Data Engineer,Race Strategy Engineer"
-
-# re-score after a prompt change, without searching again
-pitwall score --rescore-all --prompt-version v2
-
-# iterate on the parser entirely offline
-pitwall search --cache-only && pitwall extract --reprocess
-
-# live job openings, and who you know at those companies
-python scripts/discover_ats.py        # once; finds public ATS boards
-pitwall jobs --score-fit              # poll sources, score fit vs config/profile.md
-pitwall openings                      # the join, in the terminal
-
-# finding an email address — never automatic, never over the whole table
-pitwall enrich -c 41 -c 88            # free engine only: it cannot spend
-pitwall enrich -c 41 --github         # also read public commit emails
-pitwall enrich -c 41 --hunter         # allow the paid escalation, 1 credit
-pitwall enrich -c 41 --dry-run        # run it, write nothing
-
-# where things stand, and what to export
-pitwall stats
-pitwall coverage                      # how much of the company list is actually searched
-pitwall export --format md --min-score 55
-pitwall export --include-contacts     # addresses are excluded unless you ask
-
-# tailored CVs and cover letters
-make fonts                            # vendor the three typefaces (once)
-make validate-profile                 # is profile/ sound?
-make calibrate                        # does the CV frame still measure as it claims?
-pitwall apply preview quantitative    # a CV for a role family — no job, no model
-pitwall apply jobs                    # the best-scoring postings, with ids
-pitwall apply analyze --job 930       # matched / partial / missing, one model call
-pitwall apply research Anthropic      # what they build, from their own pages
-pitwall apply research X --dry-run    # what the model would see; calls no model
-pitwall apply research --show         # what is cached, and what was rejected
-pitwall apply generate --job 930 --dry-run     # the plan, writing nothing
-pitwall apply generate --job 930               # CV + letter + provenance
-pitwall apply generate --job 930 --no-llm      # deterministic CV only
-pitwall apply generate --job 930 --record      # also track it as SHORTLISTED
-pitwall apply tidy                    # one folder per job + output/README.md
-pitwall apply tidy --dry-run          # what would move, moving nothing
-pitwall apply voice-eval --job 930 --job 2922  # generate, read, score 1-5
-pitwall apply voice-eval --show                # the trend across prompt versions
-
-# housekeeping
-make searxng-check                    # is the search container healthy?
-make groq-check                       # which models can this key reach?
-python scripts/purge_stale.py --apply --vacuum
-python scripts/eval_scoring.py relabel # §1.3: sweep + a labelling worksheet
-python scripts/eval_scoring.py sweep
-python scripts/sanitise_eval_set.py --check   # no real people in tracked fixtures
-```
-
----
-
 
 ## Scoring, in two stages
 

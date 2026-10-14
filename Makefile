@@ -1,4 +1,4 @@
-# PitWall — the handful of commands worth memorising.
+# RocketApply — the handful of commands worth memorising.
 #
 # ALWAYS use .venv/bin/python. The system `python3` on this machine is Anaconda
 # and its pydantic-settings predates the `NoDecode` import in
@@ -11,8 +11,7 @@ SXNG_URL := http://localhost:8888
 
 .DEFAULT_GOAL := help
 .PHONY: help venv test lint typecheck searxng searxng-env searxng-check \
-        searxng-stop searxng-logs searxng-pull groq-check app pitwall rocketapply cli \
-        coverage sweep relabel domains domains-apply domains-show \
+        searxng-stop searxng-logs searxng-pull groq-check run rocketapply cli \
         job-search job-rerank job-calibrate job-audit job-targets-ats fonts validate-profile calibrate
 
 help:  ## show this help
@@ -87,38 +86,6 @@ searxng-pull:  ## update the image
 groq-check:  ## list the Groq models your key can reach and verify LLM_MODEL
 	$(PY) scripts/setup_groq.py
 
-# ─────────────────────────────── sweeps ────────────────────────────────
-
-coverage:  ## how much of the company list has actually been searched
-	$(PY) scripts/run_pipeline.py coverage
-
-# The §1.5 full sweep. Deliberately NOT a plain `run`:
-#   · 49 companies x 17 roles x 12 templates is ~13,000 unique queries, so the
-#     budget is what makes this finish. 1,200 at 1 q/s is about 20 minutes of
-#     searching, and covers every company at least once.
-#   · --no-llm because searching and scoring have completely different rate
-#     limits; score afterwards, in tranches, and the run stays resumable.
-#   · run `make coverage` before and after, and keep both.
-SWEEP_QUERIES ?= 1200
-sweep:  ## full sweep across every company (searching only, no LLM)
-	$(PY) scripts/run_pipeline.py coverage
-	$(PY) scripts/run_pipeline.py run --max-queries $(SWEEP_QUERIES) --no-llm -v
-	$(PY) scripts/run_pipeline.py coverage
-
-relabel:  ## §1.3: small sweep on the current provider + a labelling worksheet
-	$(PY) scripts/eval_scoring.py relabel
-
-# ───────────────────────── contact enrichment ──────────────────────────
-
-domains:  ## propose a mail domain per company (writes nothing — review first)
-	$(PY) scripts/resolve_domains.py --plain
-
-domains-apply:  ## …and write them into config/companies.csv
-	$(PY) scripts/resolve_domains.py --apply
-
-domains-show:  ## which companies already have a domain
-	$(PY) scripts/resolve_domains.py --show
-
 # ───────────────────────────── job search ──────────────────────────────
 
 job-search:  ## the daily job inbox: poll every source, filter, rank
@@ -136,18 +103,15 @@ job-audit:  ## is the Search list worth reading? measured against the audit labe
 job-targets-ats:  ## find the public ATS board of each target company
 	$(PY) scripts/discover_ats.py --targets
 
-# ──────────────────────────────── apps ─────────────────────────────────
-# Two apps, one engine, one database. Both launch from the repo root so the
-# engine's relative output/, run/ and data/ paths resolve; each app's theme is
-# in apps/<app>/.streamlit/config.toml. They can run side by side.
+# ──────────────────────────────── app ──────────────────────────────────
+# Launched from the repo root so the engine's relative output/, run/ and data/
+# paths resolve; the theme is in apps/rocketapply/.streamlit/config.toml.
+# The database is DB_PATH in .env (default data/pitwall.db).
 
-pitwall:  ## PitWall — the motorsport people finder (dark), on :8501
-	$(PY) -m streamlit run apps/pitwall/Home.py --server.port 8501
-
-rocketapply:  ## RocketApply — search, generate, apply, connect (light), on :8502
+rocketapply:  ## RocketApply — search, generate, apply, connect, on :8502
 	$(PY) -m streamlit run apps/rocketapply/app.py --server.port 8502
 
-app: pitwall  ## same as `make pitwall`
+run: rocketapply  ## same as `make rocketapply`
 
 cli:  ## show the CLI help
 	$(PY) scripts/run_pipeline.py --help
