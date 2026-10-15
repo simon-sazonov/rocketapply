@@ -115,7 +115,8 @@ _LANGUAGE_NAMES = {
     "français": "fr", "portuguese": "pt", "português": "pt", "spanish": "es",
     "español": "es", "italian": "it", "italiano": "it", "dutch": "nl",
     "nederlands": "nl", "swedish": "sv", "polish": "pl", "danish": "da",
-    "norwegian": "no", "finnish": "fi",
+    "norwegian": "no", "finnish": "fi", "ukrainian": "uk", "українська": "uk",
+    "russian": "ru", "русский": "ru", "polski": "pl",
 }
 
 
