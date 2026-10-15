@@ -19,9 +19,10 @@ make rocketapply    # the app, on http://localhost:8502
 
 ## Where the data lives
 
-- **Database:** `DB_PATH` in `.env` (default `data/pitwall.db`). For now this
-  still points at the shared file in `../networking_lead_finder/data/`, until
-  the two apps' databases are split.
+- **Database:** `DB_PATH` in `.env`; on Simon's Mac `data/rocketapply.db`, its
+  own file since 15 Oct 2026 (a full copy of PitWall's `pitwall.db` taken that
+  day, so it still holds the people tables too — harmless, and the "who to
+  write to" panel uses them).
 - **Generated applications:** `output/` (a link to the PitWall folder's `output/`
   on Simon's Mac until the split is finished).
 - **Your profile:** `profile/` (tracked), plus `config/job_search.yaml`,
